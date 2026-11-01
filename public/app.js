@@ -137,7 +137,7 @@ const form = $('#compose-form');
 function renderCompose(dateIso) {
   const box = $('#compose-accounts');
   box.innerHTML = accounts.length
-    ? accounts.map((a) => `<label><input type="checkbox" name="accountIds" value="${a.id}" data-platform="${a.platform}" checked>
+    ? accounts.map((a) => `<label><input type="checkbox" name="accountIds" value="${a.id}" data-platform="${a.platform}"${accounts.length === 1 ? ' checked' : ''}>
         <span class="dot ${a.platform}"></span>${esc(a.username ? '@' + a.username : a.name)}</label>`).join('')
     : `<span class="muted">No accounts yet. <a href="#accounts">Connect one first.</a></span>`;
   let when = dateIso ? new Date(dateIso) : new Date(Date.now() + 3600e3);
