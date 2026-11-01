@@ -158,3 +158,30 @@ test('imports a post bundle, skips duplicates, and rejects bad bundles whole', a
   assert.equal(one.media_type, 'image');
   assert.equal(one.targets.length, 2);
 });
+
+test('imports posts with media links and downloads the media before publishing', async () => {
+  const when = new Date(Date.now() + 86400e3).toISOString();
+  const fd = new FormData();
+  fd.set('bundle', new Blob([JSON.stringify({ posts: [
+    { caption: 'Linked reel', when, accounts: [{ platform: 'instagram', name: 'My IG' }], media: { url: 'https://cdn.example.com/a/clip.mp4' } },
+  ] })]), 'b.json');
+  const r = await (await fetch(`${base}/api/import`, { method: 'POST', body: fd })).json();
+  assert.equal(r.imported, 1, JSON.stringify(r));
+  const row = db.prepare("SELECT * FROM posts WHERE caption='Linked reel'").get();
+  assert.equal(row.media_type, 'video');
+  assert.equal(row.media_file, null);
+  assert.equal(row.media_source_url, 'https://cdn.example.com/a/clip.mp4');
+
+  // Point it at a local server and let the publisher download + post it.
+  const mediaServer = http.createServer((req, res) => res.end('fakevideo'));
+  await new Promise((ok) => mediaServer.listen(0, ok));
+  const url = `http://127.0.0.1:${mediaServer.address().port}/clip.mp4`;
+  db.prepare('UPDATE posts SET media_source_url=?, scheduled_at=? WHERE id=?').run(url, new Date(Date.now() - 1000).toISOString(), row.id);
+  await scheduler.publishDue();
+  mediaServer.close();
+  const after = db.prepare('SELECT * FROM posts WHERE id=?').get(row.id);
+  assert.match(after.media_file, /\.mp4$/);
+  assert.equal(fs.readFileSync(path.join(process.env.DATA_DIR, 'media', after.media_file), 'utf8'), 'fakevideo');
+  const t = db.prepare('SELECT status FROM post_targets WHERE post_id=?').get(row.id);
+  assert.equal(t.status, 'published');
+});

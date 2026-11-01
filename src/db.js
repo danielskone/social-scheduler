@@ -51,4 +51,9 @@ CREATE TABLE IF NOT EXISTS follower_snapshots (
 );
 `);
 
+// Added later: media that is downloaded from a link after import.
+if (!db.prepare('PRAGMA table_info(posts)').all().some((c) => c.name === 'media_source_url')) {
+  db.exec('ALTER TABLE posts ADD COLUMN media_source_url TEXT');
+}
+
 module.exports = db;

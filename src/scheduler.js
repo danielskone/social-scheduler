@@ -2,6 +2,7 @@
 const cron = require('node-cron');
 const db = require('./db');
 const meta = require('./meta');
+const media = require('./mediafetch');
 
 const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram };
 let running = false;
@@ -22,6 +23,7 @@ async function publishDue(now = new Date()) {
       db.prepare(`UPDATE post_targets SET status='publishing', error=NULL WHERE id=?`).run(row.target_id);
       const account = { platform: row.platform, external_id: row.external_id, access_token: row.access_token };
       try {
+        if (row.media_source_url && !row.media_file) row.media_file = await media.ensureMedia(row.id);
         const res = await publishers[row.platform](account, row);
         db.prepare(`UPDATE post_targets SET status='published', external_post_id=?, permalink=?, published_at=? WHERE id=?`)
           .run(res.id, res.permalink, new Date().toISOString(), row.target_id);
@@ -71,6 +73,7 @@ function start() {
   // rather than retrying and risking a double post.
   db.prepare(`UPDATE post_targets SET status='failed', error='App restarted while publishing. Check the platform, then retry if it did not post.' WHERE status='publishing'`).run();
   cron.schedule('* * * * *', () => publishDue().catch((e) => console.error(e)));
+  cron.schedule('*/2 * * * *', () => media.prefetch().catch((e) => console.error(e)));
   cron.schedule('17 */3 * * *', () => refreshStats().catch((e) => console.error(e)));
 }
 

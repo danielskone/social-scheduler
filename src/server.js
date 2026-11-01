@@ -99,7 +99,7 @@ function loadPost(id) {
   post.targets = db.prepare(`
     SELECT t.*, a.platform, a.name AS account_name, a.username
     FROM post_targets t JOIN accounts a ON a.id=t.account_id WHERE t.post_id=?`).all(id);
-  post.media_url = post.media_file ? `/media/${post.media_file}` : null;
+  post.media_url = post.media_file ? `/media/${post.media_file}` : post.media_source_url || null;
   return post;
 }
 

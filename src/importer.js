@@ -8,6 +8,7 @@
 //     "accounts": [{ "platform": "facebook", "name": "My Page" },
 //                  { "platform": "instagram", "username": "myhandle" }],
 //     "media": { "name": "pic.jpg", "data": "<base64>" }   // optional for Facebook-only posts
+//        or { "url": "https://…/clip.mp4" }                 // downloaded by the app before posting
 //   }]
 // }
 //
@@ -65,7 +66,16 @@ function importBundle(json, { now = Date.now() } = {}) {
       if (!accts.includes(a)) accts.push(a);
     }
     let media = null;
-    if (p.media && p.media.data) {
+    if (p.media && p.media.url) {
+      let u;
+      try { u = new URL(p.media.url); } catch { return problems.push(`${label}: the media link isn't valid.`); }
+      if (u.protocol !== 'https:') return problems.push(`${label}: the media link must start with https://.`);
+      const ext = path.extname(u.pathname).toLowerCase();
+      const type = p.media.type || (['.mp4', '.mov'].includes(ext) ? 'video' : ['.jpg', '.jpeg', '.png'].includes(ext) ? 'image' : null);
+      if (!type) return problems.push(`${label}: can't tell if the media link is a photo or video.`);
+      // Photos from links are converted to an Instagram-friendly JPG after download.
+      media = { url: u.toString(), type, jpg: true };
+    } else if (p.media && p.media.data) {
       const buf = Buffer.from(p.media.data, 'base64');
       const kind = sniff(buf);
       if (!kind) return problems.push(`${label}: the picture/video isn't a JPG, PNG, MP4 or MOV.`);
@@ -85,7 +95,7 @@ function importBundle(json, { now = Date.now() } = {}) {
   const exists = db.prepare(`
     SELECT p.id FROM posts p WHERE p.caption=? AND p.scheduled_at=?
       AND (SELECT group_concat(account_id) FROM (SELECT account_id FROM post_targets WHERE post_id=p.id ORDER BY account_id)) = ?`);
-  const insPost = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at) VALUES (?,?,?,?)');
+  const insPost = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, media_source_url) VALUES (?,?,?,?,?)');
   const insTarget = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
   const written = [];
   let imported = 0, skipped = 0;
@@ -95,12 +105,12 @@ function importBundle(json, { now = Date.now() } = {}) {
         const ids = r.accts.map((a) => a.id).sort((x, y) => x - y);
         if (exists.get(r.caption, r.when, ids.join(','))) { skipped++; continue; }
         let file = null;
-        if (r.media) {
+        if (r.media && r.media.buf) {
           file = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${r.media.ext}`;
           fs.writeFileSync(path.join(config.mediaDir, file), r.media.buf);
           written.push(file);
         }
-        const { lastInsertRowid } = insPost.run(r.caption, file, r.media ? r.media.type : null, r.when);
+        const { lastInsertRowid } = insPost.run(r.caption, file, r.media ? r.media.type : null, r.when, r.media && r.media.url ? r.media.url : null);
         ids.forEach((id) => insTarget.run(lastInsertRowid, id));
         imported++;
       }
