@@ -7,6 +7,7 @@ const config = require('./config');
 const db = require('./db');
 const meta = require('./meta');
 const scheduler = require('./scheduler');
+const { importBundle } = require('./importer');
 
 const app = express();
 app.use(express.json());
@@ -175,6 +176,15 @@ api.delete('/posts/:id', (req, res) => {
   db.prepare('DELETE FROM posts WHERE id=?').run(post.id);
   if (post.media_file) fs.rmSync(path.join(config.mediaDir, post.media_file), { force: true });
   res.json({ ok: true });
+});
+
+const bundleUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 * 1024 } });
+api.post('/import', bundleUpload.single('bundle'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Pick a post bundle file first.' });
+  const result = importBundle(req.file.buffer.toString('utf8'));
+  if (result.error) return res.status(400).json(result);
+  scheduler.publishDue().catch(() => {});
+  res.json(result);
 });
 
 api.get('/analytics', (req, res) => {

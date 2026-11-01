@@ -188,6 +188,24 @@ async function submitPost(now) {
 form.addEventListener('submit', (e) => { e.preventDefault(); submitPost(false); });
 $('#post-now').onclick = () => submitPost(true);
 
+// ---------- Import ----------
+$('#import-file').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  banner(`Importing ${file.name}…`);
+  const fd = new FormData();
+  fd.set('bundle', file);
+  try {
+    const r = await api('/import', { method: 'POST', body: fd });
+    banner(`Imported ${r.imported} post(s)${r.skipped ? `, skipped ${r.skipped} already on the calendar` : ''}.`);
+    if (r.first) calMonth = startOfMonth(new Date(r.first));
+    renderCalendar();
+  } catch (err) {
+    banner(err.message, true);
+  }
+};
+
 // ---------- Analytics ----------
 $('#an-days').onchange = renderAnalytics;
 $('#an-refresh').onclick = async (e) => {

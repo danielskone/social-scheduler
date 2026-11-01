@@ -6,7 +6,11 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test test/*.test.js",
-    "mac": "node scripts/start-with-tunnel.js"
+    "mac": "node scripts/start-with-tunnel.js",
+    "background:on": "node scripts/background.js on",
+    "background:off": "node scripts/background.js off",
+    "background:status": "node scripts/background.js status",
+    "update": "sh scripts/update.sh"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

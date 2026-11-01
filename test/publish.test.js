@@ -122,3 +122,39 @@ test('finds Pages that are only visible through a business portfolio', async () 
   assert.deepEqual(accts.map((a) => `${a.platform}:${a.external_id}`), ['facebook:PAGE1', 'facebook:BIZPAGE', 'instagram:IG9']);
   assert.equal(accts[2].access_token, 'pt2');
 });
+
+test('imports a post bundle, skips duplicates, and rejects bad bundles whole', async () => {
+  const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('fakejpeg')]).toString('base64');
+  const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.from('x')]).toString('base64');
+  const when = new Date(Date.now() + 86400e3).toISOString();
+  const send = async (bundle) => {
+    const fd = new FormData();
+    fd.set('bundle', new Blob([JSON.stringify(bundle)], { type: 'application/json' }), 'b.json');
+    const res = await fetch(`${base}/api/import`, { method: 'POST', body: fd });
+    return { status: res.status, body: await res.json() };
+  };
+  const good = { posts: [
+    { caption: 'Bundle one', when, accounts: [{ platform: 'facebook', name: 'my page' }, { platform: 'instagram', name: 'My IG' }], media: { name: 'a.jpg', data: jpg } },
+    { caption: 'Bundle two', when, accounts: [{ platform: 'facebook', name: 'My-Page' }] },
+  ] };
+  const r1 = await send(good);
+  assert.equal(r1.status, 200, JSON.stringify(r1.body));
+  assert.equal(r1.body.imported, 2);
+  const r2 = await send(good);
+  assert.equal(r2.body.imported, 0);
+  assert.equal(r2.body.skipped, 2);
+
+  const bad = await send({ posts: [
+    { caption: 'ok', when, accounts: [{ platform: 'facebook', name: 'My Page' }] },
+    { caption: 'png to ig', when, accounts: [{ platform: 'instagram', name: 'My IG' }], media: { data: png } },
+    { caption: 'who', when, accounts: [{ platform: 'facebook', name: 'Nobody' }] },
+  ] });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /JPG/);
+  assert.match(bad.body.error, /Nobody/);
+  const all = await (await fetch(`${base}/api/posts?from=2000-01-01&to=2100-01-01`)).json();
+  assert.ok(!all.some((p) => p.caption === 'ok'), 'nothing from a bad bundle is imported');
+  const one = all.find((p) => p.caption === 'Bundle one');
+  assert.equal(one.media_type, 'image');
+  assert.equal(one.targets.length, 2);
+});

@@ -29,7 +29,12 @@
           <button class="btn ghost" id="cal-next" aria-label="Next month">›</button>
           <button class="btn ghost" id="cal-today">Today</button>
         </div>
-        <a class="btn primary" href="#compose">+ New post</a>
+        <div class="row">
+          <label class="btn ghost" title="Add many posts at once from a post bundle file">Import posts
+            <input type="file" id="import-file" accept=".json,application/json" hidden>
+          </label>
+          <a class="btn primary" href="#compose">+ New post</a>
+        </div>
       </header>
       <div class="cal-grid" id="cal-weekdays"></div>
       <div class="cal-grid" id="cal-days"></div>

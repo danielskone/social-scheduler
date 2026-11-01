@@ -38,6 +38,24 @@ Instagram's API doesn't accept uploads. It downloads your photo/video from a lin
 
 Set `APP_PASSWORD` before exposing the app publicly. Uploaded media under `/media/` stays public on purpose so Instagram can fetch it.
 
+## Run it in the background (Mac)
+
+```bash
+npm run background:on      # starts now and at every login, no Terminal window needed
+npm run background:status  # is it running? shows the last log lines (data/app.log)
+npm run background:off     # stop
+```
+
+The Mac must be on (the app keeps it from idle-sleeping; the screen can still turn off).
+
+## Import many posts at once
+
+On the Calendar, **Import posts** takes a post bundle: one `.json` file with the posts and their pictures (base64). Format is documented at the top of `src/importer.js`. Everything is checked first; if any post has a problem, nothing is imported. Importing the same bundle twice doesn't create duplicates.
+
+## Updating
+
+`npm run update` downloads the latest version from GitHub (the repo must be public while it runs), keeping `.env` and `data/`.
+
 ## How it works
 
 - `src/server.js`: web server, dashboard API, Facebook login
