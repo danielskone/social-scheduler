@@ -80,3 +80,11 @@ npm test
 ```
 
 Runs an end-to-end test against a fake Graph API (no real accounts are touched).
+
+## Phone notifications (free)
+
+1. Install the free **ntfy** app on your iPhone (App Store) and allow notifications.
+2. In Terminal, in the app folder: `npm run phone`. It prints a name like `sched-…`.
+3. In ntfy tap **+**, type that name exactly, tap **Subscribe**.
+
+You then get a message each time a post goes out, and an urgent one if a post fails.

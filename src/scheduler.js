@@ -3,6 +3,7 @@ const cron = require('node-cron');
 const db = require('./db');
 const meta = require('./meta');
 const media = require('./mediafetch');
+const notify = require('./notify');
 
 const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram };
 let running = false;
@@ -18,6 +19,7 @@ async function publishDue(now = new Date()) {
       JOIN accounts a ON a.id = t.account_id
       WHERE t.status = 'scheduled' AND p.scheduled_at <= ?
       ORDER BY p.scheduled_at`).all(now.toISOString());
+    const results = [];
 
     for (const row of due) {
       db.prepare(`UPDATE post_targets SET status='publishing', error=NULL WHERE id=?`).run(row.target_id);
@@ -28,11 +30,14 @@ async function publishDue(now = new Date()) {
         db.prepare(`UPDATE post_targets SET status='published', external_post_id=?, permalink=?, published_at=? WHERE id=?`)
           .run(res.id, res.permalink, new Date().toISOString(), row.target_id);
         console.log(`[publish] post ${row.id} -> ${row.platform} ${row.account_name}: ${res.id}`);
+        results.push({ postId: row.id, caption: row.caption, platform: row.platform, account: row.account_name, ok: true });
       } catch (err) {
         db.prepare(`UPDATE post_targets SET status='failed', error=? WHERE id=?`).run(String(err.message || err), row.target_id);
         console.error(`[publish] post ${row.id} -> ${row.platform} failed: ${err.message}`);
+        results.push({ postId: row.id, caption: row.caption, platform: row.platform, account: row.account_name, ok: false, error: String(err.message || err) });
       }
     }
+    await notify.postResults(results);
   } finally {
     running = false;
   }
