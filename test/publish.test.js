@@ -157,6 +157,15 @@ test('imports a post bundle, skips duplicates, and rejects bad bundles whole', a
   const one = all.find((p) => p.caption === 'Bundle one');
   assert.equal(one.media_type, 'image');
   assert.equal(one.targets.length, 2);
+
+  // replace: same time + accounts gets the new caption instead of a second copy
+  const r3 = await send({ replace: true, posts: [
+    { caption: 'Bundle two, now with a call to action', when, accounts: [{ platform: 'facebook', name: 'My Page' }] },
+  ] });
+  assert.equal(r3.body.updated, 1, JSON.stringify(r3.body));
+  assert.equal(r3.body.imported, 0);
+  const after = db.prepare('SELECT caption FROM posts WHERE scheduled_at=? AND caption LIKE ?').all(when, 'Bundle two%');
+  assert.deepEqual(after.map((x) => x.caption), ['Bundle two, now with a call to action']);
 });
 
 test('imports posts with media links and downloads the media before publishing', async () => {

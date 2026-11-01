@@ -198,7 +198,7 @@ $('#import-file').onchange = async (e) => {
   fd.set('bundle', file);
   try {
     const r = await api('/import', { method: 'POST', body: fd });
-    banner(`Imported ${r.imported} post(s)${r.skipped ? `, skipped ${r.skipped} already on the calendar` : ''}.`);
+    banner(`${r.updated ? `Updated ${r.updated} post(s). ` : ''}Imported ${r.imported} post(s)${r.skipped ? `, skipped ${r.skipped} already on the calendar` : ''}.`);
     if (r.first) calMonth = startOfMonth(new Date(r.first));
     renderCalendar();
   } catch (err) {

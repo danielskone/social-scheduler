@@ -12,6 +12,10 @@
 //   }]
 // }
 //
+// With "replace": true at the top of the bundle, a post that is already on the calendar
+// at the same time for the same accounts (and not yet posted) gets the new caption instead
+// of being added again. Used to fix captions on posts imported earlier.
+//
 // Everything is checked first; if any post has a problem nothing is imported. Posts that
 // already exist (same caption, time and accounts) are skipped, so importing twice is safe.
 const crypto = require('crypto');
@@ -95,15 +99,24 @@ function importBundle(json, { now = Date.now() } = {}) {
   const exists = db.prepare(`
     SELECT p.id FROM posts p WHERE p.caption=? AND p.scheduled_at=?
       AND (SELECT group_concat(account_id) FROM (SELECT account_id FROM post_targets WHERE post_id=p.id ORDER BY account_id)) = ?`);
+  const sameSlot = db.prepare(`
+    SELECT p.id FROM posts p WHERE p.scheduled_at=?
+      AND (SELECT group_concat(account_id) FROM (SELECT account_id FROM post_targets WHERE post_id=p.id ORDER BY account_id)) = ?
+      AND NOT EXISTS (SELECT 1 FROM post_targets WHERE post_id=p.id AND status <> 'scheduled')`);
+  const setCaption = db.prepare('UPDATE posts SET caption=? WHERE id=?');
   const insPost = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, media_source_url) VALUES (?,?,?,?,?)');
   const insTarget = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
   const written = [];
-  let imported = 0, skipped = 0;
+  let imported = 0, skipped = 0, updated = 0;
   try {
     db.transaction(() => {
       for (const r of ready) {
         const ids = r.accts.map((a) => a.id).sort((x, y) => x - y);
         if (exists.get(r.caption, r.when, ids.join(','))) { skipped++; continue; }
+        if (bundle.replace) {
+          const old = sameSlot.all(r.when, ids.join(','));
+          if (old.length) { old.forEach((o) => setCaption.run(r.caption, o.id)); updated++; continue; }
+        }
         let file = null;
         if (r.media && r.media.buf) {
           file = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${r.media.ext}`;
@@ -120,7 +133,7 @@ function importBundle(json, { now = Date.now() } = {}) {
     throw err;
   }
   const first = ready.map((r) => r.when).sort()[0];
-  return { imported, skipped, first };
+  return { imported, skipped, updated, first };
 }
 
 module.exports = { importBundle };
