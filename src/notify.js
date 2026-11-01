@@ -27,10 +27,11 @@ async function send(title, message, { priority = 'default', tags = '' } = {}) {
   const t = topic();
   if (!t) return false;
   try {
-    const res = await fetch(`${base()}/${t}`, {
+    // JSON publishing keeps titles with spaces and emoji intact.
+    const res = await fetch(`${base()}/`, {
       method: 'POST',
-      body: message,
-      headers: { Title: encodeURIComponent(title), 'X-Title-Encoding': 'uri', Priority: priority, Tags: tags },
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: t, title, message, priority: { default: 3, high: 4 }[priority] || 3, tags: tags ? tags.split(',') : [] }),
     });
     return res.ok;
   } catch (err) {

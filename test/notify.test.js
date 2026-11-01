@@ -10,7 +10,7 @@ const got = [];
 const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
-  req.on('end', () => { got.push({ path: req.url, title: decodeURIComponent(req.headers.title || ''), priority: req.headers.priority, body }); res.end('{}'); });
+  req.on('end', () => { const j = JSON.parse(body); got.push({ path: `/${j.topic}`, title: j.title, priority: j.priority, body: j.message }); res.end('{}'); });
 });
 
 let notify;
@@ -40,6 +40,6 @@ test('groups results per post and flags failures', async () => {
   assert.strictEqual(got[0].title, 'Posted');
   assert.match(got[0].body, /Facebook \(FV Parade\), Instagram \(FV Parade\)/);
   assert.strictEqual(got[1].title, 'Post FAILED');
-  assert.strictEqual(got[1].priority, 'high');
+  assert.strictEqual(got[1].priority, 4);
   assert.match(got[1].body, /Bad video/);
 });
