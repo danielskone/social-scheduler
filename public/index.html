@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scheduler</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">◷ Scheduler</div>
+    <nav>
+      <a href="#calendar" data-view="calendar">Calendar</a>
+      <a href="#compose" data-view="compose">New post</a>
+      <a href="#analytics" data-view="analytics">Analytics</a>
+      <a href="#accounts" data-view="accounts">Accounts</a>
+    </nav>
+  </aside>
+
+  <main>
+    <div id="banner" class="banner" hidden></div>
+
+    <!-- Calendar -->
+    <section id="view-calendar" class="view">
+      <header class="view-head">
+        <div class="cal-nav">
+          <button class="btn ghost" id="cal-prev" aria-label="Previous month">‹</button>
+          <h1 id="cal-title"></h1>
+          <button class="btn ghost" id="cal-next" aria-label="Next month">›</button>
+          <button class="btn ghost" id="cal-today">Today</button>
+        </div>
+        <a class="btn primary" href="#compose">+ New post</a>
+      </header>
+      <div class="cal-grid" id="cal-weekdays"></div>
+      <div class="cal-grid" id="cal-days"></div>
+    </section>
+
+    <!-- Compose -->
+    <section id="view-compose" class="view" hidden>
+      <header class="view-head"><h1>New post</h1></header>
+      <form id="compose-form" class="compose">
+        <div class="compose-main">
+          <label class="field">
+            <span>Post to</span>
+            <div id="compose-accounts" class="account-picker"></div>
+          </label>
+          <label class="field">
+            <span>Caption <small id="caption-count"></small></span>
+            <textarea name="caption" rows="8" placeholder="What do you want to say?"></textarea>
+          </label>
+          <label class="field">
+            <span>Photo or video <small>(JPG, PNG, MP4 or MOV)</small></span>
+            <input type="file" name="media" accept="image/jpeg,image/png,video/mp4,video/quicktime">
+          </label>
+          <label class="field">
+            <span>When</span>
+            <input type="datetime-local" name="scheduledAt" required>
+          </label>
+          <div class="row">
+            <button class="btn primary" type="submit">Schedule</button>
+            <button class="btn ghost" type="button" id="post-now">Post now</button>
+            <span id="compose-msg" class="muted"></span>
+          </div>
+        </div>
+        <div class="compose-preview">
+          <div class="preview-card">
+            <div class="preview-head"><span class="avatar"></span><b id="preview-name">Your account</b></div>
+            <div id="preview-media" class="preview-media"></div>
+            <p id="preview-caption" class="preview-caption muted">Your caption will appear here.</p>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <!-- Analytics -->
+    <section id="view-analytics" class="view" hidden>
+      <header class="view-head">
+        <h1>Analytics</h1>
+        <div class="row">
+          <select id="an-days"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option></select>
+          <button class="btn ghost" id="an-refresh">Refresh stats</button>
+        </div>
+      </header>
+      <div id="an-tiles" class="tiles"></div>
+      <h2>Followers</h2>
+      <div id="an-followers" class="followers"></div>
+      <h2>Published posts</h2>
+      <table class="table" id="an-table">
+        <thead><tr><th>Post</th><th>Account</th><th>Published</th><th>Likes</th><th>Comments</th><th>Shares</th><th>Views</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- Accounts -->
+    <section id="view-accounts" class="view" hidden>
+      <header class="view-head">
+        <h1>Accounts</h1>
+        <a class="btn primary" href="/auth/facebook">Connect Facebook &amp; Instagram</a>
+      </header>
+      <div id="setup-notes"></div>
+      <div id="account-list" class="account-list"></div>
+    </section>
+  </main>
+
+  <dialog id="post-dialog"></dialog>
+  <script src="/app.js"></script>
+</body>
+</html>
