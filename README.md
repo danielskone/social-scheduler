@@ -2,7 +2,9 @@
 
 A personal Metricool-style scheduler for **Facebook Pages** and **Instagram** (Business/Creator). Write a post once, pick accounts and a time, and it publishes automatically. Includes a content calendar and basic analytics (likes, comments, shares, views, follower growth).
 
-TikTok and YouTube are planned next.
+Also posts to **YouTube** and **TikTok**, and includes **Viral Touch CRM** (the Contacts tab): people and businesses with groups, a drag-and-drop pipeline, tasks with a daily phone reminder, shareable sign-up forms at `/f/<id>` (public, no password), and email/text templates that open in your own Mail or Messages app for one person at a time.
+
+The CRM never bulk-sends email or texts. It records whether someone agreed to email (how and when), and "Export email list" only includes those people, so the list can go into a proper email service that handles unsubscribe links.
 
 ## What you need
 

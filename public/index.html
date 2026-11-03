@@ -13,6 +13,7 @@
       <a href="#calendar" data-view="calendar">Calendar</a>
       <a href="#compose" data-view="compose">New post</a>
       <a href="#analytics" data-view="analytics">Analytics</a>
+      <a href="#contacts" data-view="contacts">Viral Touch CRM</a>
       <a href="#accounts" data-view="accounts">Accounts</a>
     </nav>
   </aside>
@@ -100,6 +101,73 @@
       </table>
     </section>
 
+    <!-- Contacts (CRM) -->
+    <section id="view-contacts" class="view" hidden>
+      <header class="view-head">
+        <h1>Viral Touch CRM</h1>
+        <div class="row">
+          <button class="btn ghost" id="crm-task-add">+ Task</button>
+          <button class="btn primary" id="crm-add">+ Add contact</button>
+        </div>
+      </header>
+      <div class="subtabs" id="crm-tabs">
+        <a href="#contacts" data-tab="list">People</a>
+        <a href="#contacts/pipeline" data-tab="pipeline">Pipeline</a>
+        <a href="#contacts/tasks" data-tab="tasks">Tasks</a>
+        <a href="#contacts/forms" data-tab="forms">Sign-up forms</a>
+        <a href="#contacts/templates" data-tab="templates">Message templates</a>
+      </div>
+      <div id="crm-tiles" class="tiles"></div>
+
+      <div class="crm-panel" data-panel="list">
+        <div class="row crm-filters">
+          <input type="search" id="crm-q" placeholder="Search name, company, email, phone, notes">
+          <select id="crm-group"><option value="">All groups</option></select>
+          <select id="crm-stage"><option value="">All stages</option></select>
+          <label class="check"><input type="checkbox" id="crm-due"> Follow-ups due</label>
+          <label class="btn ghost" title="Add contacts from a spreadsheet saved as CSV">Import CSV
+            <input type="file" id="crm-import" accept=".csv,text/csv" hidden>
+          </label>
+          <a class="btn ghost" href="/api/crm/export.csv" download>Export all</a>
+          <a class="btn ghost" href="/api/crm/export.csv?list=email" download title="Only people who said yes to email">Export email list</a>
+        </div>
+        <table class="table crm-table" id="crm-table">
+          <thead><tr><th>Name</th><th>Group</th><th>Stage</th><th>Amount</th><th>Contact</th><th>Next follow-up</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="muted small">This app never bulk-sends email or texts, so your accounts can't get flagged for spam. Mark "OK to email" only when someone said yes. "Export email list" gives you just those people, ready for a free email tool that adds the unsubscribe link for you.</p>
+      </div>
+
+      <div class="crm-panel" data-panel="pipeline" hidden>
+        <div class="row crm-filters">
+          <select id="pipe-group"><option value="">All groups</option></select>
+          <span class="muted">Drag a card to move it to another stage.</span>
+        </div>
+        <div class="board" id="pipe-board"></div>
+      </div>
+
+      <div class="crm-panel" data-panel="tasks" hidden>
+        <div class="row crm-filters"><label class="check"><input type="checkbox" id="task-show-done"> Show finished tasks</label></div>
+        <ul class="tasklist" id="task-list"></ul>
+      </div>
+
+      <div class="crm-panel" data-panel="forms" hidden>
+        <div class="row crm-filters">
+          <button class="btn primary" id="form-add">+ New form</button>
+          <span class="muted">Share a form's link (on social posts, your website or a QR code). Each sign-up lands here and pings your iPhone.</span>
+        </div>
+        <div class="cards" id="form-list"></div>
+      </div>
+
+      <div class="crm-panel" data-panel="templates" hidden>
+        <div class="row crm-filters">
+          <button class="btn primary" id="tpl-add">+ New template</button>
+          <span class="muted">Use {first_name}, {name} or {company}. Templates open in your own Mail or Messages app, one person at a time.</span>
+        </div>
+        <div class="cards" id="tpl-list"></div>
+      </div>
+    </section>
+
     <!-- Accounts -->
     <section id="view-accounts" class="view" hidden>
       <header class="view-head">
@@ -116,6 +184,9 @@
   </main>
 
   <dialog id="post-dialog"></dialog>
+  <dialog id="contact-dialog" class="wide"></dialog>
+  <dialog id="crm-edit-dialog"></dialog>
+  <script src="/crm.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

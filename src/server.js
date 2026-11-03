@@ -10,12 +10,16 @@ const youtube = require('./youtube');
 const tiktok = require('./tiktok');
 const scheduler = require('./scheduler');
 const { importBundle } = require('./importer');
+const crm = require('./crm');
 
 const app = express();
 app.use(express.json());
 
 // Media must stay public (no password) so Instagram can download it when publishing.
 app.use('/media', express.static(config.mediaDir, { fallthrough: false }));
+
+// Public sign-up forms from the Contacts tab. No password, so anyone with the link can fill one in.
+app.use('/f', crm.publicForms);
 
 // ---------- Password protection ----------
 app.use((req, res, next) => {
@@ -260,6 +264,7 @@ api.post('/analytics/refresh', async (req, res) => {
   res.json({ ok: true });
 });
 
+app.use('/api/crm', crm.router);
 app.use('/api', api);
 
 app.use((err, req, res, next) => {
