@@ -30,7 +30,7 @@ app.use((req, res, next) => {
     const a = Buffer.from(pass), b = Buffer.from(config.appPassword);
     if (a.length === b.length && crypto.timingSafeEqual(a, b)) return next();
   }
-  res.set('WWW-Authenticate', 'Basic realm="Scheduler"').status(401).send('Password required');
+  res.set('WWW-Authenticate', 'Basic realm="Viral Post"').status(401).send('Password required');
 });
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
