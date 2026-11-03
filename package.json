@@ -1,7 +1,7 @@
 {
   "name": "social-scheduler",
   "version": "1.0.0",
-  "description": "Personal social media scheduler for Facebook, Instagram and YouTube",
+  "description": "Personal social media scheduler for Facebook, Instagram, YouTube and TikTok",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -12,7 +12,8 @@
     "background:status": "node scripts/background.js status",
     "update": "sh scripts/update.sh",
     "phone": "node scripts/phone.js",
-    "youtube-keys": "node scripts/youtube-keys.js"
+    "youtube-keys": "node scripts/save-keys.js youtube",
+    "tiktok-keys": "node scripts/save-keys.js tiktok"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

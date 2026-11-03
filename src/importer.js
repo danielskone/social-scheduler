@@ -91,6 +91,7 @@ function importBundle(json, { now = Date.now() } = {}) {
     if (hasIg && !media) return problems.push(`${label}: Instagram posts need a photo or video.`);
     if (hasIg && media.type === 'image' && !media.jpg) return problems.push(`${label}: Instagram needs a JPG photo, not PNG.`);
     if (accts.some((a) => a.platform === 'youtube') && (!media || media.type !== 'video')) return problems.push(`${label}: YouTube posts need a video.`);
+    if (accts.some((a) => a.platform === 'tiktok') && (!media || media.type !== 'video')) return problems.push(`${label}: TikTok posts need a video.`);
     if (hasIg && caption.length > 2200) return problems.push(`${label}: Instagram captions are limited to 2,200 characters.`);
     if (!caption && !media) return problems.push(`${label}: empty post.`);
     ready.push({ caption, title: String(p.title || '').trim() || null, when: new Date(when).toISOString(), accts, media });

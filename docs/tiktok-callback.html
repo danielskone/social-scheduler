@@ -1,0 +1,8 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Connecting TikTok…</title>
+<p style="font-family:system-ui;padding:2rem">Connecting TikTok to your scheduler… If nothing happens, make sure the scheduler is running on this computer.</p>
+<script>
+  // TikTok only returns to https addresses, so it lands here and we forward to the app on this computer.
+  location.replace('http://localhost:3000/auth/tiktok/callback' + location.search);
+</script>

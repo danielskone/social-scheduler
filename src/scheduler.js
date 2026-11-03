@@ -6,10 +6,11 @@ const media = require('./mediafetch');
 const notify = require('./notify');
 
 const youtube = require('./youtube');
+const tiktok = require('./tiktok');
 
-const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram, youtube: youtube.publishYouTube };
-const postStats = { facebook: meta.facebookPostStats, instagram: meta.instagramPostStats, youtube: youtube.videoStats };
-const followers = { facebook: meta.followerCount, instagram: meta.followerCount, youtube: youtube.subscriberCount };
+const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram, youtube: youtube.publishYouTube, tiktok: tiktok.publishTikTok };
+const postStats = { facebook: meta.facebookPostStats, instagram: meta.instagramPostStats, youtube: youtube.videoStats, tiktok: tiktok.videoStats };
+const followers = { facebook: meta.followerCount, instagram: meta.followerCount, youtube: youtube.subscriberCount, tiktok: tiktok.followerCount };
 let running = false;
 
 async function publishDue(now = new Date()) {
@@ -17,7 +18,7 @@ async function publishDue(now = new Date()) {
   running = true;
   try {
     const due = db.prepare(`
-      SELECT t.id AS target_id, p.*, a.platform, a.external_id, a.access_token, a.name AS account_name
+      SELECT t.id AS target_id, p.*, a.platform, a.external_id, a.access_token, a.name AS account_name, a.username AS account_username
       FROM post_targets t
       JOIN posts p ON p.id = t.post_id
       JOIN accounts a ON a.id = t.account_id
@@ -27,14 +28,14 @@ async function publishDue(now = new Date()) {
 
     for (const row of due) {
       db.prepare(`UPDATE post_targets SET status='publishing', error=NULL WHERE id=?`).run(row.target_id);
-      const account = { platform: row.platform, external_id: row.external_id, access_token: row.access_token };
+      const account = { platform: row.platform, external_id: row.external_id, access_token: row.access_token, username: row.account_username };
       try {
         if (row.media_source_url && !row.media_file) row.media_file = await media.ensureMedia(row.id);
         const res = await publishers[row.platform](account, row);
         db.prepare(`UPDATE post_targets SET status='published', external_post_id=?, permalink=?, published_at=? WHERE id=?`)
           .run(res.id, res.permalink, new Date().toISOString(), row.target_id);
         console.log(`[publish] post ${row.id} -> ${row.platform} ${row.account_name}: ${res.id}`);
-        results.push({ postId: row.id, caption: row.caption, platform: row.platform, account: row.account_name, ok: true });
+        results.push({ postId: row.id, caption: row.caption, platform: row.platform, account: row.account_name, ok: true, note: res.note || null });
       } catch (err) {
         db.prepare(`UPDATE post_targets SET status='failed', error=? WHERE id=?`).run(String(err.message || err), row.target_id);
         console.error(`[publish] post ${row.id} -> ${row.platform} failed: ${err.message}`);
@@ -50,7 +51,7 @@ async function publishDue(now = new Date()) {
 async function refreshStats({ days = 30 } = {}) {
   const since = new Date(Date.now() - days * 864e5).toISOString();
   const rows = db.prepare(`
-    SELECT t.id, t.external_post_id, a.platform, a.external_id, a.access_token
+    SELECT t.id, t.external_post_id, a.platform, a.external_id, a.access_token, a.username
     FROM post_targets t JOIN accounts a ON a.id = t.account_id
     WHERE t.status='published' AND t.published_at >= ?`).all(since);
   for (const r of rows) {

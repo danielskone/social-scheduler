@@ -56,6 +56,7 @@ textarea { width: 100%; resize: vertical; }
 .dot.facebook { background: var(--fb); }
 .dot.instagram { background: var(--ig); }
 .dot.youtube { background: #ff0033; }
+.dot.tiktok { background: #25f4ee; box-shadow: 1px 1px 0 #fe2c55; }
 
 /* Compose */
 .compose { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 28px; }

@@ -255,12 +255,14 @@ async function renderAccounts() {
   notes.push(`In your Meta app, add <code>${esc(status.redirectUri)}</code> as a Valid OAuth Redirect URI (Facebook Login → Settings).`);
   if (!status.youtubeConfigured) notes.push('To add YouTube: in Terminal run <code>npm run youtube-keys</code>, then <code>npm run background:on</code>.');
   else notes.push(`In Google Cloud, your OAuth client's Authorized redirect URI must be <code>${esc(status.youtubeRedirectUri)}</code>.`);
+  if (!status.tiktokConfigured) notes.push('To add TikTok: in Terminal run <code>npm run tiktok-keys</code>, then <code>npm run background:on</code>.');
+  else notes.push(`TikTok mode: <b>${status.tiktokMode === 'direct' ? 'posts by itself' : 'sends to your TikTok inbox, then you tap Post'}</b>. TikTok redirect URI: <code>${esc(status.tiktokRedirectUri)}</code>.`);
   if (!status.instagramReady) notes.push('Instagram posting needs <code>PUBLIC_BASE_URL</code> to be a public https address. Facebook posts work without it.');
   $('#setup-notes').innerHTML = `<div class="note">${notes.map((n) => `<div>${n}</div>`).join('')}</div>`;
 
   $('#account-list').innerHTML = accounts.map((a) => `<div class="account">
       ${a.picture_url ? `<img src="${esc(a.picture_url)}" alt="">` : '<span class="avatar"></span>'}
-      <div class="grow"><b>${esc(a.name)}</b><div class="muted"><span class="dot ${a.platform}"></span> ${a.platform === 'facebook' ? 'Facebook Page' : (a.platform === 'youtube' ? 'YouTube channel' : 'Instagram') + (a.username ? ' · @' + esc(a.username) : '')}</div></div>
+      <div class="grow"><b>${esc(a.name)}</b><div class="muted"><span class="dot ${a.platform}"></span> ${a.platform === 'facebook' ? 'Facebook Page' : ({ youtube: 'YouTube channel', tiktok: 'TikTok' }[a.platform] || 'Instagram') + (a.username ? ' · @' + esc(a.username) : '')}</div></div>
       <button class="btn danger" data-remove="${a.id}">Remove</button></div>`).join('')
     || '<p class="muted">No accounts connected yet.</p>';
   $('#account-list').onclick = async (e) => {

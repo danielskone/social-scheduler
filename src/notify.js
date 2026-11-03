@@ -52,12 +52,14 @@ async function postResults(results) {
   }
   for (const rows of byPost.values()) {
     const ok = rows.filter((r) => r.ok), bad = rows.filter((r) => !r.ok);
-    const where = (list) => list.map((r) => `${{ instagram: 'Instagram', youtube: 'YouTube' }[r.platform] || 'Facebook'} (${r.account})`).join(', ');
+    const where = (list) => list.map((r) => `${{ instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok' }[r.platform] || 'Facebook'} (${r.account})`).join(', ');
     if (bad.length) {
       await send('Post FAILED', `"${short(rows[0].caption)}"\nFailed on: ${bad.map((r) => `${where([r])}: ${short(r.error, 120)}`).join('\n')}`
         + (ok.length ? `\nPosted on: ${where(ok)}` : ''), { priority: 'high', tags: 'warning' });
     } else {
-      await send('Posted', `"${short(rows[0].caption)}"\nOn: ${where(ok)}`, { tags: 'white_check_mark' });
+      const notes = [...new Set(ok.map((r) => r.note).filter(Boolean))];
+      await send(notes.length ? 'Action needed' : 'Posted', `"${short(rows[0].caption)}"\nOn: ${where(ok)}${notes.map((n) => `\n${n}`).join('')}`,
+        { tags: notes.length ? 'point_right' : 'white_check_mark', priority: notes.length ? 'high' : 'default' });
     }
   }
 }

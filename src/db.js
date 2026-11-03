@@ -10,7 +10,7 @@ db.pragma('foreign_keys = ON');
 db.exec(`
 CREATE TABLE IF NOT EXISTS accounts (
   id INTEGER PRIMARY KEY,
-  platform TEXT NOT NULL CHECK (platform IN ('facebook','instagram','youtube')),
+  platform TEXT NOT NULL CHECK (platform IN ('facebook','instagram','youtube','tiktok')),
   external_id TEXT NOT NULL,
   name TEXT NOT NULL,
   username TEXT,
@@ -56,13 +56,13 @@ if (!db.prepare('PRAGMA table_info(posts)').all().some((c) => c.name === 'media_
   db.exec('ALTER TABLE posts ADD COLUMN media_source_url TEXT');
 }
 
-// Added later: YouTube accounts. Older databases only allowed facebook/instagram, and
+// Added later: YouTube and TikTok accounts. Older databases only allowed fewer platforms, and
 // SQLite can't change that rule in place, so the accounts table is rebuilt (rows kept).
 const acctSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'").get().sql;
-if (!acctSql.includes("'youtube'")) {
+if (!acctSql.includes("'tiktok'")) {
   db.pragma('foreign_keys = OFF');
   db.transaction(() => {
-    db.exec(acctSql.replace('CREATE TABLE accounts', 'CREATE TABLE accounts_new').replace("IN ('facebook','instagram')", "IN ('facebook','instagram','youtube')"));
+    db.exec(acctSql.replace('CREATE TABLE accounts', 'CREATE TABLE accounts_new').replace(/IN \('facebook'[^)]*\)/, "IN ('facebook','instagram','youtube','tiktok')"));
     db.exec('INSERT INTO accounts_new SELECT * FROM accounts; DROP TABLE accounts; ALTER TABLE accounts_new RENAME TO accounts;');
   })();
   db.pragma('foreign_keys = ON');

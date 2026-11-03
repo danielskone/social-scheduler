@@ -100,3 +100,14 @@ redirect `http://localhost:3000/auth/youtube/callback`, run `npm run youtube-key
 YouTube posts need a video. The title defaults to the caption's first line (or set one in the
 composer / `"title"` in an import bundle). Until Google audits your API project (free form:
 YouTube API Services Audit and Quota Extension), uploads are kept **private** by YouTube.
+
+## TikTok (free)
+
+Step-by-step guide: `/mnt/project-files/setup/tiktok-setup.md` (in the project files).
+TikTok only returns sign-ins to https addresses, so `docs/tiktok-callback.html` (served by
+GitHub Pages from the `docs/` folder) forwards the sign-in to `http://localhost:3000`. The same
+folder has the Terms and Privacy pages TikTok asks for. Keys: `npm run tiktok-keys`.
+
+`TIKTOK_MODE=draft` (default): at the scheduled time the video goes to your TikTok inbox and your
+phone alert includes the caption to paste; you tap Post in TikTok. `TIKTOK_MODE=direct` posts by
+itself, but TikTok keeps those posts private until the app passes TikTok's audit.

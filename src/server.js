@@ -7,6 +7,7 @@ const config = require('./config');
 const db = require('./db');
 const meta = require('./meta');
 const youtube = require('./youtube');
+const tiktok = require('./tiktok');
 const scheduler = require('./scheduler');
 const { importBundle } = require('./importer');
 
@@ -77,6 +78,28 @@ app.get('/auth/youtube/callback', async (req, res) => {
   }
 });
 
+app.get('/auth/tiktok', (req, res) => {
+  if (!tiktok.configured()) {
+    return res.status(500).send('Add your TikTok keys first: in Terminal run "npm run tiktok-keys", then "npm run background:on".');
+  }
+  const state = crypto.randomBytes(16).toString('hex');
+  loginStates.add(state);
+  res.redirect(tiktok.loginUrl(state));
+});
+
+app.get('/auth/tiktok/callback', async (req, res) => {
+  const { code, state, error, error_description } = req.query;
+  if (error) return res.redirect(`/#accounts?error=${encodeURIComponent(error_description || error)}`);
+  if (!state || !loginStates.delete(state)) return res.status(400).send('Login expired, please try again.');
+  try {
+    const accounts = await tiktok.accountsFromCode(code);
+    saveAccounts(accounts);
+    res.redirect(`/#accounts?connected=${accounts.length}`);
+  } catch (err) {
+    res.redirect(`/#accounts?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
 function saveAccounts(accounts) {
   const upsert = db.prepare(`
     INSERT INTO accounts (platform, external_id, name, username, picture_url, access_token)
@@ -97,6 +120,9 @@ api.get('/status', (req, res) => {
     redirectUri: meta.redirectUri(),
     youtubeConfigured: youtube.configured(),
     youtubeRedirectUri: youtube.redirectUri(),
+    tiktokConfigured: tiktok.configured(),
+    tiktokRedirectUri: tiktok.redirectUri(),
+    tiktokMode: tiktok.mode(),
   });
 });
 
@@ -137,6 +163,7 @@ function validatePost({ caption, scheduledAt, accountIds, mediaType }) {
   if (!caption && !mediaType) return 'Write something or add media.';
   if (caption && caption.length > 2200 && accts.some((a) => a.platform === 'instagram')) return 'Instagram captions are limited to 2,200 characters.';
   if (accts.some((a) => a.platform === 'youtube') && mediaType !== 'video') return 'YouTube posts need a video.';
+  if (accts.some((a) => a.platform === 'tiktok') && mediaType !== 'video') return 'TikTok posts need a video.';
   return null;
 }
 
