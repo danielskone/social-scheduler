@@ -5,7 +5,11 @@ const meta = require('./meta');
 const media = require('./mediafetch');
 const notify = require('./notify');
 
-const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram };
+const youtube = require('./youtube');
+
+const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram, youtube: youtube.publishYouTube };
+const postStats = { facebook: meta.facebookPostStats, instagram: meta.instagramPostStats, youtube: youtube.videoStats };
+const followers = { facebook: meta.followerCount, instagram: meta.followerCount, youtube: youtube.subscriberCount };
 let running = false;
 
 async function publishDue(now = new Date()) {
@@ -51,8 +55,7 @@ async function refreshStats({ days = 30 } = {}) {
     WHERE t.status='published' AND t.published_at >= ?`).all(since);
   for (const r of rows) {
     try {
-      const fn = r.platform === 'facebook' ? meta.facebookPostStats : meta.instagramPostStats;
-      const s = await fn(r, r.external_post_id);
+      const s = await postStats[r.platform](r, r.external_post_id);
       db.prepare(`UPDATE post_targets SET likes=?, comments=?, shares=?, views=?, stats_updated_at=? WHERE id=?`)
         .run(s.likes, s.comments, s.shares, s.views, new Date().toISOString(), r.id);
     } catch (err) {
@@ -62,7 +65,7 @@ async function refreshStats({ days = 30 } = {}) {
   const today = new Date().toISOString().slice(0, 10);
   for (const a of db.prepare('SELECT * FROM accounts').all()) {
     try {
-      const n = await meta.followerCount(a);
+      const n = await followers[a.platform](a);
       if (n != null) {
         db.prepare(`INSERT INTO follower_snapshots (account_id, followers, taken_on) VALUES (?,?,?)
                     ON CONFLICT(account_id, taken_on) DO UPDATE SET followers=excluded.followers`).run(a.id, n, today);

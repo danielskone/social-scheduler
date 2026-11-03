@@ -55,6 +55,7 @@ textarea { width: 100%; resize: vertical; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .dot.facebook { background: var(--fb); }
 .dot.instagram { background: var(--ig); }
+.dot.youtube { background: #ff0033; }
 
 /* Compose */
 .compose { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 28px; }

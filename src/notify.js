@@ -52,7 +52,7 @@ async function postResults(results) {
   }
   for (const rows of byPost.values()) {
     const ok = rows.filter((r) => r.ok), bad = rows.filter((r) => !r.ok);
-    const where = (list) => list.map((r) => `${r.platform === 'instagram' ? 'Instagram' : 'Facebook'} (${r.account})`).join(', ');
+    const where = (list) => list.map((r) => `${{ instagram: 'Instagram', youtube: 'YouTube' }[r.platform] || 'Facebook'} (${r.account})`).join(', ');
     if (bad.length) {
       await send('Post FAILED', `"${short(rows[0].caption)}"\nFailed on: ${bad.map((r) => `${where([r])}: ${short(r.error, 120)}`).join('\n')}`
         + (ok.length ? `\nPosted on: ${where(ok)}` : ''), { priority: 'high', tags: 'warning' });

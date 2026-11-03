@@ -6,6 +6,7 @@ const multer = require('multer');
 const config = require('./config');
 const db = require('./db');
 const meta = require('./meta');
+const youtube = require('./youtube');
 const scheduler = require('./scheduler');
 const { importBundle } = require('./importer');
 
@@ -54,6 +55,28 @@ app.get('/auth/facebook/callback', async (req, res) => {
   }
 });
 
+app.get('/auth/youtube', (req, res) => {
+  if (!youtube.configured()) {
+    return res.status(500).send('Add your Google keys first: in Terminal run "npm run youtube-keys", then "npm run background:on".');
+  }
+  const state = crypto.randomBytes(16).toString('hex');
+  loginStates.add(state);
+  res.redirect(youtube.loginUrl(state));
+});
+
+app.get('/auth/youtube/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error) return res.redirect(`/#accounts?error=${encodeURIComponent(error === 'access_denied' ? 'Google sign-in was cancelled.' : error)}`);
+  if (!state || !loginStates.delete(state)) return res.status(400).send('Login expired, please try again.');
+  try {
+    const accounts = await youtube.accountsFromCode(code);
+    saveAccounts(accounts);
+    res.redirect(`/#accounts?connected=${accounts.length}`);
+  } catch (err) {
+    res.redirect(`/#accounts?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
 function saveAccounts(accounts) {
   const upsert = db.prepare(`
     INSERT INTO accounts (platform, external_id, name, username, picture_url, access_token)
@@ -72,6 +95,8 @@ api.get('/status', (req, res) => {
     publicBaseUrl: config.publicBaseUrl,
     instagramReady: config.publicBaseUrl.startsWith('https://'),
     redirectUri: meta.redirectUri(),
+    youtubeConfigured: youtube.configured(),
+    youtubeRedirectUri: youtube.redirectUri(),
   });
 });
 
@@ -111,6 +136,7 @@ function validatePost({ caption, scheduledAt, accountIds, mediaType }) {
   if (accts.some((a) => a.platform === 'instagram') && !mediaType) return 'Instagram posts need a photo or video.';
   if (!caption && !mediaType) return 'Write something or add media.';
   if (caption && caption.length > 2200 && accts.some((a) => a.platform === 'instagram')) return 'Instagram captions are limited to 2,200 characters.';
+  if (accts.some((a) => a.platform === 'youtube') && mediaType !== 'video') return 'YouTube posts need a video.';
   return null;
 }
 
@@ -128,8 +154,8 @@ api.post('/posts', upload.single('media'), (req, res) => {
     return res.status(400).json({ error });
   }
   const id = db.transaction(() => {
-    const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at) VALUES (?,?,?,?)')
-      .run(caption, req.file?.filename || null, mediaType, new Date(req.body.scheduledAt).toISOString());
+    const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title) VALUES (?,?,?,?,?)')
+      .run(caption, req.file?.filename || null, mediaType, new Date(req.body.scheduledAt).toISOString(), (req.body.title || '').trim() || null);
     const ins = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
     accountIds.forEach((a) => ins.run(lastInsertRowid, a));
     return lastInsertRowid;
@@ -156,10 +182,11 @@ api.patch('/posts/:id', (req, res) => {
   if (post.targets.some((t) => t.status === 'published' || t.status === 'publishing')) {
     return res.status(409).json({ error: 'Already published to at least one account, so it can no longer be edited.' });
   }
-  const { caption, scheduledAt } = req.body;
+  const { caption, scheduledAt, title } = req.body;
   if (scheduledAt !== undefined && isNaN(Date.parse(scheduledAt))) return res.status(400).json({ error: 'Invalid date.' });
   db.prepare('UPDATE posts SET caption=COALESCE(?, caption), scheduled_at=COALESCE(?, scheduled_at) WHERE id=?')
     .run(caption ?? null, scheduledAt ? new Date(scheduledAt).toISOString() : null, post.id);
+  if (title !== undefined) db.prepare('UPDATE posts SET title=? WHERE id=?').run(String(title).trim() || null, post.id);
   res.json(loadPost(post.id));
 });
 

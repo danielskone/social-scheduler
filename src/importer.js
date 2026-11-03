@@ -4,6 +4,7 @@
 // {
 //   "posts": [{
 //     "caption": "Text…",
+//     "title": "Video title",                          // optional, YouTube only (max 100)
 //     "when": "2026-11-03T18:00:00-05:00",            // any ISO date with timezone
 //     "accounts": [{ "platform": "facebook", "name": "My Page" },
 //                  { "platform": "instagram", "username": "myhandle" }],
@@ -89,9 +90,10 @@ function importBundle(json, { now = Date.now() } = {}) {
     const caption = String(p.caption || '').trim();
     if (hasIg && !media) return problems.push(`${label}: Instagram posts need a photo or video.`);
     if (hasIg && media.type === 'image' && !media.jpg) return problems.push(`${label}: Instagram needs a JPG photo, not PNG.`);
+    if (accts.some((a) => a.platform === 'youtube') && (!media || media.type !== 'video')) return problems.push(`${label}: YouTube posts need a video.`);
     if (hasIg && caption.length > 2200) return problems.push(`${label}: Instagram captions are limited to 2,200 characters.`);
     if (!caption && !media) return problems.push(`${label}: empty post.`);
-    ready.push({ caption, when: new Date(when).toISOString(), accts, media });
+    ready.push({ caption, title: String(p.title || '').trim() || null, when: new Date(when).toISOString(), accts, media });
   });
 
   if (problems.length) return { error: `Nothing was imported. Please fix: ${problems.join(' ')}`, problems };
@@ -103,8 +105,8 @@ function importBundle(json, { now = Date.now() } = {}) {
     SELECT p.id FROM posts p WHERE p.scheduled_at=?
       AND (SELECT group_concat(account_id) FROM (SELECT account_id FROM post_targets WHERE post_id=p.id ORDER BY account_id)) = ?
       AND NOT EXISTS (SELECT 1 FROM post_targets WHERE post_id=p.id AND status <> 'scheduled')`);
-  const setCaption = db.prepare('UPDATE posts SET caption=? WHERE id=?');
-  const insPost = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, media_source_url) VALUES (?,?,?,?,?)');
+  const setCaption = db.prepare('UPDATE posts SET caption=?, title=COALESCE(?, title) WHERE id=?');
+  const insPost = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, media_source_url, title) VALUES (?,?,?,?,?,?)');
   const insTarget = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
   const written = [];
   let imported = 0, skipped = 0, updated = 0;
@@ -115,7 +117,7 @@ function importBundle(json, { now = Date.now() } = {}) {
         if (exists.get(r.caption, r.when, ids.join(','))) { skipped++; continue; }
         if (bundle.replace) {
           const old = sameSlot.all(r.when, ids.join(','));
-          if (old.length) { old.forEach((o) => setCaption.run(r.caption, o.id)); updated++; continue; }
+          if (old.length) { old.forEach((o) => setCaption.run(r.caption, r.title, o.id)); updated++; continue; }
         }
         let file = null;
         if (r.media && r.media.buf) {
@@ -123,7 +125,7 @@ function importBundle(json, { now = Date.now() } = {}) {
           fs.writeFileSync(path.join(config.mediaDir, file), r.media.buf);
           written.push(file);
         }
-        const { lastInsertRowid } = insPost.run(r.caption, file, r.media ? r.media.type : null, r.when, r.media && r.media.url ? r.media.url : null);
+        const { lastInsertRowid } = insPost.run(r.caption, file, r.media ? r.media.type : null, r.when, r.media && r.media.url ? r.media.url : null, r.title);
         ids.forEach((id) => insTarget.run(lastInsertRowid, id));
         imported++;
       }

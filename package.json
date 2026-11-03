@@ -1,7 +1,7 @@
 {
   "name": "social-scheduler",
   "version": "1.0.0",
-  "description": "Personal social media scheduler for Facebook and Instagram",
+  "description": "Personal social media scheduler for Facebook, Instagram and YouTube",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -11,7 +11,8 @@
     "background:off": "node scripts/background.js off",
     "background:status": "node scripts/background.js status",
     "update": "sh scripts/update.sh",
-    "phone": "node scripts/phone.js"
+    "phone": "node scripts/phone.js",
+    "youtube-keys": "node scripts/youtube-keys.js"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

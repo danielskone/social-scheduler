@@ -10,7 +10,7 @@ db.pragma('foreign_keys = ON');
 db.exec(`
 CREATE TABLE IF NOT EXISTS accounts (
   id INTEGER PRIMARY KEY,
-  platform TEXT NOT NULL CHECK (platform IN ('facebook','instagram')),
+  platform TEXT NOT NULL CHECK (platform IN ('facebook','instagram','youtube')),
   external_id TEXT NOT NULL,
   name TEXT NOT NULL,
   username TEXT,
@@ -54,6 +54,23 @@ CREATE TABLE IF NOT EXISTS follower_snapshots (
 // Added later: media that is downloaded from a link after import.
 if (!db.prepare('PRAGMA table_info(posts)').all().some((c) => c.name === 'media_source_url')) {
   db.exec('ALTER TABLE posts ADD COLUMN media_source_url TEXT');
+}
+
+// Added later: YouTube accounts. Older databases only allowed facebook/instagram, and
+// SQLite can't change that rule in place, so the accounts table is rebuilt (rows kept).
+const acctSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'").get().sql;
+if (!acctSql.includes("'youtube'")) {
+  db.pragma('foreign_keys = OFF');
+  db.transaction(() => {
+    db.exec(acctSql.replace('CREATE TABLE accounts', 'CREATE TABLE accounts_new').replace("IN ('facebook','instagram')", "IN ('facebook','instagram','youtube')"));
+    db.exec('INSERT INTO accounts_new SELECT * FROM accounts; DROP TABLE accounts; ALTER TABLE accounts_new RENAME TO accounts;');
+  })();
+  db.pragma('foreign_keys = ON');
+}
+
+// Added later: optional video title (used for YouTube).
+if (!db.prepare('PRAGMA table_info(posts)').all().some((c) => c.name === 'title')) {
+  db.exec('ALTER TABLE posts ADD COLUMN title TEXT');
 }
 
 module.exports = db;

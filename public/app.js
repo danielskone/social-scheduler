@@ -96,6 +96,7 @@ async function openPost(id) {
   dlg.innerHTML = `
     <h2 style="margin-top:0">${fmtDateTime(p.scheduled_at)}</h2>
     ${p.media_url ? (p.media_type === 'video' ? `<video src="${p.media_url}" controls></video>` : `<img src="${p.media_url}" alt="">`) : ''}
+    ${editable && p.targets.some((t) => t.platform === 'youtube') ? `<p><input type="text" id="dlg-title" maxlength="100" placeholder="YouTube title (optional)" value="${esc(p.title || '')}"></p>` : (p.title ? `<p><b>${esc(p.title)}</b></p>` : '')}
     ${editable ? `<textarea id="dlg-caption" rows="5">${esc(p.caption)}</textarea>
       <p><input type="datetime-local" id="dlg-when" value="${toLocalInput(new Date(p.scheduled_at))}"></p>`
       : `<p style="white-space:pre-wrap">${esc(p.caption)}</p>`}
@@ -113,7 +114,7 @@ async function openPost(id) {
   $('#dlg-close').onclick = () => dlg.close();
   $('#dlg-delete').onclick = async () => {
     const msg = p.targets.some((t) => t.status === 'published')
-      ? 'Remove this from your calendar? (It stays on Facebook/Instagram.)' : 'Delete this scheduled post?';
+      ? 'Remove this from your calendar? (Anything already posted stays online.)' : 'Delete this scheduled post?';
     if (!confirm(msg)) return;
     await api(`/posts/${id}`, { method: 'DELETE' });
     dlg.close(); renderCalendar();
@@ -121,7 +122,7 @@ async function openPost(id) {
   if ($('#dlg-save')) $('#dlg-save').onclick = async () => {
     try {
       await api(`/posts/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ caption: $('#dlg-caption').value, scheduledAt: new Date($('#dlg-when').value).toISOString() }) });
+        body: JSON.stringify({ caption: $('#dlg-caption').value, scheduledAt: new Date($('#dlg-when').value).toISOString(), ...($('#dlg-title') ? { title: $('#dlg-title').value } : {}) }) });
       dlg.close(); renderCalendar();
     } catch (e) { alert(e.message); }
   };
@@ -150,7 +151,9 @@ function renderCompose(dateIso) {
 function updatePreview() {
   const caption = form.caption.value;
   $('#preview-caption').textContent = caption || 'Your caption will appear here.';
-  const hasIg = [...form.querySelectorAll('[name=accountIds]:checked')].some((c) => c.dataset.platform === 'instagram');
+  const checked = [...form.querySelectorAll('[name=accountIds]:checked')];
+  const hasIg = checked.some((c) => c.dataset.platform === 'instagram');
+  $('#title-field').hidden = !checked.some((c) => c.dataset.platform === 'youtube');
   $('#caption-count').textContent = `${caption.length}${hasIg ? ' / 2200' : ''}`;
   const first = accounts.find((a) => form.querySelector(`[name=accountIds][value="${a.id}"]:checked`));
   $('#preview-name').textContent = first ? (first.username ? '@' + first.username : first.name) : 'Your account';
@@ -250,12 +253,14 @@ async function renderAccounts() {
   const notes = [];
   if (!status.metaConfigured) notes.push('Add your <code>META_APP_ID</code> and <code>META_APP_SECRET</code> to the <code>.env</code> file, then restart the app.');
   notes.push(`In your Meta app, add <code>${esc(status.redirectUri)}</code> as a Valid OAuth Redirect URI (Facebook Login → Settings).`);
+  if (!status.youtubeConfigured) notes.push('To add YouTube: in Terminal run <code>npm run youtube-keys</code>, then <code>npm run background:on</code>.');
+  else notes.push(`In Google Cloud, your OAuth client's Authorized redirect URI must be <code>${esc(status.youtubeRedirectUri)}</code>.`);
   if (!status.instagramReady) notes.push('Instagram posting needs <code>PUBLIC_BASE_URL</code> to be a public https address. Facebook posts work without it.');
   $('#setup-notes').innerHTML = `<div class="note">${notes.map((n) => `<div>${n}</div>`).join('')}</div>`;
 
   $('#account-list').innerHTML = accounts.map((a) => `<div class="account">
       ${a.picture_url ? `<img src="${esc(a.picture_url)}" alt="">` : '<span class="avatar"></span>'}
-      <div class="grow"><b>${esc(a.name)}</b><div class="muted"><span class="dot ${a.platform}"></span> ${a.platform === 'facebook' ? 'Facebook Page' : 'Instagram' + (a.username ? ' · @' + esc(a.username) : '')}</div></div>
+      <div class="grow"><b>${esc(a.name)}</b><div class="muted"><span class="dot ${a.platform}"></span> ${a.platform === 'facebook' ? 'Facebook Page' : (a.platform === 'youtube' ? 'YouTube channel' : 'Instagram') + (a.username ? ' · @' + esc(a.username) : '')}</div></div>
       <button class="btn danger" data-remove="${a.id}">Remove</button></div>`).join('')
     || '<p class="muted">No accounts connected yet.</p>';
   $('#account-list').onclick = async (e) => {

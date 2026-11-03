@@ -88,3 +88,15 @@ Runs an end-to-end test against a fake Graph API (no real accounts are touched).
 3. In ntfy tap **+**, type that name exactly, tap **Subscribe**.
 
 You then get a message each time a post goes out, and an urgent one if a post fails.
+
+## YouTube (free)
+
+Step-by-step guide: `/mnt/project-files/setup/youtube-setup.md` (in the project files).
+Short version: create a Google Cloud project, enable **YouTube Data API v3**, set up the
+consent screen (External, then **Publish app**), create a **Web application** OAuth client with
+redirect `http://localhost:3000/auth/youtube/callback`, run `npm run youtube-keys`, then
+`npm run background:on` and click **Connect YouTube** on the Accounts page.
+
+YouTube posts need a video. The title defaults to the caption's first line (or set one in the
+composer / `"title"` in an import bundle). Until Google audits your API project (free form:
+YouTube API Services Audit and Quota Extension), uploads are kept **private** by YouTube.

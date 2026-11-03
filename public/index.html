@@ -49,6 +49,10 @@
             <span>Post to</span>
             <div id="compose-accounts" class="account-picker"></div>
           </label>
+          <label class="field" id="title-field" hidden>
+            <span>YouTube title <small>(optional, max 100; uses the caption's first line if empty)</small></span>
+            <input type="text" name="title" maxlength="100">
+          </label>
           <label class="field">
             <span>Caption <small id="caption-count"></small></span>
             <textarea name="caption" rows="8" placeholder="What do you want to say?"></textarea>
@@ -100,7 +104,10 @@
     <section id="view-accounts" class="view" hidden>
       <header class="view-head">
         <h1>Accounts</h1>
-        <a class="btn primary" href="/auth/facebook">Connect Facebook &amp; Instagram</a>
+        <div class="row">
+          <a class="btn primary" href="/auth/facebook">Connect Facebook &amp; Instagram</a>
+          <a class="btn primary" href="/auth/youtube">Connect YouTube</a>
+        </div>
       </header>
       <div id="setup-notes"></div>
       <div id="account-list" class="account-list"></div>
