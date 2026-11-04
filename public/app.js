@@ -63,62 +63,187 @@ window.addEventListener('hashchange', route);
 
 // ---------- Calendar ----------
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const isPhone = () => matchMedia('(max-width: 800px)').matches;
+let calMode = (() => { try { return localStorage.getItem('calMode') || 'month'; } catch { return 'month'; } })();
+let calWeek = startOfWeek(new Date());
+function startOfWeek(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const platformsOf = (p) => [...new Set(p.targets.map((t) => t.platform))];
+const label = (p) => p.title || p.caption || (p.media_type === 'video' ? 'Video' : 'Photo');
+const thumb = (p, cls) => (p.media_type && p.media_url
+  ? (p.media_type === 'video'
+    ? `<span class="${cls} vid"><video src="${p.media_url}#t=0.5" muted playsinline preload="metadata"></video></span>`
+    : `<span class="${cls}"><img src="${p.media_url}" alt="" loading="lazy"></span>`)
+  : `<span class="${cls} none">${p.media_type === 'video' ? '▶' : 'Aa'}</span>`);
+const STATUS_WORD = { scheduled: 'Scheduled', published: 'Posted', failed: 'Needs attention' };
+
 $('#cal-weekdays').innerHTML = WEEKDAYS.map((d) => `<div>${d}</div>`).join('');
-$('#cal-prev').onclick = () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); renderCalendar(); };
-$('#cal-next').onclick = () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); renderCalendar(); };
-$('#cal-today').onclick = () => { calMonth = startOfMonth(new Date()); renderCalendar(); };
+$('#cal-prev').onclick = () => { if (mode() === 'week') calWeek = addDays(calWeek, -7); else calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); renderCalendar(); };
+$('#cal-next').onclick = () => { if (mode() === 'week') calWeek = addDays(calWeek, 7); else calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); renderCalendar(); };
+$('#cal-today').onclick = () => { calMonth = startOfMonth(new Date()); calWeek = startOfWeek(new Date()); renderCalendar(); };
+$('#cal-mode').onclick = (e) => {
+  const b = e.target.closest('button[data-mode]');
+  if (!b) return;
+  calMode = b.dataset.mode;
+  try { localStorage.setItem('calMode', calMode); } catch { /* private mode */ }
+  if (calMode === 'week') calWeek = startOfWeek(calMonth.getMonth() === new Date().getMonth() ? new Date() : calMonth);
+  renderCalendar();
+};
+// On iPhone the month grid is too small to read, so it shows the list instead.
+function mode() { return isPhone() && calMode === 'month' ? 'list' : calMode; }
+
+async function renderOverview() {
+  const now = new Date();
+  const [upcoming, recent] = await Promise.all([
+    api(`/posts?from=${now.toISOString()}&to=${addDays(now, 7).toISOString()}`),
+    api(`/posts?from=${addDays(now, -30).toISOString()}&to=${now.toISOString()}`),
+  ]);
+  const next = upcoming.filter((p) => overallStatus(p) === 'scheduled').sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at))[0];
+  const failed = recent.filter((p) => overallStatus(p) === 'failed');
+  const posted = recent.filter((p) => overallStatus(p) === 'published').length;
+  const perPlatform = {};
+  upcoming.forEach((p) => platformsOf(p).forEach((pl) => (perPlatform[pl] = (perPlatform[pl] || 0) + 1)));
+  const until = (iso) => {
+    const m = Math.round((new Date(iso) - now) / 60000);
+    if (m < 60) return `in ${Math.max(m, 1)} min`;
+    if (m < 24 * 60) return `in ${Math.round(m / 60)} h`;
+    return new Date(iso).toLocaleDateString([], { weekday: 'long' });
+  };
+  $('#cal-overview').innerHTML = `
+    ${next ? `<button class="ov-card ov-next" data-id="${next.id}">
+      ${thumb(next, 'ov-thumb')}
+      <span class="ov-body"><span class="ov-label">Up next · ${until(next.scheduled_at)}</span>
+        <b class="ov-title">${esc(label(next))}</b>
+        <span class="ov-meta">${fmtTime(next.scheduled_at)} <span class="ov-icons">${platformsOf(next).map(icon).join('')}</span></span></span>
+    </button>` : `<div class="ov-card ov-next empty-next"><span class="ov-body"><span class="ov-label">Up next</span><b class="ov-title">Nothing scheduled this week</b><a href="#compose">+ New post</a></span></div>`}
+    <div class="ov-card"><span class="ov-label">Next 7 days</span><b class="ov-num">${upcoming.length}</b>
+      <span class="ov-icons wide">${Object.entries(perPlatform).map(([pl, n]) => `<span class="ov-pl">${icon(pl)}${n}</span>`).join('') || '<span class="muted">No posts</span>'}</span></div>
+    <div class="ov-card"><span class="ov-label">Posted · last 30 days</span><b class="ov-num ok">${posted}</b><span class="muted small">Published everywhere</span></div>
+    <button class="ov-card ${failed.length ? 'bad' : ''}" id="ov-failed" ${failed.length ? `data-id="${failed[0].id}"` : 'disabled'}>
+      <span class="ov-label">Needs attention</span><b class="ov-num ${failed.length ? 'bad' : ''}">${failed.length}</b>
+      <span class="muted small">${failed.length ? 'Tap to see the first one' : 'All good ✓'}</span></button>`;
+  $('#cal-overview').onclick = (e) => { const c = e.target.closest('[data-id]'); if (c) openPost(c.dataset.id); };
+}
+
+function postCard(p) {
+  const st = overallStatus(p);
+  return `<button class="pcard ${st}" data-id="${p.id}">
+    ${thumb(p, 'pc-thumb')}
+    <span class="pc-body">
+      <span class="pc-top"><b>${fmtTime(p.scheduled_at)}</b><span class="pc-icons">${platformsOf(p).map(icon).join('')}</span></span>
+      <span class="pc-text">${esc(label(p))}</span>
+      <span class="status ${st}">${STATUS_WORD[st]}</span>
+    </span></button>`;
+}
 
 async function renderCalendar() {
+  const m = mode();
+  document.querySelectorAll('#cal-mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === (m === 'list' && isPhone() && calMode === 'month' ? 'month' : m)));
+  $('#view-calendar').dataset.mode = m;
+  renderOverview().catch(() => {});
+  const today = dayKey(new Date());
+
+  if (m === 'week') {
+    const from = calWeek, to = addDays(calWeek, 7);
+    const sameMonth = from.getMonth() === addDays(to, -1).getMonth();
+    $('#cal-title').textContent = `${from.toLocaleDateString([], { month: 'short', day: 'numeric' })} – ${addDays(to, -1).toLocaleDateString([], sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' })}`;
+    const posts = (await api(`/posts?from=${from.toISOString()}&to=${to.toISOString()}`)).sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+    const byDay = {};
+    posts.forEach((p) => (byDay[dayKey(new Date(p.scheduled_at))] ||= []).push(p));
+    $('#cal-week').innerHTML = [...Array(7)].map((_, i) => {
+      const d = addDays(from, i);
+      const list = byDay[dayKey(d)] || [];
+      return `<div class="wk-col ${dayKey(d) === today ? 'today' : ''}">
+        <div class="wk-head"><span>${d.toLocaleDateString([], { weekday: 'short' })}</span><b>${d.getDate()}</b><small>${list.length ? `${list.length} post${list.length > 1 ? 's' : ''}` : ''}</small></div>
+        <div class="wk-list">${list.map(postCard).join('')}
+          <a class="wk-add" href="#compose?date=${encodeURIComponent(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 10).toISOString())}">+ Add</a></div>
+      </div>`;
+    }).join('');
+    $('#cal-week').onclick = (e) => { const c = e.target.closest('.pcard'); if (c) openPost(c.dataset.id); };
+    return;
+  }
+
   $('#cal-title').textContent = calMonth.toLocaleDateString([], { month: 'long', year: 'numeric' });
   const first = new Date(calMonth);
   first.setDate(1 - ((first.getDay() + 6) % 7)); // back to Monday
-  const last = new Date(first);
-  last.setDate(first.getDate() + 42);
-  const posts = await api(`/posts?from=${first.toISOString()}&to=${last.toISOString()}`);
+  const last = addDays(first, 42);
+  const posts = (await api(`/posts?from=${first.toISOString()}&to=${last.toISOString()}`)).sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
   const byDay = {};
   posts.forEach((p) => (byDay[dayKey(new Date(p.scheduled_at))] ||= []).push(p));
 
-  const today = dayKey(new Date());
-  let html = '';
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(first);
-    d.setDate(first.getDate() + i);
-    const items = byDay[dayKey(d)] || [];
-    html += `<div class="day ${d.getMonth() !== calMonth.getMonth() ? 'other' : ''} ${dayKey(d) === today ? 'today' : ''}" data-date="${d.toISOString()}">
-      <span class="num">${d.getDate()}</span>
-      ${items.map((p) => `<div class="chip ${overallStatus(p)}" data-id="${p.id}" title="${esc(p.caption)}">
-        ${[...new Set(p.targets.map((t) => t.platform))].map((pl) => `${icon(pl)}`).join('')}
-        <b>${fmtTime(p.scheduled_at)}</b> <span class="text">${esc(p.caption || (p.media_type === 'video' ? 'Video' : 'Photo'))}</span>
-      </div>`).join('')}
-    </div>`;
+  if (m === 'month') {
+    const MAX = 6;
+    let html = '';
+    for (let i = 0; i < 42; i++) {
+      const d = addDays(first, i);
+      const items = byDay[dayKey(d)] || [];
+      html += `<div class="day ${d.getMonth() !== calMonth.getMonth() ? 'other' : ''} ${dayKey(d) === today ? 'today' : ''}" data-date="${d.toISOString()}">
+        <div class="day-head"><span class="num">${d.getDate()}</span>${items.length ? `<span class="day-count">${items.length}</span>` : ''}</div>
+        ${items.slice(0, MAX).map((p) => `<div class="chip ${overallStatus(p)}" data-id="${p.id}">
+          ${thumb(p, 'chip-thumb')}
+          <span class="chip-body"><span class="chip-top"><b>${fmtTime(p.scheduled_at)}</b><span class="chip-icons">${platformsOf(p).map(icon).join('')}</span></span>
+          <span class="text">${esc(label(p))}</span></span>
+        </div>`).join('')}
+        ${items.length > MAX ? `<button class="more" data-day="${d.toISOString()}">+${items.length - MAX} more</button>` : ''}
+      </div>`;
+    }
+    $('#cal-days').innerHTML = html;
+    $('#cal-days').onclick = (e) => {
+      const chip = e.target.closest('.chip');
+      if (chip) return openPost(chip.dataset.id);
+      const more = e.target.closest('.more');
+      if (more) { calMode = 'week'; calWeek = startOfWeek(new Date(more.dataset.day)); return renderCalendar(); }
+      const day = e.target.closest('.day');
+      if (day) location.hash = `compose?date=${encodeURIComponent(day.dataset.date)}`;
+    };
+    attachHoverPreview(posts);
+    return;
   }
-  $('#cal-days').innerHTML = html;
 
-  // Phone view: a simple list of this month's days that have posts.
-  const inMonth = posts.filter((p) => new Date(p.scheduled_at).getMonth() === calMonth.getMonth())
-    .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+  // List: this month's days that have posts.
+  const inMonth = posts.filter((p) => new Date(p.scheduled_at).getMonth() === calMonth.getMonth());
   const groups = {};
   inMonth.forEach((p) => (groups[dayKey(new Date(p.scheduled_at))] ||= []).push(p));
   $('#cal-agenda').innerHTML = Object.values(groups).map((list) => {
     const d = new Date(list[0].scheduled_at);
-    const isToday = dayKey(d) === today;
-    return `<div class="ag-day${isToday ? ' today' : ''}">
+    return `<div class="ag-day${dayKey(d) === today ? ' today' : ''}">
       <div class="ag-date"><span>${d.toLocaleDateString([], { weekday: 'short' })}</span><b>${d.getDate()}</b></div>
-      <div class="ag-list">${list.map((p) => `<button class="ag-item ${overallStatus(p)}" data-id="${p.id}">
-        ${p.media_type && p.media_url ? (p.media_type === 'video' ? `<video class="ag-thumb" src="${p.media_url}#t=0.5" muted playsinline preload="metadata"></video>` : `<img class="ag-thumb" src="${p.media_url}" alt="" loading="lazy">`) : '<span class="ag-thumb"></span>'}
-        <span class="ag-body"><span class="ag-top"><b>${fmtTime(p.scheduled_at)}</b><span class="ag-icons">${[...new Set(p.targets.map((t) => t.platform))].map((pl) => icon(pl)).join('')}</span></span>
-        <span class="ag-text">${esc(p.title || p.caption || (p.media_type === 'video' ? 'Video' : 'Photo'))}</span>
-        <span class="status ${overallStatus(p)}">${overallStatus(p)}</span></span>
-      </button>`).join('')}</div></div>`;
+      <div class="ag-list">${list.map(postCard).join('')}</div></div>`;
   }).join('') || '<p class="empty">No posts this month yet.<br><a class="btn primary" href="#compose">+ New post</a></p>';
-  $('#cal-agenda').onclick = (e) => { const it = e.target.closest('.ag-item'); if (it) openPost(it.dataset.id); };
-  $('#cal-days').onclick = (e) => {
-    const chip = e.target.closest('.chip');
-    if (chip) return openPost(chip.dataset.id);
-    const day = e.target.closest('.day');
-    if (day) location.hash = `compose?date=${encodeURIComponent(day.dataset.date)}`;
-  };
+  $('#cal-agenda').onclick = (e) => { const it = e.target.closest('.pcard'); if (it) openPost(it.dataset.id); };
 }
+
+// Mac: hovering a post in the month view shows a bigger preview with the full caption.
+function attachHoverPreview(posts) {
+  const tip = $('#hover-card');
+  const byId = Object.fromEntries(posts.map((p) => [p.id, p]));
+  let timer;
+  $('#cal-days').onmouseover = (e) => {
+    const chip = e.target.closest('.chip');
+    clearTimeout(timer);
+    if (!chip) { tip.hidden = true; return; }
+    timer = setTimeout(() => {
+      const p = byId[chip.dataset.id];
+      if (!p) return;
+      const st = overallStatus(p);
+      tip.innerHTML = `${p.media_url ? (p.media_type === 'video' ? `<video src="${p.media_url}#t=0.5" muted playsinline preload="metadata"></video>` : `<img src="${p.media_url}" alt="">`) : ''}
+        <div class="hc-body"><div class="hc-top"><b>${fmtDateTime(p.scheduled_at)}</b><span class="status ${st}">${STATUS_WORD[st]}</span></div>
+        ${p.title ? `<b class="hc-title">${esc(p.title)}</b>` : ''}
+        <p>${esc(p.caption || '')}</p>
+        <div class="hc-targets">${p.targets.map((t) => `<span>${icon(t.platform)}${esc(t.account_name)}</span>`).join('')}</div></div>`;
+      const r = chip.getBoundingClientRect();
+      tip.hidden = false;
+      const w = tip.offsetWidth, h = tip.offsetHeight;
+      let x = r.right + 10; if (x + w > innerWidth - 10) x = r.left - w - 10;
+      let y = Math.min(Math.max(10, r.top - 20), innerHeight - h - 10);
+      tip.style.left = `${Math.max(10, x)}px`; tip.style.top = `${y}px`;
+    }, 250);
+  };
+  $('#cal-days').onmouseleave = () => { clearTimeout(timer); tip.hidden = true; };
+}
+addEventListener('scroll', () => { const t = $('#hover-card'); if (t) t.hidden = true; }, { passive: true });
+let wasPhone = isPhone();
+addEventListener('resize', () => { if (isPhone() !== wasPhone) { wasPhone = isPhone(); if (!$('#view-calendar').hidden) renderCalendar(); } });
 
 async function openPost(id) {
   const p = await api(`/posts/${id}`);

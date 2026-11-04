@@ -43,14 +43,19 @@
           <button class="btn ghost" id="cal-today">Today</button>
         </div>
         <div class="row">
+          <div class="seg" id="cal-mode" role="tablist">
+            <button type="button" data-mode="month">Month</button><button type="button" data-mode="week">Week</button><button type="button" data-mode="list">List</button>
+          </div>
           <label class="btn ghost" title="Add many posts at once from a post bundle file">Import posts
             <input type="file" id="import-file" accept=".json,application/json" hidden>
           </label>
           <a class="btn primary hide-mobile" href="#compose">+ New post</a>
         </div>
       </header>
+      <div id="cal-overview" class="overview"></div>
       <div class="cal-grid" id="cal-weekdays"></div>
       <div class="cal-grid" id="cal-days"></div>
+      <div id="cal-week" class="week"></div>
       <div id="cal-agenda" class="agenda"></div>
     </section>
 
@@ -130,6 +135,7 @@
   </main>
 
   <dialog id="post-dialog"></dialog>
+  <div id="hover-card" class="hover-card" hidden></div>
   <script src="/app.js"></script>
 </body>
 </html>
