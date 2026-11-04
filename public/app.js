@@ -1,6 +1,17 @@
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// Small platform logos shown next to accounts and posts.
+const ICONS = {
+  facebook: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#1877F2"/><path d="M13.4 19.5v-6.2h2.1l.3-2.4h-2.4V9.4c0-.7.2-1.2 1.2-1.2h1.3V6.1c-.2 0-1-.1-1.9-.1-1.9 0-3.2 1.2-3.2 3.3v1.8H8.7v2.4h2.1v6.2z" fill="#fff"/></svg>',
+  instagram: '<svg viewBox="0 0 24 24"><defs><linearGradient id="igg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#FEDA75"/><stop offset=".35" stop-color="#FA7E1E"/><stop offset=".6" stop-color="#D62976"/><stop offset=".8" stop-color="#962FBF"/><stop offset="1" stop-color="#4F5BD5"/></linearGradient></defs><rect width="24" height="24" rx="6" fill="url(#igg)"/><rect x="5.5" y="5.5" width="13" height="13" rx="4" fill="none" stroke="#fff" stroke-width="1.8"/><circle cx="12" cy="12" r="3.1" fill="none" stroke="#fff" stroke-width="1.8"/><circle cx="16.1" cy="7.9" r="1" fill="#fff"/></svg>',
+  youtube: '<svg viewBox="0 0 24 24"><rect y="4" width="24" height="16" rx="4.5" fill="#FF0000"/><path d="M9.8 8.4v7.2l6.2-3.6z" fill="#fff"/></svg>',
+  tiktok: '<svg viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#000"/><path d="M15.6 5h-2.4v9.6a2.1 2.1 0 1 1-1.6-2v-2.5a4.5 4.5 0 1 0 4 4.5V9.6a5.6 5.6 0 0 0 3.2 1V8.2A3.2 3.2 0 0 1 15.6 5z" fill="#25F4EE" transform="translate(-.5 -.4)"/><path d="M15.6 5h-2.4v9.6a2.1 2.1 0 1 1-1.6-2v-2.5a4.5 4.5 0 1 0 4 4.5V9.6a5.6 5.6 0 0 0 3.2 1V8.2A3.2 3.2 0 0 1 15.6 5z" fill="#FE2C55" transform="translate(.5 .4)"/><path d="M15.6 5h-2.4v9.6a2.1 2.1 0 1 1-1.6-2v-2.5a4.5 4.5 0 1 0 4 4.5V9.6a5.6 5.6 0 0 0 3.2 1V8.2A3.2 3.2 0 0 1 15.6 5z" fill="#fff"/></svg>',
+};
+const NAMES = { facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok' };
+let iconN = 0; // each Instagram logo needs its own gradient id, or hidden copies break it
+const icon = (pl) => `<span class="picon" title="${NAMES[pl] || pl}">${(ICONS[pl] || '').replace(/igg/g, `igg${++iconN}`)}</span>`;
+
 async function api(path, opts = {}) {
   const res = await fetch(`/api${path}`, opts);
   if (res.status === 401) { location.href = '/login.html'; throw new Error('Please sign in.'); }
@@ -76,7 +87,7 @@ async function renderCalendar() {
     html += `<div class="day ${d.getMonth() !== calMonth.getMonth() ? 'other' : ''} ${dayKey(d) === today ? 'today' : ''}" data-date="${d.toISOString()}">
       <span class="num">${d.getDate()}</span>
       ${items.map((p) => `<div class="chip ${overallStatus(p)}" data-id="${p.id}" title="${esc(p.caption)}">
-        ${[...new Set(p.targets.map((t) => t.platform))].map((pl) => `<span class="dot ${pl}"></span>`).join('')}
+        ${[...new Set(p.targets.map((t) => t.platform))].map((pl) => `${icon(pl)}`).join('')}
         <b>${fmtTime(p.scheduled_at)}</b> <span class="text">${esc(p.caption || (p.media_type === 'video' ? 'Video' : 'Photo'))}</span>
       </div>`).join('')}
     </div>`;
@@ -101,7 +112,7 @@ async function openPost(id) {
     ${editable ? `<textarea id="dlg-caption" rows="5">${esc(p.caption)}</textarea>
       <p><input type="datetime-local" id="dlg-when" value="${toLocalInput(new Date(p.scheduled_at))}"></p>`
       : `<p style="white-space:pre-wrap">${esc(p.caption)}</p>`}
-    ${p.targets.map((t) => `<div class="target"><span class="dot ${t.platform}"></span>${esc(t.account_name)}
+    ${p.targets.map((t) => `<div class="target">${icon(t.platform)}${esc(t.account_name)}
       <span class="status ${t.status}">${t.status}</span>
       ${t.permalink ? `<a href="${esc(t.permalink)}" target="_blank" rel="noopener">View</a>` : ''}
       ${t.error ? `<small class="muted">${esc(t.error)}</small>` : ''}</div>`).join('')}
@@ -140,7 +151,7 @@ function renderCompose(dateIso) {
   const box = $('#compose-accounts');
   box.innerHTML = accounts.length
     ? accounts.map((a) => `<label><input type="checkbox" name="accountIds" value="${a.id}" data-platform="${a.platform}"${accounts.length === 1 ? ' checked' : ''}>
-        <span class="dot ${a.platform}"></span>${esc(a.username ? '@' + a.username : a.name)}</label>`).join('')
+        ${icon(a.platform)}${esc(a.username ? '@' + a.username : a.name)}</label>`).join('')
     : `<span class="muted">No accounts yet. <a href="#accounts">Connect one first.</a></span>`;
   let when = dateIso ? new Date(dateIso) : new Date(Date.now() + 3600e3);
   if (dateIso) when.setHours(9, 0, 0, 0);
@@ -236,13 +247,13 @@ async function renderAnalytics() {
   followers.forEach((f) => (byAcct[f.account_id] ||= { ...f, series: [] }).series.push(f.followers));
   $('#an-followers').innerHTML = Object.values(byAcct).map((a) => {
     const first = a.series[0], last = a.series[a.series.length - 1], diff = last - first;
-    return `<div class="tile"><div class="label"><span class="dot ${a.platform}"></span> ${esc(a.name)}</div>
+    return `<div class="tile"><div class="label">${icon(a.platform)} ${esc(a.name)}</div>
       <div class="value">${last.toLocaleString()} <small class="muted" style="font-size:.85rem">${diff >= 0 ? '+' : ''}${diff}</small></div>${sparkline(a.series)}</div>`;
   }).join('') || '<p class="muted">No follower data yet. Click "Refresh stats", and it will also update automatically every few hours.</p>';
 
   $('#an-table tbody').innerHTML = posts.map((p) => `<tr>
     <td>${p.permalink ? `<a href="${esc(p.permalink)}" target="_blank" rel="noopener">${esc(p.caption || '(no caption)')}</a>` : esc(p.caption || '(no caption)')}</td>
-    <td><span class="dot ${p.platform}"></span> ${esc(p.account_name)}</td>
+    <td>${icon(p.platform)} ${esc(p.account_name)}</td>
     <td>${fmtDateTime(p.published_at)}</td>
     <td>${p.likes ?? '–'}</td><td>${p.comments ?? '–'}</td><td>${p.shares ?? '–'}</td><td>${p.views ?? '–'}</td></tr>`).join('')
     || '<tr><td colspan="7" class="muted">Nothing published in this period yet.</td></tr>';
@@ -263,7 +274,7 @@ async function renderAccounts() {
 
   $('#account-list').innerHTML = accounts.map((a) => `<div class="account">
       ${a.picture_url ? `<img src="${esc(a.picture_url)}" alt="">` : '<span class="avatar"></span>'}
-      <div class="grow"><b>${esc(a.name)}</b><div class="muted"><span class="dot ${a.platform}"></span> ${a.platform === 'facebook' ? 'Facebook Page' : ({ youtube: 'YouTube channel', tiktok: 'TikTok' }[a.platform] || 'Instagram') + (a.username ? ' · @' + esc(a.username) : '')}</div></div>
+      <div class="grow"><b>${esc(a.name)}</b><div class="muted">${icon(a.platform)} ${a.platform === 'facebook' ? 'Facebook Page' : ({ youtube: 'YouTube channel', tiktok: 'TikTok' }[a.platform] || 'Instagram') + (a.username ? ' · @' + esc(a.username) : '')}</div></div>
       <button class="btn danger" data-remove="${a.id}">Remove</button></div>`).join('')
     || '<p class="muted">No accounts connected yet.</p>';
   $('#account-list').onclick = async (e) => {
