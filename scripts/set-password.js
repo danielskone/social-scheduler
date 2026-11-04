@@ -7,7 +7,8 @@ const envPath = path.join(__dirname, '..', '.env');
 function ask(question) {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    rl._writeToOutput = (s) => { if (s.includes(question)) rl.output.write(s); else if (s !== '\r\n' && s !== '\n') rl.output.write('*'); };
+    // Show one star per character, never the text itself (also when a line is redrawn).
+      rl._writeToOutput = (s) => { if (s.includes(question)) rl.output.write(`\r${question}${'*'.repeat(rl.line.length)}\x1b[K`); else if (s !== '\r\n' && s !== '\n') rl.output.write('*'.repeat([...s].length)); };
     rl.question(question, (a) => { rl.close(); process.stdout.write('\n'); resolve(a); });
   });
 }
