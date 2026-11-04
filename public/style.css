@@ -98,7 +98,10 @@ dialog img, dialog video { max-width: 100%; border-radius: 8px; }
 .status { font-size: .75rem; padding: 2px 8px; border-radius: 999px; background: var(--bg); }
 .status.published { color: var(--ok); } .status.failed { color: var(--bad); } .status.scheduled { color: var(--accent); }
 
+.legal { font-size: .72rem; color: var(--muted); margin-top: 24px; line-height: 1.5; }
+
 @media (max-width: 800px) {
+  .legal { display: none; }
   body { flex-direction: column; }
   .sidebar { width: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 10px; }
   .brand { display: none; }
