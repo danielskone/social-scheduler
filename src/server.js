@@ -52,7 +52,8 @@ app.get('/auth/facebook/callback', async (req, res) => {
     saveAccounts(accounts);
     res.redirect(`/#accounts?connected=${accounts.length}`);
   } catch (err) {
-    res.redirect(`/#accounts?error=${encodeURIComponent(err.message)}`);
+    console.error('[connect]', err);
+    res.redirect(`/#accounts?error=${encodeURIComponent(errText(err))}`);
   }
 });
 
@@ -74,7 +75,8 @@ app.get('/auth/youtube/callback', async (req, res) => {
     saveAccounts(accounts);
     res.redirect(`/#accounts?connected=${accounts.length}`);
   } catch (err) {
-    res.redirect(`/#accounts?error=${encodeURIComponent(err.message)}`);
+    console.error('[connect]', err);
+    res.redirect(`/#accounts?error=${encodeURIComponent(errText(err))}`);
   }
 });
 
@@ -96,9 +98,16 @@ app.get('/auth/tiktok/callback', async (req, res) => {
     saveAccounts(accounts);
     res.redirect(`/#accounts?connected=${accounts.length}`);
   } catch (err) {
-    res.redirect(`/#accounts?error=${encodeURIComponent(err.message)}`);
+    console.error('[connect]', err);
+    res.redirect(`/#accounts?error=${encodeURIComponent(errText(err))}`);
   }
 });
+
+// "fetch failed" alone says nothing; add the network reason (e.g. ENOTFOUND, certificate).
+function errText(err) {
+  const c = err && err.cause;
+  return c ? `${err.message} (${[c.code, c.message].filter(Boolean).join(': ')})` : String(err.message || err);
+}
 
 function saveAccounts(accounts) {
   const upsert = db.prepare(`
