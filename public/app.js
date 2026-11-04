@@ -366,7 +366,27 @@ $('#import-file').onchange = async (e) => {
 };
 
 // ---------- Analytics ----------
-$('#an-days').onchange = renderAnalytics;
+const PL_COLOR = { facebook: '#1877F2', instagram: '#D6249F', youtube: '#FF0000', tiktok: 'var(--tiktok)' };
+let anDays = (() => { try { return Number(localStorage.getItem('anDays')) || 30; } catch { return 30; } })();
+let anPlatform = 'all';
+let anSort = { key: 'published_at', dir: -1 };
+let anData = null;
+let anShowAll = false;
+
+$('#an-range').onclick = (e) => {
+  const b = e.target.closest('button[data-days]');
+  if (!b) return;
+  anDays = Number(b.dataset.days);
+  try { localStorage.setItem('anDays', anDays); } catch { /* private mode */ }
+  renderAnalytics();
+};
+$('#an-filter').onclick = (e) => { const b = e.target.closest('button[data-pl]'); if (b) { anPlatform = b.dataset.pl; drawAnalytics(); } };
+$('#an-table thead').onclick = (e) => {
+  const th = e.target.closest('th[data-sort]');
+  if (!th) return;
+  anSort = { key: th.dataset.sort, dir: anSort.key === th.dataset.sort ? -anSort.dir : (['caption', 'account_name'].includes(th.dataset.sort) ? 1 : -1) };
+  drawAnalytics();
+};
 $('#an-refresh').onclick = async (e) => {
   e.target.disabled = true; e.target.textContent = 'Refreshing…';
   try { await api('/analytics/refresh', { method: 'POST' }); await renderAnalytics(); }
@@ -376,31 +396,141 @@ $('#an-refresh').onclick = async (e) => {
 function sparkline(values) {
   if (values.length < 2) return '';
   const min = Math.min(...values), max = Math.max(...values), span = max - min || 1;
-  const pts = values.map((v, i) => `${(i / (values.length - 1)) * 100},${48 - ((v - min) / span) * 44}`).join(' ');
-  return `<svg viewBox="0 0 100 50" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+  const pts = values.map((v, i) => `${(i / (values.length - 1)) * 100},${46 - ((v - min) / span) * 40}`).join(' ');
+  return `<svg viewBox="0 0 100 50" preserveAspectRatio="none"><defs><linearGradient id="spk" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".25"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+    <polygon points="0,50 ${pts} 100,50" fill="url(#spk)"/><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2.2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
+}
+
+const eng = (p) => (p.likes || 0) + (p.comments || 0) + (p.shares || 0);
+const fmtN = (n) => (n >= 10000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : Math.round(n).toLocaleString());
+function change(now, before) {
+  if (!before && !now) return '';
+  if (!before) return '<span class="chg up">new</span>';
+  const pct = Math.round(((now - before) / before) * 100);
+  return `<span class="chg ${pct > 0 ? 'up' : pct < 0 ? 'down' : ''}">${pct > 0 ? '▲' : pct < 0 ? '▼' : ''} ${Math.abs(pct)}%</span>`;
 }
 
 async function renderAnalytics() {
-  const { posts, followers } = await api(`/analytics?days=${$('#an-days').value}`);
-  const sum = (k) => posts.reduce((n, p) => n + (p[k] || 0), 0);
-  $('#an-tiles').innerHTML = [
-    ['Posts published', posts.length], ['Likes', sum('likes')], ['Comments', sum('comments')], ['Shares', sum('shares')], ['Views', sum('views')],
-  ].map(([l, v]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v.toLocaleString()}</div></div>`).join('');
+  document.querySelectorAll('#an-range button').forEach((b) => b.classList.toggle('on', Number(b.dataset.days) === anDays));
+  anData = await api(`/analytics?days=${anDays}`);
+  drawAnalytics();
+}
 
+function drawAnalytics() {
+  const { posts: allPosts, previous: allPrev, followers, days, failed } = anData;
+  const platforms = [...new Set([...allPosts.map((p) => p.platform), ...accounts.map((a) => a.platform)])];
+  $('#an-filter').innerHTML = ['all', ...platforms].map((pl) => `<button type="button" data-pl="${pl}" class="${anPlatform === pl ? 'on' : ''}">${pl === 'all' ? 'All platforms' : `${icon(pl)}${NAMES[pl]}`}</button>`).join('');
+  const pick = (list) => (anPlatform === 'all' ? list : list.filter((p) => p.platform === anPlatform));
+  const posts = pick(allPosts), prev = pick(allPrev);
+  const sum = (list, k) => list.reduce((n, p) => n + (k === 'eng' ? eng(p) : (p[k] || 0)), 0);
+
+  // Tiles
+  const tiles = [
+    ['Posts', posts.length, prev.length, '📣'],
+    ['Engagement', sum(posts, 'eng'), sum(prev, 'eng'), '🔥'],
+    ['Likes', sum(posts, 'likes'), sum(prev, 'likes'), '❤️'],
+    ['Comments', sum(posts, 'comments'), sum(prev, 'comments'), '💬'],
+    ['Shares', sum(posts, 'shares'), sum(prev, 'shares'), '🔁'],
+    ['Views', sum(posts, 'views'), sum(prev, 'views'), '👀'],
+    ['Avg. per post', posts.length ? sum(posts, 'eng') / posts.length : 0, prev.length ? sum(prev, 'eng') / prev.length : 0, '⭐'],
+  ];
+  $('#an-tiles').innerHTML = tiles.map(([l, v, b, e]) => `<div class="tile"><div class="label"><span class="emo">${e}</span>${l}</div>
+    <div class="value">${fmtN(v)}</div><div class="sub">${change(v, b)} <span class="muted">vs last ${days} days</span></div></div>`).join('')
+    + (failed ? `<a class="tile bad" href="#calendar"><div class="label"><span class="emo">⚠️</span>Failed posts</div><div class="value">${failed}</div><div class="sub muted">Open the calendar to retry</div></a>` : '');
+
+  // Engagement by day, stacked by platform
+  const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - days + 1);
+  const buckets = [...Array(days)].map(() => ({}));
+  const postsPerDay = Array(days).fill(0);
+  posts.forEach((p) => {
+    const i = Math.floor((new Date(p.published_at) - start) / 864e5);
+    if (i < 0 || i >= days) return;
+    buckets[i][p.platform] = (buckets[i][p.platform] || 0) + eng(p);
+    postsPerDay[i]++;
+  });
+  const totals = buckets.map((b) => Object.values(b).reduce((a, c) => a + c, 0));
+  const max = Math.max(1, ...totals);
+  const W = 100 / days;
+  const bars = buckets.map((b, i) => {
+    let y = 100;
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    const tip = `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}: ${totals[i]} engagement, ${postsPerDay[i]} post(s)`;
+    const segs = Object.entries(b).map(([pl, v]) => { const h = (v / max) * 92; y -= h; return `<rect x="${i * W + W * 0.15}" y="${y}" width="${W * 0.7}" height="${h}" fill="${PL_COLOR[pl]}" rx="${Math.min(W * 0.2, 1)}"/>`; }).join('');
+    const dot = postsPerDay[i] && !totals[i] ? `<rect x="${i * W + W * 0.15}" y="98" width="${W * 0.7}" height="2" fill="var(--line)"/>` : '';
+    return `<g><title>${tip}</title><rect x="${i * W}" y="0" width="${W}" height="100" fill="transparent"/>${segs}${dot}</g>`;
+  }).join('');
+  const lbl = (i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d.toLocaleDateString([], { month: 'short', day: 'numeric' }); };
+  $('#an-chart').innerHTML = posts.length
+    ? `<div class="chart"><div class="chart-max">${fmtN(max)}</div><svg viewBox="0 0 100 100" preserveAspectRatio="none">${bars}</svg></div>
+       <div class="chart-x"><span>${lbl(0)}</span><span>${lbl(Math.floor(days / 2))}</span><span>Today</span></div>
+       <div class="legend">${[...new Set(posts.map((p) => p.platform))].map((pl) => `<span><i style="background:${PL_COLOR[pl]}"></i>${NAMES[pl]}</span>`).join('')}</div>`
+    : '<p class="empty small">No published posts in this period yet.</p>';
+  $('#an-chart-note').textContent = posts.length ? `Best day: ${lbl(totals.indexOf(Math.max(...totals)))}` : '';
+
+  // By platform
+  const byPl = {};
+  allPosts.forEach((p) => { const x = (byPl[p.platform] ||= { posts: 0, likes: 0, comments: 0, shares: 0, views: 0, eng: 0 }); x.posts++; ['likes', 'comments', 'shares', 'views'].forEach((k) => (x[k] += p[k] || 0)); x.eng += eng(p); });
+  const maxEng = Math.max(1, ...Object.values(byPl).map((x) => x.eng));
+  $('#an-platforms').innerHTML = Object.entries(byPl).sort((a, b) => b[1].eng - a[1].eng).map(([pl, x]) => `
+    <div class="plrow ${anPlatform !== 'all' && anPlatform !== pl ? 'dim' : ''}">
+      <div class="plrow-head">${icon(pl)}<b>${NAMES[pl]}</b><span class="muted small">${x.posts} post${x.posts === 1 ? '' : 's'}</span><b class="plrow-eng">${fmtN(x.eng)}</b></div>
+      <div class="bar"><i style="width:${(x.eng / maxEng) * 100}%;background:${PL_COLOR[pl]}"></i></div>
+      <div class="plrow-stats"><span>❤️ ${fmtN(x.likes)}</span><span>💬 ${fmtN(x.comments)}</span><span>🔁 ${fmtN(x.shares)}</span>${x.views ? `<span>👀 ${fmtN(x.views)}</span>` : ''}<span class="muted">avg ${fmtN(x.eng / x.posts)}/post</span></div>
+    </div>`).join('') || '<p class="empty small">Nothing published yet.</p>';
+
+  // Top posts
+  const top = [...posts].sort((a, b) => eng(b) - eng(a)).slice(0, 5);
+  $('#an-top').innerHTML = top.map((p, i) => `<a class="top-post" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''}>
+    <span class="rank">${i + 1}</span>${thumb(p, 'tp-thumb')}
+    <span class="tp-body"><span class="tp-text">${esc(p.title || p.caption || '(no caption)')}</span>
+      <span class="tp-meta">${icon(p.platform)} ${esc(p.account_name)} · ${new Date(p.published_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span></span>
+    <span class="tp-nums"><b>${fmtN(eng(p))}</b><span class="muted small">❤️ ${p.likes ?? 0} · 💬 ${p.comments ?? 0}</span></span></a>`).join('') || '<p class="empty small">No published posts in this period yet.</p>';
+
+  // Best weekday + best hours
+  const wd = [...Array(7)].map(() => ({ n: 0, e: 0 })), hr = {};
+  posts.forEach((p) => {
+    const d = new Date(p.published_at);
+    const w = (d.getDay() + 6) % 7; wd[w].n++; wd[w].e += eng(p);
+    const h = d.getHours(); (hr[h] ||= { n: 0, e: 0 }); hr[h].n++; hr[h].e += eng(p);
+  });
+  const avg = wd.map((x) => (x.n ? x.e / x.n : 0));
+  const maxAvg = Math.max(1, ...avg), best = avg.indexOf(Math.max(...avg));
+  $('#an-days-chart').innerHTML = posts.length ? `<div class="wd">${WEEKDAYS.map((d, i) => `<div class="wd-col ${i === best && avg[i] ? 'best' : ''}" title="${wd[i].n} post(s), avg ${fmtN(avg[i])}">
+      <span class="wd-val">${avg[i] ? fmtN(avg[i]) : ''}</span><div class="wd-bar"><i style="height:${(avg[i] / maxAvg) * 100}%"></i></div><span>${d}</span></div>`).join('')}</div>` : '<p class="empty small">Post a few times and this fills in.</p>';
+  const hours = Object.entries(hr).map(([h, x]) => ({ h: Number(h), avg: x.e / x.n, n: x.n })).sort((a, b) => b.avg - a.avg).slice(0, 3);
+  const hName = (h) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric' });
+  $('#an-hours').innerHTML = hours.map((x, i) => `<div class="hour"><span class="medal">${['🥇', '🥈', '🥉'][i]}</span><b>${hName(x.h)}</b><span class="muted small">${x.n} post${x.n === 1 ? '' : 's'}</span><b class="hour-avg">${fmtN(x.avg)} avg</b></div>`).join('') || '<p class="muted small">Not enough posts yet.</p>';
+
+  // Followers
+  const since = anData.since.slice(0, 10);
   const byAcct = {};
-  followers.forEach((f) => (byAcct[f.account_id] ||= { ...f, series: [] }).series.push(f.followers));
+  followers.filter((f) => anPlatform === 'all' || f.platform === anPlatform)
+    .forEach((f) => (byAcct[f.account_id] ||= { ...f, series: [], prior: null }).series.push(f));
   $('#an-followers').innerHTML = Object.values(byAcct).map((a) => {
-    const first = a.series[0], last = a.series[a.series.length - 1], diff = last - first;
-    return `<div class="tile"><div class="label">${icon(a.platform)} ${esc(a.name)}</div>
-      <div class="value">${last.toLocaleString()} <small class="muted" style="font-size:.85rem">${diff >= 0 ? '+' : ''}${diff}</small></div>${sparkline(a.series)}</div>`;
+    const inRange = a.series.filter((f) => f.taken_on >= since).map((f) => f.followers);
+    const all = a.series.map((f) => f.followers);
+    const last = all[all.length - 1], first = inRange[0] ?? last, diff = last - first;
+    return `<div class="tile follower"><div class="label">${a.picture_url ? `<img class="f-pic" src="${esc(a.picture_url)}" alt="">` : ''}${icon(a.platform)} <span class="f-name">${esc(a.name)}</span></div>
+      <div class="value">${last.toLocaleString()} <span class="chg ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '+' : ''}${diff.toLocaleString()}</span></div>${sparkline(inRange.length > 1 ? inRange : all)}</div>`;
   }).join('') || '<p class="muted">No follower data yet. Click "Refresh stats", and it will also update automatically every few hours.</p>';
 
-  $('#an-table tbody').innerHTML = posts.map((p) => `<tr>
-    <td>${p.permalink ? `<a href="${esc(p.permalink)}" target="_blank" rel="noopener">${esc(p.caption || '(no caption)')}</a>` : esc(p.caption || '(no caption)')}</td>
-    <td>${icon(p.platform)} ${esc(p.account_name)}</td>
-    <td>${fmtDateTime(p.published_at)}</td>
-    <td>${p.likes ?? '–'}</td><td>${p.comments ?? '–'}</td><td>${p.shares ?? '–'}</td><td>${p.views ?? '–'}</td></tr>`).join('')
-    || '<tr><td colspan="7" class="muted">Nothing published in this period yet.</td></tr>';
+  // Table
+  const k = anSort.key;
+  const rows = [...posts].sort((a, b) => {
+    const va = k === 'eng' ? eng(a) : a[k] ?? -1, vb = k === 'eng' ? eng(b) : b[k] ?? -1;
+    return (va > vb ? 1 : va < vb ? -1 : 0) * anSort.dir;
+  });
+  document.querySelectorAll('#an-table th').forEach((th) => { th.classList.toggle('sorted', th.dataset.sort === k); th.dataset.dir = anSort.dir > 0 ? '▲' : '▼'; });
+  $('#an-count').textContent = `(${posts.length})`;
+  const LIMIT = 20;
+  $('#an-more').innerHTML = rows.length > LIMIT ? `<button class="btn ghost show-all" type="button">${anShowAll ? 'Show fewer' : `Show all ${rows.length} posts`}</button>` : '';
+  $('#an-more').onclick = () => { anShowAll = !anShowAll; drawAnalytics(); };
+  $('#an-table tbody').innerHTML = (anShowAll ? rows : rows.slice(0, LIMIT)).map((p) => `<tr>
+    <td><div class="t-post">${thumb(p, 't-thumb')}${p.permalink ? `<a href="${esc(p.permalink)}" target="_blank" rel="noopener">${esc(p.title || p.caption || '(no caption)')}</a>` : `<span>${esc(p.title || p.caption || '(no caption)')}</span>`}</div></td>
+    <td><span class="t-acct">${icon(p.platform)} ${esc(p.account_name)}</span></td>
+    <td>${new Date(p.published_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
+    <td>${p.likes ?? '–'}</td><td>${p.comments ?? '–'}</td><td>${p.shares ?? '–'}</td><td>${p.views ?? '–'}</td><td><b>${eng(p)}</b></td></tr>`).join('')
+    || '<tr><td colspan="8" class="muted">Nothing published in this period yet.</td></tr>';
 }
 
 // ---------- Accounts ----------

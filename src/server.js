@@ -297,15 +297,21 @@ api.post('/import', bundleUpload.single('bundle'), (req, res) => {
 api.get('/analytics', (req, res) => {
   const days = Number(req.query.days || 30);
   const since = new Date(Date.now() - days * 864e5).toISOString();
-  const posts = db.prepare(`
-    SELECT t.*, p.caption, p.media_type, p.media_file, a.platform, a.name AS account_name
+  const before = new Date(Date.now() - 2 * days * 864e5).toISOString();
+  const rows = (from, to) => db.prepare(`
+    SELECT t.*, p.caption, p.title, p.media_type, p.media_file, p.media_source_url, p.scheduled_at, a.platform, a.name AS account_name
     FROM post_targets t JOIN posts p ON p.id=t.post_id JOIN accounts a ON a.id=t.account_id
-    WHERE t.status='published' AND t.published_at >= ? ORDER BY t.published_at DESC`).all(since);
+    WHERE t.status='published' AND t.published_at >= ? AND t.published_at < ? ORDER BY t.published_at DESC`).all(from, to);
+  const withMedia = (p) => ({ ...p, media_url: p.media_file ? `/media/${p.media_file}` : p.media_source_url || null });
+  const posts = rows(since, '9999').map(withMedia);
+  const previous = rows(before, since).map(({ platform, likes, comments, shares, views }) => ({ platform, likes, comments, shares, views }));
+  const failed = db.prepare(`SELECT COUNT(*) AS n FROM post_targets t JOIN posts p ON p.id=t.post_id
+    WHERE t.status='failed' AND p.scheduled_at >= ?`).get(since).n;
   const followers = db.prepare(`
-    SELECT a.id AS account_id, a.platform, a.name, f.taken_on, f.followers
+    SELECT a.id AS account_id, a.platform, a.name, a.picture_url, f.taken_on, f.followers
     FROM follower_snapshots f JOIN accounts a ON a.id=f.account_id
-    WHERE f.taken_on >= ? ORDER BY f.taken_on`).all(since.slice(0, 10));
-  res.json({ posts, followers });
+    WHERE f.taken_on >= ? ORDER BY f.taken_on`).all(before.slice(0, 10));
+  res.json({ days, posts, previous, failed, followers, since });
 });
 
 api.post('/analytics/refresh', async (req, res) => {
