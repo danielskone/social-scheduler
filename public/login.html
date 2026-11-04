@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Viral Post</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Viral Post">
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body { display: grid; place-items: center; min-height: 100vh; padding: 16px; }
+    .login { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; text-align: center; }
+    .login img { width: 72px; height: 72px; border-radius: 16px; }
+    .login input { width: 100%; font-size: 16px; padding: 12px; margin: 16px 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); box-sizing: border-box; }
+    .login button { width: 100%; font-size: 16px; padding: 12px; }
+    .err { color: var(--bad); min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <form class="login" method="post" action="/login">
+    <img src="/icons/apple-touch-icon.png" alt="">
+    <h1>Viral Post</h1>
+    <input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus required>
+    <button class="btn primary" type="submit">Sign in</button>
+    <p class="err" id="err"></p>
+  </form>
+  <script>
+    const e = new URLSearchParams(location.search).get('error');
+    if (e) document.getElementById('err').textContent = e === 'wait' ? 'Too many tries. Wait 15 minutes.' : 'Wrong password. Try again.';
+  </script>
+</body>
+</html>

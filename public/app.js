@@ -3,6 +3,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 async function api(path, opts = {}) {
   const res = await fetch(`/api${path}`, opts);
+  if (res.status === 401) { location.href = '/login.html'; throw new Error('Please sign in.'); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;

@@ -18,15 +18,50 @@ app.use(express.json());
 app.use('/media', express.static(config.mediaDir, { fallthrough: false }));
 
 // ---------- Password protection ----------
-app.use((req, res, next) => {
-  if (!config.appPassword) return next();
+// On this Mac (localhost) the password is optional. From a phone or any other device a
+// password is required. Phones sign in once on /login and stay signed in (cookie).
+const PUBLIC_FILES = new Set(['/login', '/login.html', '/manifest.webmanifest', '/style.css']);
+const isLocal = (req) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+const loginToken = () => crypto.createHmac('sha256', config.appPassword).update('viral-post-login').digest('hex');
+const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
+function cookie(req, name) {
+  const m = (req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
+  return m ? m[1] : '';
+}
+function signedIn(req) {
+  if (!config.appPassword) return isLocal(req);
+  if (cookie(req, 'vp_login') && same(cookie(req, 'vp_login'), loginToken())) return true;
   const [scheme, encoded] = (req.headers.authorization || '').split(' ');
   if (scheme === 'Basic' && encoded) {
     const pass = Buffer.from(encoded, 'base64').toString().split(':').slice(1).join(':');
-    const a = Buffer.from(pass), b = Buffer.from(config.appPassword);
-    if (a.length === b.length && crypto.timingSafeEqual(a, b)) return next();
+    return same(pass, config.appPassword);
   }
-  res.set('WWW-Authenticate', 'Basic realm="Viral Post"').status(401).send('Password required');
+  return false;
+}
+
+const failed = new Map(); // ip -> { n, until }
+app.post('/login', express.urlencoded({ extended: false }), (req, res) => {
+  const ip = req.socket.remoteAddress;
+  const f = failed.get(ip) || { n: 0, until: 0 };
+  if (f.until > Date.now()) return res.redirect('/login.html?error=wait');
+  if (config.appPassword && same(req.body.password || '', config.appPassword)) {
+    failed.delete(ip);
+    res.set('Set-Cookie', `vp_login=${loginToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 365}`);
+    return res.redirect('/#calendar');
+  }
+  f.n += 1;
+  if (f.n >= 5) { f.n = 0; f.until = Date.now() + 15 * 60 * 1000; }
+  failed.set(ip, f);
+  res.redirect('/login.html?error=wrong');
+});
+
+app.use((req, res, next) => {
+  if (PUBLIC_FILES.has(req.path) || req.path.startsWith('/icons/') || signedIn(req)) return next();
+  if (!config.appPassword) {
+    return res.status(403).send('<meta name="viewport" content="width=device-width, initial-scale=1"><p style="font:18px system-ui;padding:20px">To open Viral Post on your phone, first set a password on your Mac. In Terminal run: <b>npm run password</b></p>');
+  }
+  if (req.method === 'GET' && (req.headers.accept || '').includes('text/html')) return res.redirect('/login.html');
+  res.status(401).json({ error: 'Please sign in again.' });
 });
 
 app.use(express.static(path.join(__dirname, '..', 'public')));

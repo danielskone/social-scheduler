@@ -103,6 +103,8 @@ dialog img, dialog video { max-width: 100%; border-radius: 8px; }
   .sidebar { width: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 10px; }
   .brand { display: none; }
   nav { display: flex; gap: 4px; overflow-x: auto; }
+  nav a { white-space: nowrap; }
+  .sidebar { padding-top: max(10px, env(safe-area-inset-top)); }
   main { padding: 16px; }
   .compose { grid-template-columns: 1fr; }
   .day { min-height: 70px; }
