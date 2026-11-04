@@ -73,4 +73,7 @@ if (!db.prepare('PRAGMA table_info(posts)').all().some((c) => c.name === 'title'
   db.exec('ALTER TABLE posts ADD COLUMN title TEXT');
 }
 
+// Fix Facebook Reel links saved as "/reel/123/" (they opened on localhost).
+db.prepare(`UPDATE post_targets SET permalink = 'https://www.facebook.com' || permalink WHERE permalink LIKE '/%'`).run();
+
 module.exports = db;

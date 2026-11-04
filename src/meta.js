@@ -158,6 +158,8 @@ async function publishFacebook(account, post) {
   let permalink = null;
   try {
     permalink = (await call('GET', id, { fields: 'permalink_url', access_token: token })).permalink_url || null;
+    // Reels come back as "/reel/123/" without the site; make it a full link.
+    if (permalink && permalink.startsWith('/')) permalink = `https://www.facebook.com${permalink}`;
   } catch { /* video posts may not expose this right away */ }
   return { id, permalink };
 }
