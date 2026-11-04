@@ -506,12 +506,17 @@ function drawAnalytics() {
   const byAcct = {};
   followers.filter((f) => anPlatform === 'all' || f.platform === anPlatform)
     .forEach((f) => (byAcct[f.account_id] ||= { ...f, series: [], prior: null }).series.push(f));
-  $('#an-followers').innerHTML = Object.values(byAcct).map((a) => {
+  const lastOf = (a) => a.series[a.series.length - 1].followers;
+  $('#an-followers').innerHTML = Object.values(byAcct).sort((x, y) => lastOf(y) - lastOf(x)).map((a) => {
     const inRange = a.series.filter((f) => f.taken_on >= since).map((f) => f.followers);
     const all = a.series.map((f) => f.followers);
     const last = all[all.length - 1], first = inRange[0] ?? last, diff = last - first;
-    return `<div class="tile follower"><div class="label">${a.picture_url ? `<img class="f-pic" src="${esc(a.picture_url)}" alt="">` : ''}${icon(a.platform)} <span class="f-name">${esc(a.name)}</span></div>
-      <div class="value">${last.toLocaleString()} <span class="chg ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '+' : ''}${diff.toLocaleString()}</span></div>${sparkline(inRange.length > 1 ? inRange : all)}</div>`;
+    const series = inRange.length > 1 ? inRange : all;
+    const flat = Math.min(...series) === Math.max(...series);
+    const pic = a.picture_url ? `<img class="f-pic" src="${esc(a.picture_url)}" alt="" onerror="this.style.visibility='hidden'">` : '<span class="f-pic"></span>';
+    return `<div class="tile follower"><div class="label"><span class="f-avatar">${pic}${icon(a.platform)}</span><span class="f-name">${esc(a.name)}</span></div>
+      <div class="value">${last.toLocaleString()} <span class="chg ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '+' : ''}${diff ? diff.toLocaleString() : 'no change'}</span></div>
+      ${flat ? '<div class="f-flat">Steady this period</div>' : sparkline(series)}</div>`;
   }).join('') || '<p class="muted">No follower data yet. Click "Refresh stats", and it will also update automatically every few hours.</p>';
 
   // Table
