@@ -93,6 +93,25 @@ async function renderCalendar() {
     </div>`;
   }
   $('#cal-days').innerHTML = html;
+
+  // Phone view: a simple list of this month's days that have posts.
+  const inMonth = posts.filter((p) => new Date(p.scheduled_at).getMonth() === calMonth.getMonth())
+    .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+  const groups = {};
+  inMonth.forEach((p) => (groups[dayKey(new Date(p.scheduled_at))] ||= []).push(p));
+  $('#cal-agenda').innerHTML = Object.values(groups).map((list) => {
+    const d = new Date(list[0].scheduled_at);
+    const isToday = dayKey(d) === today;
+    return `<div class="ag-day${isToday ? ' today' : ''}">
+      <div class="ag-date"><span>${d.toLocaleDateString([], { weekday: 'short' })}</span><b>${d.getDate()}</b></div>
+      <div class="ag-list">${list.map((p) => `<button class="ag-item ${overallStatus(p)}" data-id="${p.id}">
+        ${p.media_type && p.media_url ? (p.media_type === 'video' ? `<video class="ag-thumb" src="${p.media_url}#t=0.5" muted playsinline preload="metadata"></video>` : `<img class="ag-thumb" src="${p.media_url}" alt="" loading="lazy">`) : '<span class="ag-thumb"></span>'}
+        <span class="ag-body"><span class="ag-top"><b>${fmtTime(p.scheduled_at)}</b><span class="ag-icons">${[...new Set(p.targets.map((t) => t.platform))].map((pl) => icon(pl)).join('')}</span></span>
+        <span class="ag-text">${esc(p.title || p.caption || (p.media_type === 'video' ? 'Video' : 'Photo'))}</span>
+        <span class="status ${overallStatus(p)}">${overallStatus(p)}</span></span>
+      </button>`).join('')}</div></div>`;
+  }).join('') || '<p class="empty">No posts this month yet.<br><a class="btn primary" href="#compose">+ New post</a></p>';
+  $('#cal-agenda').onclick = (e) => { const it = e.target.closest('.ag-item'); if (it) openPost(it.dataset.id); };
   $('#cal-days').onclick = (e) => {
     const chip = e.target.closest('.chip');
     if (chip) return openPost(chip.dataset.id);
@@ -122,7 +141,7 @@ async function openPost(id) {
       <button class="btn danger" id="dlg-delete">Delete</button>
       <button class="btn ghost" id="dlg-close">Close</button>
     </div>`;
-  dlg.showModal();
+  dlg.showModal(); dlg.scrollTop = 0; document.activeElement?.blur();
   $('#dlg-close').onclick = () => dlg.close();
   $('#dlg-delete').onclick = async () => {
     const msg = p.targets.some((t) => t.status === 'published')
