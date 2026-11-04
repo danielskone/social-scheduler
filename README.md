@@ -117,3 +117,8 @@ itself, but TikTok keeps those posts private until the app passes TikTok's audit
 2. `npm run phone-app` shows the address, for example `http://192.168.1.20:3000`.
 3. On the iPhone (same Wi-Fi), open that address in Safari, tap Share, then **Add to Home Screen**.
 Without a password, Viral Post only opens on the Mac itself.
+
+## Mac app and phone access from anywhere
+- `npm run mac-app` puts a **Viral Post** app on the Desktop. Double-click it to start Viral Post and open it in its own window.
+- To use Viral Post on your phone away from home, install the free **Tailscale** app on the Mac and the iPhone (same account), then run `npm run phone-app` for the "from anywhere" address.
+- The Cloudflare tunnel only serves `/media/` (for Instagram). The dashboard is never reachable through it.

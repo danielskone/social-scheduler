@@ -14,6 +14,15 @@ const { importBundle } = require('./importer');
 const app = express();
 app.use(express.json());
 
+// The Cloudflare tunnel exists only so Instagram can download media. Anything else that
+// arrives through it (it adds a cf-connecting-ip header) is refused, so the dashboard is
+// never reachable from the open internet. Phones reach it over home Wi-Fi or Tailscale.
+const viaTunnel = (req) => Boolean(req.headers['cf-connecting-ip']);
+app.use((req, res, next) => {
+  if (viaTunnel(req) && !req.path.startsWith('/media/')) return res.status(404).send('Not found');
+  next();
+});
+
 // Media must stay public (no password) so Instagram can download it when publishing.
 app.use('/media', express.static(config.mediaDir, { fallthrough: false }));
 
@@ -21,7 +30,7 @@ app.use('/media', express.static(config.mediaDir, { fallthrough: false }));
 // On this Mac (localhost) the password is optional. From a phone or any other device a
 // password is required. Phones sign in once on /login and stay signed in (cookie).
 const PUBLIC_FILES = new Set(['/login', '/login.html', '/manifest.webmanifest', '/style.css']);
-const isLocal = (req) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+const isLocal = (req) => !viaTunnel(req) && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
 const loginToken = () => crypto.createHmac('sha256', config.appPassword).update('viral-post-login').digest('hex');
 const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 function cookie(req, name) {

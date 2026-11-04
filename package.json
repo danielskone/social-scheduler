@@ -15,7 +15,8 @@
     "youtube-keys": "node scripts/save-keys.js youtube",
     "tiktok-keys": "node scripts/save-keys.js tiktok",
     "password": "node scripts/set-password.js",
-    "phone-app": "node scripts/phone-app.js"
+    "phone-app": "node scripts/phone-app.js",
+    "mac-app": "node scripts/mac-app.js"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
