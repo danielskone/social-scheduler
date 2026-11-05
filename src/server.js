@@ -10,9 +10,13 @@ const youtube = require('./youtube');
 const tiktok = require('./tiktok');
 const scheduler = require('./scheduler');
 const { importBundle } = require('./importer');
+const compression = require('compression');
+const { thumbFor } = require('./thumbs');
 
 const app = express();
 app.use(express.json());
+// Private app: ask search engines never to list it.
+app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next(); });
 
 // The Cloudflare tunnel exists only so Instagram can download media. Anything else that
 // arrives through it (it adds a cf-connecting-ip header) is refused, so the dashboard is
@@ -24,12 +28,16 @@ app.use((req, res, next) => {
 });
 
 // Media must stay public (no password) so Instagram can download it when publishing.
-app.use('/media', express.static(config.mediaDir, { fallthrough: false }));
+// File names never change, so phones may keep them for a month.
+app.use('/media', express.static(config.mediaDir, { fallthrough: false, maxAge: '30d', immutable: true }));
+
+// Pages and data are squeezed before they're sent, which matters a lot on cellular.
+app.use(compression({ filter: (req, res) => !req.path.startsWith('/thumb/') && compression.filter(req, res) }));
 
 // ---------- Password protection ----------
 // On this Mac (localhost) the password is optional. From a phone or any other device a
 // password is required. Phones sign in once on /login and stay signed in (cookie).
-const PUBLIC_FILES = new Set(['/login', '/login.html', '/manifest.webmanifest', '/style.css']);
+const PUBLIC_FILES = new Set(['/login', '/login.html', '/manifest.webmanifest', '/style.css', '/sw.js']);
 const isLocal = (req) => !viaTunnel(req) && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
 const loginToken = () => crypto.createHmac('sha256', config.appPassword).update('viral-post-login').digest('hex');
 const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
@@ -71,6 +79,13 @@ app.use((req, res, next) => {
   }
   if (req.method === 'GET' && (req.headers.accept || '').includes('text/html')) return res.redirect('/login.html');
   res.status(401).json({ error: 'Please sign in again.' });
+});
+
+// Small previews for the calendar (see thumbs.js).
+app.get('/thumb/:file', async (req, res) => {
+  const file = await thumbFor(req.params.file);
+  if (!file) return res.status(404).end();
+  res.sendFile(file, { maxAge: '30d', immutable: true });
 });
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -204,6 +219,7 @@ function loadPost(id) {
     SELECT t.*, a.platform, a.name AS account_name, a.username
     FROM post_targets t JOIN accounts a ON a.id=t.account_id WHERE t.post_id=?`).all(id);
   post.media_url = post.media_file ? `/media/${post.media_file}` : post.media_source_url || null;
+  post.thumb_url = post.media_file ? `/thumb/${post.media_file}` : post.media_url;
   return post;
 }
 
@@ -302,7 +318,7 @@ api.get('/analytics', (req, res) => {
     SELECT t.*, p.caption, p.title, p.media_type, p.media_file, p.media_source_url, p.scheduled_at, a.platform, a.name AS account_name
     FROM post_targets t JOIN posts p ON p.id=t.post_id JOIN accounts a ON a.id=t.account_id
     WHERE t.status='published' AND t.published_at >= ? AND t.published_at < ? ORDER BY t.published_at DESC`).all(from, to);
-  const withMedia = (p) => ({ ...p, media_url: p.media_file ? `/media/${p.media_file}` : p.media_source_url || null });
+  const withMedia = (p) => ({ ...p, media_url: p.media_file ? `/media/${p.media_file}` : p.media_source_url || null, thumb_url: p.media_file ? `/thumb/${p.media_file}` : p.media_source_url || null });
   const posts = rows(since, '9999').map(withMedia);
   const previous = rows(before, since).map(({ platform, likes, comments, shares, views }) => ({ platform, likes, comments, shares, views }));
   const failed = db.prepare(`SELECT COUNT(*) AS n FROM post_targets t JOIN posts p ON p.id=t.post_id

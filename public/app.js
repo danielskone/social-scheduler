@@ -53,8 +53,9 @@ async function route() {
   banner(params.get('error') ? `Couldn't connect: ${params.get('error')}` : params.get('connected') ? `Connected ${params.get('connected')} account(s).` : '', Boolean(params.get('error')));
   document.querySelectorAll('.view').forEach((v) => (v.hidden = v.id !== `view-${view}`));
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === view));
-  accounts = await api('/accounts');
-  if (view === 'calendar') renderCalendar();
+  const acctLoad = api('/accounts').then((a) => (accounts = a));
+  if (view === 'calendar') { renderCalendar(); return; } // the calendar doesn't need the account list
+  await acctLoad;
   if (view === 'compose') renderCompose(params.get('date'));
   if (view === 'analytics') renderAnalytics();
   if (view === 'accounts') renderAccounts();
@@ -70,11 +71,12 @@ function startOfWeek(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.ge
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const platformsOf = (p) => [...new Set(p.targets.map((t) => t.platform))];
 const label = (p) => p.title || p.caption || (p.media_type === 'video' ? 'Video' : 'Photo');
-const thumb = (p, cls) => (p.media_type && p.media_url
-  ? (p.media_type === 'video'
-    ? `<span class="${cls} vid"><video src="${p.media_url}#t=0.5" muted playsinline preload="metadata"></video></span>`
-    : `<span class="${cls}"><img src="${p.media_url}" alt="" loading="lazy"></span>`)
-  : `<span class="${cls} none">${p.media_type === 'video' ? '▶' : 'Aa'}</span>`);
+// Small preview picture. Uses the little /thumb/ version so the phone doesn't download whole videos.
+const thumb = (p, cls) => {
+  if (!p.media_type || !(p.thumb_url || p.media_url)) return `<span class="${cls} none">Aa</span>`;
+  const vid = p.media_type === 'video';
+  return `<span class="${cls}${vid ? ' vid' : ''}"><img src="${p.thumb_url || p.media_url}" alt="" loading="lazy" decoding="async" onerror="this.remove()"></span>`;
+};
 const STATUS_WORD = { scheduled: 'Scheduled', published: 'Posted', failed: 'Needs attention' };
 
 $('#cal-weekdays').innerHTML = WEEKDAYS.map((d) => `<div>${d}</div>`).join('');
@@ -226,7 +228,7 @@ function attachHoverPreview(posts) {
       const p = byId[chip.dataset.id];
       if (!p) return;
       const st = overallStatus(p);
-      tip.innerHTML = `${p.media_url ? (p.media_type === 'video' ? `<video src="${p.media_url}#t=0.5" muted playsinline preload="metadata"></video>` : `<img src="${p.media_url}" alt="">`) : ''}
+      tip.innerHTML = `${p.thumb_url ? `<img src="${p.thumb_url}" alt="" onerror="this.remove()">` : ''}
         <div class="hc-body"><div class="hc-top"><b>${fmtDateTime(p.scheduled_at)}</b><span class="status ${st}">${STATUS_WORD[st]}</span></div>
         ${p.title ? `<b class="hc-title">${esc(p.title)}</b>` : ''}
         <p>${esc(p.caption || '')}</p>
@@ -251,7 +253,7 @@ async function openPost(id) {
   const dlg = $('#post-dialog');
   dlg.innerHTML = `
     <h2 style="margin-top:0">${fmtDateTime(p.scheduled_at)}</h2>
-    ${p.media_url ? (p.media_type === 'video' ? `<video src="${p.media_url}" controls></video>` : `<img src="${p.media_url}" alt="">`) : ''}
+    ${p.media_url ? (p.media_type === 'video' ? `<video src="${p.media_url}" ${p.thumb_url ? `poster="${p.thumb_url}"` : ''} controls playsinline preload="none"></video>` : `<img src="${p.media_url}" alt="">`) : ''}
     ${editable && p.targets.some((t) => t.platform === 'youtube') ? `<p><input type="text" id="dlg-title" maxlength="100" placeholder="YouTube title (optional)" value="${esc(p.title || '')}"></p>` : (p.title ? `<p><b>${esc(p.title)}</b></p>` : '')}
     ${editable ? `<textarea id="dlg-caption" rows="5">${esc(p.caption)}</textarea>
       <p><input type="datetime-local" id="dlg-when" value="${toLocalInput(new Date(p.scheduled_at))}"></p>`
@@ -566,3 +568,8 @@ async function renderAccounts() {
 }
 
 route();
+
+// Keep the app's files on the phone so it opens instantly.
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
