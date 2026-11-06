@@ -430,7 +430,8 @@ async function renderScene({ ad, brand, scene, n, total, fmt, work, voiceFile, v
     : Math.max(2.4, words(scene.say).length / 2.6 + 0.8);
   if (scene.endCard && !voiceFile) len = Math.max(len, 3);
   len = Math.max(1.5, Math.min(60, len));
-  const voiceEnd = voiceFile ? voiceStart + voiceLen : useVideoSound ? 0 : len - 0.3;
+  // With the video's own sound (like an AI presenter), the scene's words are shown over the whole scene.
+  const voiceEnd = voiceFile ? voiceStart + voiceLen : useVideoSound ? Math.max(0.5, len - 0.2) : len - 0.3;
 
   const inputs = [];
   if (!media) {

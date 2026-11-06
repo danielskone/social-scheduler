@@ -205,7 +205,8 @@ function drawEditor() {
         <div class="panel">
           <div class="panel-head"><h2>Script</h2>
             <div class="row"><select id="ad-recipe" aria-label="Style">${Object.entries(AS.opts.recipes).filter(([k]) => k !== 'script').map(([k, v]) => opt(k, v, a.recipe)).join('')}</select>
-            <button type="button" class="btn ghost" data-ad-rewrite>${AI.redo}Write it again</button></div></div>
+            <button type="button" class="btn ghost" data-ad-rewrite>${AI.redo}Write it again</button>
+            <button type="button" class="ad-ai-btn" data-ad-presenter>${AI.spark}AI presenter</button></div></div>
           <p class="muted ad-help">Each scene is one picture or video with a few big words on screen, while the voice says the line. Change anything you like.</p>
           <div id="ad-scenes"></div>
           <button type="button" class="btn ghost" data-scene-add>${AI.plus}Add a scene</button>
@@ -553,6 +554,7 @@ adsBody.addEventListener('click', async (e) => {
   if (t.dataset.sceneUp) return move(Number(t.dataset.sceneUp), Number(t.dataset.sceneUp) - 1);
   if (t.dataset.sceneDown) return move(Number(t.dataset.sceneDown), Number(t.dataset.sceneDown) + 1);
   if (t.dataset.sceneAi) return openAiScene(Number(t.dataset.sceneAi));
+  if (t.hasAttribute('data-ad-presenter')) { await saveAdSoon({}, true); return openPresenter(); }
   if (t.dataset.sceneDel) { a.scenes.splice(Number(t.dataset.sceneDel), 1); drawScenes(); saveScenes(); return; }
   if (t.dataset.adUnmedia) {
     const files = a.media.map((m) => m.file).filter((f) => f !== t.dataset.adUnmedia);
@@ -626,6 +628,66 @@ $('#ads-dialog').addEventListener('change', async (e) => {
   if (await putClipInScene(i, e.target.files)) $('#ads-dialog').close();
   else $('#ad-ai-msg').textContent = 'That file could not be added. Use an MP4 or MOV video.';
 });
+
+// ---------- AI presenter (HumanPal) ----------
+// HumanPal has no API: the whole script is copied, HumanPal opens, and the finished presenter
+// video comes back here. It is then cut into the scenes (by how many words each scene has), using
+// the presenter's own voice, with the headlines, captions, logo and end card on top.
+const presenterScript = () => AS.ad.scenes.map((s) => (s.say || '').trim()).filter(Boolean).join('\n\n');
+function openPresenter() {
+  const dlg = $('#ads-dialog');
+  dlg.innerHTML = `<form method="dialog" class="ad-ai">
+    <h2>${AI.spark}AI presenter for this ad</h2>
+    <ol class="ad-ai-steps"><li>Click <b>Copy script & open HumanPal</b>.</li><li>In HumanPal pick a presenter and voice, paste the script, choose <b>vertical 9:16</b>, and make the video.</li><li>Download it and add it here. Each scene gets its part of the video, with your captions, logo and end card on top.</li></ol>
+    <textarea id="ad-presenter-script" rows="8">${esc(presenterScript())}</textarea>
+    <div class="ad-ai-sites"><button type="button" class="btn ghost" data-presenter-open="https://app.humanpal.io/dashboard"><b>Copy script & open HumanPal</b><small>Your account · AI presenters · 1 minute per video on the Commercial plan</small></button></div>
+    <p id="ad-ai-msg" class="clip-msg"></p>
+    <div class="row"><label class="btn primary">${AI.plus}Add the presenter video<input type="file" id="ad-presenter-file" accept="video/*" hidden></label><button class="btn ghost" value="close">Close</button></div>
+    <p class="muted clip-fine">Change the script here first if you like. Keep the paragraphs in the same order as the scenes so each part lines up with its scene.</p>
+  </form>`;
+  dlg.showModal();
+}
+$('#ads-dialog').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-presenter-open]');
+  if (!b) return;
+  const text = $('#ad-presenter-script').value;
+  let copied = false;
+  try { await navigator.clipboard.writeText(text); copied = true; } catch {
+    const t = $('#ad-presenter-script'); t.select(); try { copied = document.execCommand('copy'); } catch {}
+  }
+  window.open(b.dataset.presenterOpen, '_blank', 'noopener');
+  $('#ad-ai-msg').textContent = copied ? 'Script copied. Paste it into HumanPal.' : 'Copy the script above, then paste it into HumanPal.';
+});
+$('#ads-dialog').addEventListener('change', async (e) => {
+  if (e.target.id !== 'ad-presenter-file') return;
+  const msg = $('#ad-ai-msg');
+  msg.textContent = 'Adding the presenter video…';
+  const [m] = (await uploadAdMedia([...e.target.files].slice(0, 1), null)).filter((x) => x.kind === 'video');
+  if (!m || !m.duration) { msg.textContent = 'That file could not be added. Use an MP4 or MOV video.'; return; }
+  // If the script was changed here, those words become the scenes' words.
+  const parts = $('#ad-presenter-script').value.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+  const a = AS.ad;
+  const spoken = a.scenes.filter((s) => (s.say || '').trim());
+  if (parts.length === spoken.length) spoken.forEach((s, k) => { s.say = parts[k]; });
+  splitPresenter(a.scenes, m);
+  await saveAdSoon({ media: [...a.media.map((x) => x.file), m.file], scenes: a.scenes }, true);
+  $('#ads-dialog').close();
+  drawEditor();
+  banner('Presenter added to every scene. Press Make my video.');
+  setTimeout(() => banner(''), 3000);
+});
+// Each scene gets a stretch of the presenter video sized by how many words it has.
+function splitPresenter(scenes, m) {
+  const weight = (s) => Math.max(1, (s.say || '').split(/\s+/).filter(Boolean).length);
+  const total = scenes.reduce((t, s) => t + weight(s), 0);
+  let at = 0;
+  scenes.forEach((s, k) => {
+    const len = k === scenes.length - 1 ? Math.max(1.5, m.duration - at) : (m.duration * weight(s)) / total;
+    Object.assign(s, { media: m.file, sound: 'video', framing: 'auto', start: +at.toFixed(2), seconds: +Math.max(1.5, len).toFixed(2) });
+    at += len;
+  });
+  return scenes;
+}
 
 // A photo or video dropped on a scene (or picked for it) becomes that scene's picture.
 async function putClipInScene(i, files) {
