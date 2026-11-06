@@ -64,7 +64,9 @@ const PRESETS = {
   console.log('\nThe law (CAN-SPAM) says every email must show a real mailing address.');
   console.log('A PO box or your business address is fine.');
   env.EMAIL_MAILING_ADDRESS = await ask('Mailing address on one line: ');
-  if (env.EMAIL_MAILING_ADDRESS.length < 10) stop('Please enter a full mailing address.');
+  if (env.EMAIL_MAILING_ADDRESS.length < 10 || /@|https?:|www\./i.test(env.EMAIL_MAILING_ADDRESS) || !/\d/.test(env.EMAIL_MAILING_ADDRESS)) {
+    stop('That needs to be a postal address (street or PO box with the ZIP code), like 123 Main St, Fuquay-Varina, NC 27526. Not an email or website.');
+  }
 
   Object.assign(process.env, env);
   const email = require('../src/email');
