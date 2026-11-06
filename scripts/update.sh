@@ -14,4 +14,7 @@ rm -rf "$TMP"
 npm install --no-fund --no-audit
 npm install-scripts approve better-sqlite3 >/dev/null 2>&1 || true
 node -e "require('better-sqlite3')" 2>/dev/null || npm rebuild better-sqlite3
+# Clips tab: ffmpeg (video tool) is downloaded by its installer, which newer npm asks to approve.
+npm install-scripts approve ffmpeg-static >/dev/null 2>&1 || true
+node -e "process.exit(require('fs').existsSync(require('ffmpeg-static')) ? 0 : 1)" 2>/dev/null || npm rebuild ffmpeg-static
 echo "UPDATED"
