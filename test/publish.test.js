@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const calls = [];
+let igFailures = 0; // make Instagram fail this many times with its generic error
 const fakeGraph = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
@@ -17,6 +18,7 @@ const fakeGraph = http.createServer((req, res) => {
     let out = {};
     if (p === 'PAGE1/feed') out = { id: 'PAGE1_111' };
     else if (p === 'PAGE1/photos') out = { id: 'photo1', post_id: 'PAGE1_222' };
+    else if (p === 'IG1/media' && igFailures > 0) { igFailures--; res.statusCode = 500; out = { error: { message: 'An unknown error has occurred.', code: 1, is_transient: false } }; }
     else if (p === 'IG1/media') out = { id: 'container1' };
     else if (p === 'container1') out = { status_code: 'FINISHED' };
     else if (p === 'IG1/media_publish') out = { id: 'igmedia1' };
@@ -40,7 +42,7 @@ test.before(async () => {
   Object.assign(process.env, {
     GRAPH_BASE: graph, GRAPH_VIDEO_BASE: graph,
     DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'sched-')),
-    PUBLIC_BASE_URL: 'https://scheduler.example.com', APP_PASSWORD: '',
+    PUBLIC_BASE_URL: 'https://scheduler.example.com', APP_PASSWORD: '', SKIP_MEDIA_CHECK: '1',
   });
   const app = require('../src/server');
   db = require('../src/db');
@@ -99,6 +101,38 @@ test('records failures with the error message', async () => {
   const p = await (await fetch(`${base}/api/posts/${r.body.id}`)).json();
   assert.equal(p.targets[0].status, 'failed');
   assert.match(p.targets[0].error, /Invalid token/);
+});
+
+test('a temporary Instagram error is retried by itself, and only fails after the last try', async () => {
+  igFailures = 1;
+  const r = await createPost({ caption: 'retry me', scheduledAt: new Date(Date.now() - 1000).toISOString(), accountIds: '2' }, true);
+  const t0 = Date.now();
+  await scheduler.publishDue(new Date(t0));
+  let p = await (await fetch(`${base}/api/posts/${r.body.id}`)).json();
+  assert.equal(p.targets[0].status, 'scheduled');
+  assert.match(p.targets[0].error, /Trying again .*try 2 of 4.*unknown error/);
+  await scheduler.publishDue(new Date(t0 + 60e3)); // too early: left alone
+  assert.equal((await (await fetch(`${base}/api/posts/${r.body.id}`)).json()).targets[0].status, 'scheduled');
+  await scheduler.publishDue(new Date(t0 + 6 * 60e3));
+  p = await (await fetch(`${base}/api/posts/${r.body.id}`)).json();
+  assert.equal(p.targets[0].status, 'published');
+
+  igFailures = 99;
+  const r2 = await createPost({ caption: 'keeps failing', scheduledAt: new Date(Date.now() - 1000).toISOString(), accountIds: '2' }, true);
+  let at = Date.now();
+  for (const wait of [0, 5, 20, 60]) { at += wait * 60e3 + 1000; await scheduler.publishDue(new Date(at)); }
+  p = await (await fetch(`${base}/api/posts/${r2.body.id}`)).json();
+  assert.equal(p.targets[0].status, 'failed');
+  assert.match(p.targets[0].error, /tried 4 times/);
+  igFailures = 0;
+});
+
+test('sign-in errors are not retried', async () => {
+  const r = await createPost({ caption: 'bad token', scheduledAt: new Date(Date.now() - 1000).toISOString(), accountIds: '3' });
+  await scheduler.publishDue();
+  const p = await (await fetch(`${base}/api/posts/${r.body.id}`)).json();
+  assert.equal(p.targets[0].status, 'failed');
+  assert.doesNotMatch(p.targets[0].error, /tried/);
 });
 
 test('refreshes stats and followers', async () => {

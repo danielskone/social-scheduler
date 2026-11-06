@@ -304,7 +304,7 @@ api.patch('/posts/:id', (req, res) => {
 });
 
 api.post('/posts/:id/retry', (req, res) => {
-  db.prepare(`UPDATE post_targets SET status='scheduled', error=NULL WHERE post_id=? AND status='failed'`).run(req.params.id);
+  db.prepare(`UPDATE post_targets SET status='scheduled', error=NULL, attempts=0, retry_at=NULL WHERE post_id=? AND status='failed'`).run(req.params.id);
   db.prepare(`UPDATE posts SET scheduled_at=? WHERE id=?`).run(new Date().toISOString(), req.params.id);
   scheduler.publishDue().catch(() => {});
   res.json(loadPost(req.params.id));

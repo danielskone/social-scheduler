@@ -16,6 +16,18 @@ const postStats = { facebook: meta.facebookPostStats, instagram: meta.instagramP
 const followers = { facebook: meta.followerCount, instagram: meta.followerCount, youtube: youtube.subscriberCount, tiktok: tiktok.followerCount };
 let running = false;
 
+// A post that fails for a temporary reason (Instagram "unknown error", the Mac's link not
+// ready, a busy server) is tried again by itself: after 5, 20 and 60 minutes. Only if it
+// still fails does it show as Failed and buzz your phone. It's only retried when we know
+// nothing was posted, so a retry can never make a double post.
+const RETRY_MINUTES = [5, 20, 60];
+function retryable(err, platform) {
+  if (err.safeToRetry === false) return false;
+  if (err.safeToRetry === true) return true; // Facebook/Instagram said no; nothing was posted
+  // Downloading the media for an imported post failed before anything was sent.
+  return err.stage === 'media';
+}
+
 async function publishDue(now = new Date()) {
   if (running) return; // don't overlap if a slow video upload is still going
   running = true;
@@ -25,23 +37,33 @@ async function publishDue(now = new Date()) {
       FROM post_targets t
       JOIN posts p ON p.id = t.post_id
       JOIN accounts a ON a.id = t.account_id
-      WHERE t.status = 'scheduled' AND p.scheduled_at <= ?
-      ORDER BY p.scheduled_at`).all(now.toISOString());
+      WHERE t.status = 'scheduled' AND p.scheduled_at <= ? AND (t.retry_at IS NULL OR t.retry_at <= ?)
+      ORDER BY p.scheduled_at`).all(now.toISOString(), now.toISOString());
     const results = [];
 
     for (const row of due) {
       db.prepare(`UPDATE post_targets SET status='publishing', error=NULL WHERE id=?`).run(row.target_id);
       const account = { platform: row.platform, external_id: row.external_id, access_token: row.access_token, username: row.account_username };
       try {
-        if (row.media_source_url && !row.media_file) row.media_file = await media.ensureMedia(row.id);
+        if (row.media_source_url && !row.media_file) {
+          row.media_file = await media.ensureMedia(row.id).catch((e) => { throw Object.assign(e, { stage: 'media' }); });
+        }
         const res = await publishers[row.platform](account, row);
-        db.prepare(`UPDATE post_targets SET status='published', external_post_id=?, permalink=?, published_at=? WHERE id=?`)
+        db.prepare(`UPDATE post_targets SET status='published', external_post_id=?, permalink=?, published_at=?, retry_at=NULL WHERE id=?`)
           .run(res.id, res.permalink, new Date().toISOString(), row.target_id);
         console.log(`[publish] post ${row.id} -> ${row.platform} ${row.account_name}: ${res.id}`);
         results.push({ postId: row.id, caption: row.caption, platform: row.platform, account: row.account_name, ok: true, note: res.note || null });
       } catch (err) {
         const why = err.cause ? `${err.message} (${[err.cause.code, err.cause.message].filter(Boolean).join(': ')})` : String(err.message || err);
-        db.prepare(`UPDATE post_targets SET status='failed', error=? WHERE id=?`).run(why, row.target_id);
+        const tries = db.prepare('SELECT attempts FROM post_targets WHERE id=?').get(row.target_id).attempts;
+        if (row.platform !== 'youtube' && row.platform !== 'tiktok' && tries < RETRY_MINUTES.length && retryable(err, row.platform)) {
+          const at = new Date(now.getTime() + RETRY_MINUTES[tries] * 60e3);
+          db.prepare(`UPDATE post_targets SET status='scheduled', attempts=attempts+1, retry_at=?, error=? WHERE id=?`)
+            .run(at.toISOString(), `Trying again at ${at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} (try ${tries + 2} of ${RETRY_MINUTES.length + 1}). Last error: ${why}`, row.target_id);
+          console.error(`[publish] post ${row.id} -> ${row.platform} will retry in ${RETRY_MINUTES[tries]} min: ${err.message}`);
+          continue; // no phone alert yet
+        }
+        db.prepare(`UPDATE post_targets SET status='failed', error=?, retry_at=NULL WHERE id=?`).run(tries ? `${why} (tried ${tries + 1} times)` : why, row.target_id);
         console.error(`[publish] post ${row.id} -> ${row.platform} failed: ${err.message}`);
         results.push({ postId: row.id, caption: row.caption, platform: row.platform, account: row.account_name, ok: false, error: String(err.message || err) });
       }

@@ -14,7 +14,16 @@ const SCOPES = [
   'business_management',
 ];
 
-class GraphError extends Error {}
+// safeToRetry = Facebook/Instagram answered with an error, so nothing was posted and trying
+// again can't make a double post. Errors about sign-in or permissions never fix themselves.
+class GraphError extends Error {
+  constructor(message, { code, transient, safeToRetry = true } = {}) {
+    super(message);
+    this.code = code;
+    this.transient = Boolean(transient);
+    this.safeToRetry = safeToRetry && !(code === 190 || code === 10 || code === 368 || (code >= 200 && code < 300));
+  }
+}
 
 function graphUrl(p, base = config.graphBase) {
   return `${base}/${config.graphVersion}/${p.replace(/^\//, '')}`;
@@ -31,11 +40,17 @@ async function call(method, p, params = {}, { base, body } = {}) {
     init.headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
     init.body = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined));
   }
-  const res = await fetch(url, init);
+  let res;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    // No answer at all: for a POST we can't be sure whether it went through, so never auto-retry it.
+    throw Object.assign(new GraphError(`Could not reach Facebook: ${e.message}`, { safeToRetry: method === 'GET' }), { cause: e.cause });
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) {
     const msg = data.error ? `${data.error.message} (code ${data.error.code})` : `HTTP ${res.status}`;
-    throw new GraphError(msg);
+    throw new GraphError(msg, { code: data.error && data.error.code, transient: data.error && data.error.is_transient });
   }
   return data;
 }
@@ -166,10 +181,24 @@ async function publishFacebook(account, post) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+async function reachable(url) {
+  if (process.env.SKIP_MEDIA_CHECK) return true;
+  try {
+    const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(15000) });
+    return res.ok;
+  } catch { return false; }
+}
+
 async function publishInstagram(account, post, { pollMs = 5000, maxPolls = 60 } = {}) {
   if (!post.media_file) throw new GraphError('Instagram posts need a photo or video.');
   if (!/^https:\/\//.test(config.publicBaseUrl)) {
     throw new GraphError('Instagram needs PUBLIC_BASE_URL to be a public https address so it can download your media.');
+  }
+  // Instagram downloads the file from this Mac's public link. If that link isn't working right
+  // now (Mac just woke up, tunnel restarting), say so plainly; the scheduler will try again.
+  const mediaUrl = mediaPublicUrl(post.media_file);
+  if (!(await reachable(mediaUrl))) {
+    throw new GraphError("Instagram can't reach your Mac's public link right now, so it couldn't download the media. Will try again.");
   }
   const token = account.access_token;
   const params = { caption: post.caption, access_token: token };
