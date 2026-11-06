@@ -57,7 +57,8 @@ async function route() {
   const acctLoad = api('/accounts').then((a) => (accounts = a));
   if (view === 'calendar') { renderCalendar(); return; } // the calendar doesn't need the account list
   await acctLoad;
-  if (view === 'compose') renderCompose(params.get('date'));
+  if (view === 'compose') renderCompose(params.get('date'), params.get('clip'));
+  if (view === 'clips') renderClips();
   if (view === 'analytics') renderAnalytics();
   if (view === 'contacts') renderContacts(sub);
   if (view === 'accounts') renderAccounts();
@@ -295,7 +296,9 @@ async function openPost(id) {
 // ---------- Compose ----------
 const form = $('#compose-form');
 
-function renderCompose(dateIso) {
+let composeClip = null; // a clip from the Clips tab, used instead of an uploaded video
+
+async function renderCompose(dateIso, clipId) {
   const box = $('#compose-accounts');
   box.innerHTML = accounts.length
     ? accounts.map((a) => `<label><input type="checkbox" name="accountIds" value="${a.id}" data-platform="${a.platform}"${accounts.length === 1 ? ' checked' : ''}>
@@ -305,8 +308,30 @@ function renderCompose(dateIso) {
   if (dateIso) when.setHours(9, 0, 0, 0);
   form.scheduledAt.value = toLocalInput(when);
   $('#compose-msg').textContent = '';
+  composeClip = null;
+  if (clipId) {
+    try {
+      composeClip = await api(`/clips/clip/${clipId}`);
+      form.media.value = '';
+      if (!form.caption.value.trim()) form.caption.value = composeClip.caption || composeClip.title || '';
+      if (!form.title.value.trim()) form.title.value = (composeClip.title || '').slice(0, 100);
+    } catch (e) { $('#compose-msg').textContent = e.message; }
+  }
+  showComposeClip();
   updatePreview();
 }
+
+function showComposeClip() {
+  const box = $('#compose-clip');
+  box.hidden = !composeClip;
+  $('#media-field').hidden = Boolean(composeClip);
+  if (!composeClip) return;
+  box.querySelector('img').src = composeClip.poster_url || '';
+  box.querySelector('b').textContent = composeClip.title;
+  box.querySelector('small').textContent = `Clip · ${Math.round(composeClip.length)} seconds · vertical 9:16`;
+}
+form.media.addEventListener('change', () => { if (form.media.files[0] && composeClip) { composeClip = null; showComposeClip(); } });
+$('#compose-clip-remove').onclick = () => { composeClip = null; showComposeClip(); updatePreview(); };
 
 function updatePreview() {
   const caption = form.caption.value;
@@ -319,12 +344,18 @@ function updatePreview() {
   $('#preview-name').textContent = first ? (first.username ? '@' + first.username : first.name) : 'Your account';
   const file = form.media.files[0];
   const media = $('#preview-media');
+  if (!file && composeClip && media.dataset.clip === String(composeClip.id)) return; // keep the clip playing while typing
+  media.dataset.clip = '';
   if (media.dataset.url) URL.revokeObjectURL(media.dataset.url);
+  media.dataset.url = '';
   media.innerHTML = '';
   if (file) {
     const url = URL.createObjectURL(file);
     media.dataset.url = url;
     media.innerHTML = file.type.startsWith('video') ? `<video src="${url}" muted controls></video>` : `<img src="${url}" alt="">`;
+  } else if (composeClip) {
+    media.dataset.clip = String(composeClip.id);
+    media.innerHTML = `<video src="${esc(composeClip.url)}" poster="${esc(composeClip.poster_url || '')}" controls playsinline></video>`;
   }
 }
 form.addEventListener('input', updatePreview);
@@ -334,12 +365,15 @@ async function submitPost(now) {
   const when = now ? new Date() : new Date(form.scheduledAt.value);
   fd.set('scheduledAt', when.toISOString());
   if (!form.media.files[0]) fd.delete('media');
+  if (!form.media.files[0] && composeClip) fd.set('clipId', composeClip.id);
   const msg = $('#compose-msg');
   msg.textContent = 'Saving…';
   form.querySelectorAll('button').forEach((b) => (b.disabled = true));
   try {
     await api('/posts', { method: 'POST', body: fd });
     form.reset();
+    composeClip = null;
+    showComposeClip();
     calMonth = startOfMonth(when);
     location.hash = 'calendar';
   } catch (e) {

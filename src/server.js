@@ -12,6 +12,7 @@ const scheduler = require('./scheduler');
 const { importBundle } = require('./importer');
 const crm = require('./crm');
 const booking = require('./booking');
+const clipper = require('./clipper');
 const compression = require('compression');
 const { thumbFor } = require('./thumbs');
 
@@ -94,6 +95,9 @@ app.get('/thumb/:file', async (req, res) => {
   if (!file) return res.status(404).end();
   res.sendFile(file, { maxAge: '30d', immutable: true });
 });
+
+// Finished clips from the Clips tab (only for signed-in users).
+app.get('/clipfile/:job/:file', clipper.serveFile);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -246,7 +250,10 @@ function validatePost({ caption, scheduledAt, accountIds, mediaType }) {
 api.post('/posts', upload.single('media'), (req, res) => {
   const caption = (req.body.caption || '').trim();
   const accountIds = [].concat(req.body.accountIds || []).flatMap((v) => String(v).split(',')).filter(Boolean).map(Number);
-  const mediaType = req.file ? (req.file.mimetype.startsWith('video') ? 'video' : 'image') : null;
+  // A clip from the Clips tab can be used instead of an uploaded file.
+  const clipFile = !req.file && req.body.clipId ? clipper.copyClipToMedia(Number(req.body.clipId)) : null;
+  if (!req.file && req.body.clipId && !clipFile) return res.status(400).json({ error: 'That clip is not ready yet. Try again in a minute.' });
+  const mediaType = req.file ? (req.file.mimetype.startsWith('video') ? 'video' : 'image') : clipFile ? 'video' : null;
   let error = validatePost({ caption, scheduledAt: req.body.scheduledAt, accountIds, mediaType });
   if (!error && req.file?.mimetype === 'image/png' && accountIds.length &&
       db.prepare(`SELECT 1 FROM accounts WHERE platform='instagram' AND id IN (${accountIds.map(() => '?').join(',')})`).get(...accountIds)) {
@@ -254,11 +261,12 @@ api.post('/posts', upload.single('media'), (req, res) => {
   }
   if (error) {
     if (req.file) fs.rmSync(req.file.path, { force: true });
+    if (clipFile) fs.rmSync(path.join(config.mediaDir, clipFile), { force: true });
     return res.status(400).json({ error });
   }
   const id = db.transaction(() => {
     const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title) VALUES (?,?,?,?,?)')
-      .run(caption, req.file?.filename || null, mediaType, new Date(req.body.scheduledAt).toISOString(), (req.body.title || '').trim() || null);
+      .run(caption, req.file?.filename || clipFile || null, mediaType, new Date(req.body.scheduledAt).toISOString(), (req.body.title || '').trim() || null);
     const ins = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
     accountIds.forEach((a) => ins.run(lastInsertRowid, a));
     return lastInsertRowid;
@@ -342,6 +350,7 @@ api.post('/analytics/refresh', async (req, res) => {
   res.json({ ok: true });
 });
 
+app.use('/api/clips', clipper.router);
 app.use('/api/crm/booking', booking.router);
 app.use('/api/crm', crm.router);
 app.use('/api', api);
@@ -353,6 +362,7 @@ app.use((err, req, res, next) => {
 
 function startApp() {
   scheduler.start();
+  clipper.start();
   app.listen(config.port, () => console.log(`Scheduler running at http://localhost:${config.port}`));
 }
 

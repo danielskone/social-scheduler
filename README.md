@@ -50,6 +50,18 @@ npm run background:off     # stop
 
 The Mac must be on (the app keeps it from idle-sleeping; the screen can still turn off).
 
+## Clips (long video to short clips)
+
+The **Clips** tab turns a long video (interview, speech, podcast, live stream) into short vertical 9:16 clips with captions, ready for Reels, Shorts and TikTok. Everything runs on this computer for free:
+
+- **ffmpeg** (installed by `npm install` through `ffmpeg-static`) cuts each clip, reframes it to 1080x1920 (fill the screen from the center/left/right, or show the whole video over a blurred copy) and burns in the captions.
+- **Whisper base.en** (through `sherpa-onnx-node`) writes down what is said. The model (~200 MB) is downloaded once from the sherpa-onnx GitHub releases into `data/models/`. It runs in a separate low-priority process (`src/speech-worker.js`) so the app and scheduler stay quick.
+- The best moments are scored from the transcript and sound: strong opening lines and questions, grabby words, numbers, pace, energy, and whether the clip ends on a full thought. Videos without talking get the most energetic stretches instead.
+
+Each clip can be trimmed, reframed, have its caption words fixed (names, places), and then **Schedule** opens New post with the clip attached. Clips and their source videos live in `data/clips/` until you delete them in the tab. Captions use the bundled Archivo Black font (SIL Open Font License, `assets/fonts/`).
+
+Only upload videos you own or have permission to use. The app never downloads videos from YouTube, TikTok or other sites.
+
 ## Import many posts at once
 
 On the Calendar, **Import posts** takes a post bundle: one `.json` file with the posts and their pictures (base64). Format is documented at the top of `src/importer.js`. Everything is checked first; if any post has a problem, nothing is imported. Importing the same bundle twice doesn't create duplicates.
