@@ -148,11 +148,22 @@
 
   // ---------- Sign-up forms ----------
   async function renderForms() {
-    const forms = await call('/forms');
+    const [forms, site] = await Promise.all([call('/forms'), call('/website').catch(() => null)]);
     const url = forms[0]?.url || '';
     const note = /localhost|127\.0\.0\.1/.test(url) ? 'Forms only work for other people when the app has a public web address (the same one Instagram uses). Right now it only has this computer\'s address, so wait a minute and refresh.'
       : /trycloudflare\.com/.test(url) ? 'Heads up: these links change whenever your Mac restarts. Copy a fresh link here each time you share one, and update any old posts that use it.' : '';
-    q$('#form-list').innerHTML = (note ? `<div class="note" style="grid-column:1/-1;max-width:none">${note}</div>` : '')
+    const siteCard = !site ? '' : `<div class="item" style="grid-column:1/-1">
+        <b>Your website's forms</b> ${site.connected ? (site.lastError ? '<span class="pill" style="color:var(--bad)">Problem</span>' : '<span class="pill">Connected</span>') : '<span class="pill">Not set up</span>'}
+        ${site.connected
+          ? `<div class="muted">Sign-ups from your website land in <b>${h(site.group)}</b> within about 2 minutes, and your phone gets an alert. ${site.imported} so far.${site.lastCheck ? ` Last checked ${h(new Date(site.lastCheck.replace(' ', 'T') + 'Z').toLocaleString())}.` : ''}</div>
+            ${site.lastError ? `<div class="muted" style="color:var(--bad)">${h(site.lastError)}</div>` : ''}
+            <details style="margin-top:6px"><summary>Code for your website</summary><p class="muted">Paste this once into your website's "custom code" spot for every page (or before &lt;/body&gt;). Your forms keep working as before; this just copies each sign-up here.</p>
+            <textarea readonly rows="6" style="width:100%;font:12px ui-monospace,monospace">${h(site.snippet)}</textarea>
+            <div class="row"><button class="btn" data-site-copy>Copy code</button></div></details>
+            <div class="row"><button class="btn ghost" data-site-check>Check now</button><span class="muted" data-site-msg></span></div>`
+          : '<div class="muted">Want sign-ups from your website (like viralattraction.com) to show up here by themselves? Follow the steps in <b>website-inbox/README.md</b>, then run <b>npm run website</b> in Terminal.</div>'}
+      </div>`;
+    q$('#form-list').innerHTML = siteCard + (note ? `<div class="note" style="grid-column:1/-1;max-width:none">${note}</div>` : '')
       + (forms.map((f) => `<div class="item" data-form="${f.id}">
         <b>${h(f.title)}</b> ${f.active ? '' : '<span class="pill" style="color:var(--bad)">Off</span>'}
         <div class="muted">Adds people to <b>${h(f.group_name)}</b> · ${f.submissions} sign-up${f.submissions === 1 ? '' : 's'}</div>
@@ -160,6 +171,13 @@
         <div class="row"><a class="btn ghost" href="${h(f.url)}" target="_blank" rel="noopener">Open</a><button class="btn ghost" data-edit>Edit</button><button class="btn danger" data-del>Delete</button></div>
       </div>`).join('') || '<p class="muted">No forms yet. Try one for "Become a parade sponsor" or "Register a parade entry".</p>');
     q$('#form-list').onclick = async (e) => {
+      if ('siteCopy' in e.target.dataset) { await navigator.clipboard.writeText(site.snippet).catch(() => {}); e.target.textContent = 'Copied'; return; }
+      if ('siteCheck' in e.target.dataset) {
+        e.target.disabled = true;
+        const r = await call('/website/check', { method: 'POST' }).catch((err) => ({ error: err.message }));
+        q$('[data-site-msg]').textContent = r.error ? r.error : `Done: ${r.added || 0} new, ${r.updated || 0} updated.`;
+        e.target.disabled = false; return;
+      }
       const el = e.target.closest('[data-form]');
       if (!el) return;
       const f = forms.find((x) => x.id === Number(el.dataset.form));

@@ -13,7 +13,7 @@ const db = require('./db');
 const notify = require('./notify');
 const config = require('./config');
 
-const GROUPS = ['Parade sponsor', 'Donor', 'Parade entry', 'Volunteer', 'Vendor', 'Auto customer', 'Other'];
+const GROUPS = ['Parade sponsor', 'Donor', 'Parade entry', 'Volunteer', 'Vendor', 'Viral Attraction lead', 'Auto customer', 'Other'];
 const STAGES = ['New', 'Contacted', 'Interested', 'Committed', 'Paid / Done', 'Not this year'];
 const FIELDS = ['name', 'company', 'email', 'phone', 'website', 'address', 'group_name', 'stage', 'amount',
   'next_follow_up', 'email_ok', 'email_ok_source', 'do_not_contact', 'notes'];
@@ -382,15 +382,16 @@ function tooMany(ip, now = Date.now()) {
 }
 
 // Saves a public form submission. Returns { contact, isNew }.
-function submitForm(form, body) {
+// opts.optIn = { source } marks them OK to email (used for website newsletter sign-ups).
+function submitForm(form, body, opts = {}) {
   const s = (k, n) => String(body[k] || '').trim().slice(0, n);
   const name = s('name', 120), email = s('email', 200).toLowerCase(), phone = s('phone', 40), company = s('company', 160), message = s('message', 2000);
   if (!name) throw err400('Please enter your name.');
   if (!email && !phone) throw err400('Please enter an email or phone number.');
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw err400('That email address does not look right.');
-  const optIn = Boolean(form.email_checkbox && email && body.email_ok);
+  const optIn = Boolean(email && (opts.optIn || (form.email_checkbox && body.email_ok)));
   const existing = email ? db.prepare('SELECT * FROM contacts WHERE lower(email)=?').get(email) : null;
-  const source = `Checked "${form.email_checkbox}" on form "${form.title}"`;
+  const source = opts.optIn ? String(opts.optIn.source) : `Checked "${form.email_checkbox}" on form "${form.title}"`;
   let contact, isNew = false;
   if (existing) {
     const patch = {};
