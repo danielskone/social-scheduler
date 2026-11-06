@@ -260,6 +260,7 @@ function drawScenes() {
           ${m ? `<select data-k="framing" aria-label="Framing">${opt('auto', 'Auto fit', s.framing)}${opt('fill', 'Fill screen', s.framing)}${opt('fit', 'Show whole', s.framing)}</select>` : ''}
           <label class="ad-secs"><input data-k="seconds" type="number" min="1.5" max="60" step="0.5" value="${s.seconds || ''}" placeholder="auto">s</label>
           <label class="ad-endcard" title="Shows your logo and website big, like the end of a TV ad"><input type="checkbox" data-k="endCard"${s.endCard ? ' checked' : ''}>End card</label>
+          ${s.endCard ? '' : `<button type="button" class="ad-ai-btn" data-scene-ai="${i}">${AI.spark}Make with AI (free)</button>`}
         </div>
       </div>
       <div class="ad-scene-tools">
@@ -551,6 +552,7 @@ adsBody.addEventListener('click', async (e) => {
   const move = (from, to) => { const [s] = a.scenes.splice(from, 1); a.scenes.splice(to, 0, s); drawScenes(); saveScenes(); };
   if (t.dataset.sceneUp) return move(Number(t.dataset.sceneUp), Number(t.dataset.sceneUp) - 1);
   if (t.dataset.sceneDown) return move(Number(t.dataset.sceneDown), Number(t.dataset.sceneDown) + 1);
+  if (t.dataset.sceneAi) return openAiScene(Number(t.dataset.sceneAi));
   if (t.dataset.sceneDel) { a.scenes.splice(Number(t.dataset.sceneDel), 1); drawScenes(); saveScenes(); return; }
   if (t.dataset.adUnmedia) {
     const files = a.media.map((m) => m.file).filter((f) => f !== t.dataset.adUnmedia);
@@ -565,6 +567,97 @@ adsBody.addEventListener('click', async (e) => {
       await saveAdSoon({ media: files, scenes: a.scenes }, true); drawEditor();
     });
   }
+});
+
+// ---------- AI scenes (free, on the AI sites themselves) ----------
+// None of the AI video makers has a free API, so this writes the prompt for a scene, copies it
+// and opens the free website. The downloaded clip is then dropped onto the scene.
+const AI_SITES = [
+  { name: 'VideoExpress', url: 'https://app.videoexpress.ai/', note: 'Your account · no watermark · text or photo to video' },
+  { name: 'Google Flow', url: 'https://labs.google/fx/tools/flow', note: 'Veo 3.1 · about 50 free credits a day · 8-second clips' },
+  { name: 'Dreamina', url: 'https://dreamina.capcut.com/ai-tool/video/generate', note: 'Seedance · free credits every day' },
+  { name: 'Meta AI', url: 'https://www.meta.ai/', note: 'Free · ask it to "make a video of…"' },
+];
+const LOOK_PROMPT = {
+  bold: 'bright, colorful and energetic, punchy commercial style',
+  clean: 'clean, bright and natural, simple modern commercial style',
+  cinematic: 'cinematic, warm moody lighting, shallow depth of field, film look',
+};
+function aiPrompt(scene) {
+  const a = AS.ad;
+  const shape = a.formats.includes('9x16') || !a.formats.length ? 'vertical 9:16' : a.formats.includes('16x9') ? 'wide 16:9' : 'square 1:1';
+  const subject = a.details?.name ? ` for ${a.details.name}` : '';
+  const about = a.details?.about ? ` Context: ${a.details.about}` : '';
+  return `An 8-second ${shape} video for an ad${subject}. Show this moment: ${scene.headline ? `${scene.headline}. ` : ''}${scene.say || ''}${about} `
+    + `Style: ${LOOK_PROMPT[a.look] || LOOK_PROMPT.bold}. Real people and places, smooth camera movement. `
+    + 'No words, captions, logos or watermarks on screen. No famous people or cartoon characters.';
+}
+function openAiScene(i) {
+  const scene = AS.ad.scenes[i];
+  const dlg = $('#ads-dialog');
+  dlg.innerHTML = `<form method="dialog" class="ad-ai">
+    <h2>${AI.spark}Make scene ${i + 1} with AI, free</h2>
+    <ol class="ad-ai-steps"><li>Check the idea below (change anything you like).</li><li>Click a site: the idea is copied, paste it there and press Generate.</li><li>Download the video, then add it here (or drag it onto the scene).</li></ol>
+    <textarea id="ad-ai-prompt" rows="6">${esc(aiPrompt(scene))}</textarea>
+    <div class="ad-ai-sites">${AI_SITES.map((s, k) => `<button type="button" class="btn ghost" data-ai-site="${k}"><b>${esc(s.name)}</b><small>${esc(s.note)}</small></button>`).join('')}</div>
+    <p id="ad-ai-msg" class="clip-msg"></p>
+    <div class="row"><label class="btn primary">${AI.plus}Add the downloaded clip<input type="file" id="ad-ai-file" accept="video/*,image/*" hidden></label><button class="btn ghost" value="close">Close</button></div>
+    <p class="muted clip-fine">Free credits run out each day, so make the scenes that matter most first. Only use clips you made yourself.</p>
+  </form>`;
+  dlg.dataset.scene = String(i);
+  dlg.showModal();
+}
+$('#ads-dialog').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-ai-site]');
+  if (!b) return;
+  const site = AI_SITES[Number(b.dataset.aiSite)];
+  const text = $('#ad-ai-prompt').value;
+  let copied = false;
+  try { await navigator.clipboard.writeText(text); copied = true; } catch {
+    const t = $('#ad-ai-prompt'); t.select(); try { copied = document.execCommand('copy'); } catch {}
+  }
+  window.open(site.url, '_blank', 'noopener');
+  $('#ad-ai-msg').textContent = copied ? `Idea copied. Paste it into ${site.name} and press Generate.` : `Copy the idea above, then paste it into ${site.name}.`;
+});
+$('#ads-dialog').addEventListener('change', async (e) => {
+  if (e.target.id !== 'ad-ai-file') return;
+  const i = Number($('#ads-dialog').dataset.scene);
+  $('#ad-ai-msg').textContent = 'Adding your clip…';
+  if (await putClipInScene(i, e.target.files)) $('#ads-dialog').close();
+  else $('#ad-ai-msg').textContent = 'That file could not be added. Use an MP4 or MOV video.';
+});
+
+// A photo or video dropped on a scene (or picked for it) becomes that scene's picture.
+async function putClipInScene(i, files) {
+  const a = AS.ad;
+  const [m] = (await uploadAdMedia([...files].slice(0, 1), null)).filter((x) => x.kind !== 'audio');
+  if (!m || !a || !a.scenes[i]) return false;
+  a.scenes[i].media = m.file;
+  a.scenes[i].framing = 'auto';
+  await saveAdSoon({ media: [...a.media.map((x) => x.file), m.file], scenes: a.scenes }, true);
+  drawEditor();
+  banner(`Added to scene ${i + 1}.`);
+  setTimeout(() => banner(''), 2000);
+  return true;
+}
+adsBody.addEventListener('dragover', (e) => {
+  const sc = e.target.closest('.ad-scene');
+  if (!sc || !AS.ad || !e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  document.querySelectorAll('.ad-scene.drop').forEach((x) => x !== sc && x.classList.remove('drop'));
+  sc.classList.add('drop');
+});
+adsBody.addEventListener('dragleave', (e) => {
+  const sc = e.target.closest('.ad-scene');
+  if (sc && !sc.contains(e.relatedTarget)) sc.classList.remove('drop');
+});
+adsBody.addEventListener('drop', async (e) => {
+  const sc = e.target.closest('.ad-scene');
+  if (!sc || !AS.ad || !e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  sc.classList.remove('drop');
+  sc.classList.add('busy');
+  await putClipInScene(Number(sc.dataset.i), e.dataTransfer.files);
 });
 
 // A simple picker for photos and videos already in the studio.
