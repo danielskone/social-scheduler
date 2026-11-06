@@ -263,13 +263,14 @@ async function sendFollowUpReminder(now = new Date()) {
     WHERE t.done_at IS NULL AND t.due_on IS NOT NULL AND t.due_on <= ? ORDER BY t.due_on, t.id`).all(day);
   db.prepare('INSERT INTO crm_reminders_sent (day) VALUES (?)').run(day);
   const items = [
+    ...require('./booking').todaysLines(now),
     ...tasks.map((t) => `• ${t.title}${t.name ? ` (${t.name})` : ''}${t.due_on < day ? ' (overdue)' : ''}`),
     ...due.map((c) => `• Follow up: ${c.name}${c.company && c.company !== c.name ? ` (${c.company})` : ''}${c.next_follow_up < day ? ' (overdue)' : ''}`),
   ];
   if (!items.length) return false;
   const lines = items.slice(0, 10);
   if (items.length > 10) lines.push(`…and ${items.length - 10} more`);
-  return notify.send(`${items.length} to-do${items.length === 1 ? '' : 's'} today`, lines.join('\n'), { tags: 'telephone_receiver' });
+  return notify.send(`${items.length} thing${items.length === 1 ? '' : 's'} today`, lines.join('\n'), { tags: 'telephone_receiver' });
 }
 
 // ---------- Tasks ----------
@@ -516,4 +517,4 @@ router.get('/export.csv', wrap((req, res) => {
   res.send('﻿' + exportCsv({ emailList }));
 }));
 
-module.exports = { router, publicForms, listTasks, saveTask, saveTemplate, fillTemplate, prepareMessage, saveForm, submitForm, tooMany, createContact, updateContact, getContact, listContacts, logActivity, importCsv, exportCsv, parseCsv, summary, sendFollowUpReminder, GROUPS, STAGES };
+module.exports = { html: { page, esc, nl }, router, publicForms, listTasks, saveTask, saveTemplate, fillTemplate, prepareMessage, saveForm, submitForm, tooMany, createContact, updateContact, getContact, listContacts, logActivity, importCsv, exportCsv, parseCsv, summary, sendFollowUpReminder, GROUPS, STAGES };

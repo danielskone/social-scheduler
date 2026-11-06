@@ -21,7 +21,7 @@
   let timer;
 
   async function renderContacts(sub) {
-    tab = ['pipeline', 'tasks', 'forms', 'templates'].includes(sub) ? sub : 'list';
+    tab = ['pipeline', 'tasks', 'appointments', 'forms', 'templates'].includes(sub) ? sub : 'list';
     document.querySelectorAll('#crm-tabs a').forEach((a) => a.classList.toggle('active', a.dataset.tab === tab));
     document.querySelectorAll('.crm-panel').forEach((p) => (p.hidden = p.dataset.panel !== tab));
     meta = await call('/meta');
@@ -36,7 +36,7 @@
     q$('#crm-tiles').innerHTML = [
       ['Contacts', s.total], ['To-dos due', s.due + s.tasksDue], ['Committed (not paid yet)', money(s.pledged)], ['Paid', money(s.paid)], ['OK to email', s.emailable],
     ].map(([l, v]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v ?? 0}</div></div>`).join('');
-    await ({ list: renderList, pipeline: renderBoard, tasks: renderTasks, forms: renderForms, templates: renderTemplates }[tab])();
+    await ({ list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates }[tab])();
   }
   window.renderContacts = renderContacts;
   const refresh = () => renderContacts(tab);
@@ -190,6 +190,80 @@
       ['ask_company', 'ask_phone', 'ask_message', 'active'].forEach((k) => (data[k] = fm[k].checked));
       try { await call(f.id ? `/forms/${f.id}` : '/forms', { method: f.id ? 'PUT' : 'POST', json: data }); dlg.close(); refresh(); }
       catch (err) { q$('#form-msg', dlg).textContent = err.message; }
+    };
+    dlg.showModal();
+  }
+
+  // ---------- Appointments ----------
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  let bookingTz = 'America/New_York';
+  const apptWhen = (iso) => new Date(iso).toLocaleString([], { timeZone: bookingTz, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  async function renderAppointments() {
+    const [{ pages, timezone }, appts] = await Promise.all([call('/booking/pages'), call(`/booking/appointments${q$('#appt-past').checked ? '?past=1' : ''}`)]);
+    bookingTz = timezone;
+    q$('#appt-list').innerHTML = appts.map((a) => `<li data-appt="${a.id}" class="${a.status === 'cancelled' ? 'done' : ''}">
+      <span class="title"><b>${h(apptWhen(a.starts_at))}</b> · ${a.contact_id ? `<a href="#" data-open="${a.contact_id}">${h(a.contact_name)}</a>` : 'Deleted contact'}
+        ${a.phone ? ` · <a href="tel:${h(a.phone)}">${h(a.phone)}</a>` : ''}<br><span class="muted">${h(a.title)}${a.note ? ` · "${h(a.note)}"` : ''}${a.status === 'cancelled' ? ' · Cancelled' : ''}</span></span>
+      ${a.status === 'booked' && !q$('#appt-past').checked ? '<button class="btn ghost" data-cancel>Cancel</button>' : ''}</li>`).join('')
+      || `<li class="muted">${q$('#appt-past').checked ? 'No past appointments.' : 'No upcoming appointments yet. Share a booking link below.'}</li>`;
+    q$('#appt-list').onclick = async (e) => {
+      if (e.target.dataset.open) { e.preventDefault(); return openContact(Number(e.target.dataset.open)); }
+      const li = e.target.closest('[data-appt]');
+      if (li && 'cancel' in e.target.dataset && confirm('Cancel this appointment? The time opens up again. Remember to let them know.')) {
+        await call(`/booking/appointments/${li.dataset.appt}/cancel`, { method: 'POST' }); refresh();
+      }
+    };
+    const local = /localhost|127\.0\.0\.1/.test(pages[0]?.url || '');
+    q$('#bp-list').innerHTML = (local ? '<div class="note" style="grid-column:1/-1;max-width:none">Booking links only work for other people when the app has its public web address. Wait a minute and refresh.</div>'
+      : /trycloudflare\.com/.test(pages[0]?.url || '') ? '<div class="note" style="grid-column:1/-1;max-width:none">Heads up: these links change whenever your Mac restarts. Copy a fresh link each time you share one.</div>' : '')
+      + (pages.map((p) => `<div class="item" data-bp="${p.id}"><b>${h(p.title)}</b> ${p.active ? '' : '<span class="pill" style="color:var(--bad)">Off</span>'}
+        <div class="muted">${p.minutes} min · ${p.days.split(',').map((d) => DAYS[d]).join(', ')} · ${h(p.start_time)}–${h(p.end_time)} · ${p.upcoming} upcoming</div>
+        <div class="linkbox"><input readonly value="${h(p.url)}"><button class="btn" data-copy>Copy link</button></div>
+        <div class="row"><a class="btn ghost" href="${h(p.url)}" target="_blank" rel="noopener">Open</a><button class="btn ghost" data-edit>Edit</button><button class="btn danger" data-del>Delete</button></div></div>`).join('')
+      || '<p class="muted">No booking pages yet.</p>');
+    q$('#bp-list').onclick = async (e) => {
+      const el = e.target.closest('[data-bp]');
+      if (!el) return;
+      const p = pages.find((x) => x.id === Number(el.dataset.bp));
+      if ('copy' in e.target.dataset) { await navigator.clipboard.writeText(p.url).catch(() => {}); e.target.textContent = 'Copied'; }
+      if ('edit' in e.target.dataset) editBookingPage(p);
+      if ('del' in e.target.dataset && confirm(`Delete "${p.title}"? The link stops working. Booked appointments stay.`)) { await call(`/booking/pages/${p.id}`, { method: 'DELETE' }); refresh(); }
+    };
+  }
+  q$('#appt-past').onchange = renderAppointments;
+  q$('#bp-add').onclick = () => editBookingPage({ minutes: 30, days: '1,2,3,4,5', start_time: '09:00', end_time: '17:00', days_ahead: 30, notice_hours: 2, active: 1, group_name: 'Other',
+    email_checkbox: 'Yes, email me updates. I can unsubscribe any time.' });
+
+  function editBookingPage(p) {
+    const dlg = q$('#crm-edit-dialog');
+    const on = p.days.split(',');
+    dlg.innerHTML = `<form id="bp-form"><h1>${p.id ? 'Edit booking page' : 'New booking page'}</h1>
+      <label class="field"><span>Title</span><input name="title" required value="${h(p.title)}" placeholder="Book a test drive" style="width:100%"></label>
+      <label class="field"><span>Short intro <small>(optional)</small></span><textarea name="intro" rows="3">${h(p.intro)}</textarea></label>
+      <label class="field"><span>Where <small>(address or "Phone call"; optional)</small></span><input name="location" value="${h(p.location)}" style="width:100%"></label>
+      <div class="field"><span>Days open</span><div class="row">${DAYS.map((d, i) => `<label class="check"><input type="checkbox" name="day" value="${i}" ${on.includes(String(i)) ? 'checked' : ''}> ${d}</label>`).join('')}</div></div>
+      <div class="row">
+        <label class="field"><span>Opens</span><input type="time" name="start_time" value="${h(p.start_time)}" required></label>
+        <label class="field"><span>Closes</span><input type="time" name="end_time" value="${h(p.end_time)}" required></label>
+        <label class="field"><span>Length (minutes)</span><input type="number" name="minutes" min="5" max="480" step="5" value="${h(p.minutes)}" required style="width:110px"></label>
+      </div>
+      <div class="row">
+        <label class="field"><span>Book up to (days ahead)</span><input type="number" name="days_ahead" min="1" max="365" value="${h(p.days_ahead)}" style="width:110px"></label>
+        <label class="field"><span>Earliest booking (hours from now)</span><input type="number" name="notice_hours" min="0" max="720" value="${h(p.notice_hours)}" style="width:110px"></label>
+      </div>
+      <label class="field"><span>Put new people in group</span><input name="group_name" list="bp-groups" value="${h(p.group_name)}" style="width:100%"><datalist id="bp-groups">${meta.groups.map((g) => `<option value="${h(g)}">`).join('')}</datalist></label>
+      <label class="field"><span>Email permission box <small>(starts unticked; leave empty for no box)</small></span><input name="email_checkbox" value="${h(p.email_checkbox)}" style="width:100%"></label>
+      <label class="check"><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Page is on (people can book)</label>
+      <div class="row" style="margin-top:12px"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="bp-msg"></span></div></form>`;
+    q$('[data-close]', dlg).onclick = () => dlg.close();
+    q$('#bp-form', dlg).onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target, data = Object.fromEntries(new FormData(f));
+      data.days = [...f.querySelectorAll('[name=day]:checked')].map((x) => x.value).join(',');
+      delete data.day;
+      data.active = f.active.checked;
+      try { await call(p.id ? `/booking/pages/${p.id}` : '/booking/pages', { method: p.id ? 'PUT' : 'POST', json: data }); dlg.close(); refresh(); }
+      catch (err) { q$('#bp-msg', dlg).textContent = err.message; }
     };
     dlg.showModal();
   }

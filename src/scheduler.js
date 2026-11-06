@@ -85,8 +85,8 @@ function start() {
   db.prepare(`UPDATE post_targets SET status='failed', error='App restarted while publishing. Check the platform, then retry if it did not post.' WHERE status='publishing'`).run();
   cron.schedule('* * * * *', () => publishDue().catch((e) => console.error(e)));
   cron.schedule('*/2 * * * *', () => media.prefetch().catch((e) => console.error(e)));
-  // Contacts: one phone alert each morning listing follow-ups due today or overdue.
-  cron.schedule('0 8 * * *', () => crm.sendFollowUpReminder().catch((e) => console.error(e)));
+  // Contacts: one phone alert at 8am (Eastern unless BOOKING_TIMEZONE says otherwise) with today's appointments, tasks and follow-ups.
+  cron.schedule('0 8 * * *', () => crm.sendFollowUpReminder().catch((e) => console.error(e)), { timezone: process.env.BOOKING_TIMEZONE || 'America/New_York' });
   cron.schedule('17 */3 * * *', () => refreshStats().catch((e) => console.error(e)));
 }
 

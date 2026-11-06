@@ -83,7 +83,7 @@ test('follow-up reminder goes to the phone once a day', async () => {
   crm.createContact({ name: 'Left Alone', next_follow_up: ymd(past), do_not_contact: true });
   assert.strictEqual(await crm.sendFollowUpReminder(day), true);
   assert.strictEqual(got.length, 1);
-  assert.match(got[0].title, /2 to-dos/);
+  assert.match(got[0].title, /2 things today/);
   assert.match(got[0].message, /Send invoice \(Late One\)/);
   assert.match(got[0].message, /Late One \(overdue\)/);
   assert.doesNotMatch(got[0].message, /Left Alone/);
