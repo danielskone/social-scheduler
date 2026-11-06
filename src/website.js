@@ -40,7 +40,7 @@ function importRow(r) {
   return crm.submitForm(
     { title, group_name: GROUP },
     { name: r.name || r.company || (r.email || '').split('@')[0], email: r.email, phone: r.phone, company: r.company, message },
-    { optIn },
+    { optIn, newsletterOnly: Boolean(optIn && !r.message && !r.interest && !r.preferred_time) },
   );
 }
 

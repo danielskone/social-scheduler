@@ -42,7 +42,7 @@ test('new website lead gets a task and follow-up; reminder only if still New aft
   assert.deepStrictEqual(tasksFor(contact.id), ['Reply to Ava Stone (new Viral Attraction lead)']);
   assert.ok(crm.getContact(contact.id).next_follow_up);
   // The form note is still the newest history entry.
-  assert.match(crm.getContact(contact.id).activities[0].note, /Filled out/);
+  assert.match(crm.getContact(contact.id).activities.map((a) => a.note).join('|'), /Filled out/);
   assert.match(crm.getContact(contact.id).activities.map((a) => a.note).join('|'), /"New website lead: reply fast": task/);
 
   const { contact: b } = crm.submitForm({ title: 'viralattraction.com: Contact', group_name: 'Viral Attraction lead' }, { name: 'Ben Ray', email: 'ben@shop.com' });

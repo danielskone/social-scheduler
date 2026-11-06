@@ -69,7 +69,7 @@ test('a new website lead gets the welcome email with address and unsubscribe, on
 
   // Same automation never emails the same person twice.
   const a = auto.list().find((x) => x.name === 'New website lead: reply fast');
-  auto.handle('contact_added', { contact: crm.getContact(contact.id), source: 'form' });
+  auto.handle('form_filled', { contact: crm.getContact(contact.id), form: site.title });
   await wait();
   assert.strictEqual(sent.length, 1);
   assert.ok(a);
@@ -98,7 +98,7 @@ test('a failed send is recorded and can be retried by a later run', async () => 
   assert.strictEqual(row.status, 'failed');
   assert.match(row.error, /Sender is not valid/);
   fail = false;
-  auto.handle('contact_added', { contact: crm.getContact(contact.id), source: 'form' });
+  auto.handle('form_filled', { contact: crm.getContact(contact.id), form: site.title });
   await wait();
   assert.strictEqual(sent.length, 1);
 });

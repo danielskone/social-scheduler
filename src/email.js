@@ -11,6 +11,7 @@
 //    "unsubscribe"); the email also carries a one-click unsubscribe header;
 //  - each automation emails a person at most once, and there is a daily limit.
 const db = require('./db');
+const design = require('./emaildesign');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS crm_emails_sent (
@@ -42,6 +43,12 @@ function footer(reason) {
     + `Don't want emails from us? Just reply with "unsubscribe" and we'll take you off right away.`;
 }
 
+function footerHtml(reason) {
+  const s = settings(), e = design.esc;
+  return `<b>${e(s.fromName)}</b><br>${e(s.address)}<br><br>You're getting this email because ${e(reason)}. `
+    + `Don't want emails from us? <a href="mailto:${e(s.from)}?subject=unsubscribe" style="color:#80869a">Unsubscribe</a> (or just reply "unsubscribe").`;
+}
+
 const sentToday = () => db.prepare("SELECT COUNT(*) AS n FROM crm_emails_sent WHERE status != 'failed' AND sent_at >= datetime('now', '-1 day')").get().n;
 
 // Throws (with a plain-English message) if this email must not go out. Otherwise records it
@@ -58,7 +65,7 @@ function claim({ contact, automationId, templateId, subject }) {
     .run(contact.id, automationId, templateId, contact.email, subject).lastInsertRowid;
 }
 
-async function deliver(rowId, { to, toName, subject, text, reason }, { fetchImpl = fetch } = {}) {
+async function deliver(rowId, { to, toName, subject, text, reason, design: d }, { fetchImpl = fetch } = {}) {
   const s = settings();
   try {
     const res = await fetchImpl(`${s.api}/v3/smtp/email`, {
@@ -69,7 +76,8 @@ async function deliver(rowId, { to, toName, subject, text, reason }, { fetchImpl
         to: [{ email: to, ...(toName ? { name: toName } : {}) }],
         replyTo: { email: s.from, name: s.fromName },
         subject,
-        textContent: text + footer(reason),
+        textContent: [d?.heading, text, d?.button_text && d?.button_url ? `${d.button_text}: ${d.button_url}` : ''].filter(Boolean).join('\n\n') + footer(reason),
+        htmlContent: design.render({ ...(d || {}), body: text }, footerHtml(reason)),
         headers: { 'List-Unsubscribe': `<mailto:${s.from}?subject=unsubscribe>` },
       }),
       signal: AbortSignal.timeout(30000),
@@ -100,4 +108,4 @@ function status() {
     recent: db.prepare('SELECT e.*, c.name AS contact_name FROM crm_emails_sent e LEFT JOIN contacts c ON c.id=e.contact_id ORDER BY e.id DESC LIMIT 10').all() };
 }
 
-module.exports = { ready, claim, deliver, sendTest, status, footer, settings };
+module.exports = { ready, claim, deliver, sendTest, status, footer, footerHtml, settings };

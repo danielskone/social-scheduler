@@ -23,6 +23,7 @@ const TRIGGERS = {
   form_filled: 'Someone fills out a form',
   stage_changed: 'A contact moves to a stage',
   appointment_booked: 'Someone books an appointment',
+  email_opt_in: 'Someone says yes to email (subscribes)',
 };
 const STEPS = ['alert', 'email', 'task', 'stage', 'group', 'follow_up', 'note', 'wait'];
 
@@ -109,7 +110,10 @@ function cleanTrigger(t) {
   if (!TRIGGERS[t?.type]) throw err400('Pick what starts this automation.');
   const out = { type: t.type, group: str(t.group, 80) || null, stage: crm.STAGES.includes(t.stage) ? t.stage : null };
   if (t.type === 'stage_changed' && !out.stage) throw err400('Pick which stage starts it.');
-  if (t.type === 'form_filled') out.form = str(t.form, 200) || null;
+  if (t.type === 'form_filled') {
+    out.form = str(t.form, 200) || null;
+    out.skip_newsletter = Boolean(t.skip_newsletter);
+  }
   return out;
 }
 
@@ -144,7 +148,9 @@ let depth = 0; // automations can set off other automations, but only a few leve
 function matches(a, event, data) {
   const t = a.trigger, c = data.contact;
   if (t.type !== event) return false;
-  if (t.group && t.group !== c.group_name) return false;
+  // "Group" can list several, separated by commas.
+  if (t.group && !t.group.split(',').map((g) => g.trim().toLowerCase()).includes(String(c.group_name).toLowerCase())) return false;
+  if (event === 'form_filled' && t.skip_newsletter && data.newsletterOnly) return false;
   if (event === 'stage_changed') return data.to === t.stage;
   if (t.stage && t.stage !== c.stage) return false;
   if (event === 'form_filled' && t.form && !String(data.form || '').toLowerCase().includes(t.form.toLowerCase())) return false;
@@ -207,11 +213,12 @@ function sendEmail(a, c, s, vars = {}) {
   // CAN-SPAM and good sense: only people who contacted you, or who said yes to email.
   if (!vars.reached_out && !c.email_ok) return `skipped email: ${c.name} didn't contact you or say yes to email`;
   const subject = crm.fillTemplate(t.subject || t.name, c), text = crm.fillTemplate(t.body, c);
+  const design = { ...t, heading: crm.fillTemplate(t.heading, c), body: text, preheader: crm.fillTemplate(t.preheader, c) };
   let rowId;
   try { rowId = email.claim({ contact: c, automationId: a.id, templateId: t.id, subject }); }
   catch (e) { return `skipped email: ${e.message}`; }
   const reason = vars.reached_out ? `you contacted us${vars.form ? ` ("${vars.form}")` : ''}` : 'you signed up to get email from us';
-  email.deliver(rowId, { to: c.email, toName: c.name, subject, text, reason }).then((r) => {
+  email.deliver(rowId, { to: c.email, toName: c.name, subject, text, reason, design }).then((r) => {
     try {
       if (r.ok) crm.logActivity(c.id, { kind: 'Email', note: `Sent "${t.name}" automatically ("${subject}")` });
       else {
@@ -279,7 +286,7 @@ if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_automations'").get(
       `Hi {first_name},\n\nThanks for reaching out to Viral Attraction! I got your message and I'll get back to you personally within one business day.\n\nIf it's easier, just reply to this email with a good time to talk.\n\nTalk soon,\nDaniel King\nViral Attraction\nhttps://viralattraction.com`);
     const welcomeSponsor = addTpl('Sponsor lead welcome', 'Thank you for your interest in sponsoring the parade!',
       `Hi {first_name},\n\nThank you for your interest in sponsoring the Fuquay-Varina Christmas Parade! I'll reach out soon with the details.\n\nIn the meantime, you can see the sponsor levels and sign up here: https://fuquayvarinachristmasparade.org/parade/sponsorship\n\nThank you,\nDaniel King\nFuquay-Varina Christmas Parade`);
-    save({ name: 'New website lead: reply fast', trigger: { type: 'contact_added', group: 'Viral Attraction lead' }, steps: [
+    save({ name: 'New website lead: reply fast', trigger: { type: 'form_filled', group: 'Viral Attraction lead', skip_newsletter: true }, steps: [
       { type: 'email', template_id: welcomeVA },
       { type: 'task', title: 'Reply to {name} (new Viral Attraction lead)', due_days: 0 },
       { type: 'follow_up', days: 2 },
@@ -307,6 +314,38 @@ if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_automations'").get(
       { type: 'task', title: 'Get ready for appointment with {name} ({when})', due_days: 0 },
     ] });
     db.prepare("INSERT INTO crm_flags (name) VALUES ('starter_automations')").run();
+  })();
+}
+
+// Ready-made email flows (Omnisend-style welcome series), added once.
+if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_email_flows'").get()) {
+  const tpl = (name) => db.prepare('SELECT id FROM crm_templates WHERE name=?').get(name)?.id || null;
+  const add = (name, f) => tpl(name) || crm.saveTemplate({ name, channel: 'email', ...f }).id;
+  const va = 'https://viralattraction.com', parade = 'https://fuquayvarinachristmasparade.org';
+  db.transaction(() => {
+    const w1 = add('Viral Attraction welcome 1: hello', { subject: 'Welcome to Viral Attraction, {first_name}!', preheader: "Here's what to expect from us",
+      heading: 'Welcome to Viral Attraction!', button_text: 'See our work', button_url: va,
+      body: `Hi {first_name},\n\nThanks for joining the Viral Attraction email list! We're a video marketing team right here in Fuquay-Varina, and we help local businesses get seen with short videos that people actually watch.\n\nEvery so often we'll send you simple video ideas, local success stories and the occasional special offer. No spam, ever.\n\nTalk soon,\nDaniel King` });
+    const w2 = add('Viral Attraction welcome 2: tips', { subject: '3 quick video ideas for your business', preheader: 'You can film these on your phone this week',
+      heading: '3 videos you can film this week', button_text: 'Get more ideas', button_url: va,
+      body: `Hi {first_name},\n\nHere are three short videos that work for almost any local business:\n\n**1. Meet the owner.** 30 seconds on why you started and who you love helping.\n\n**2. Behind the scenes.** Show how your product or service comes together.\n\n**3. Happy customer.** A quick clip of a real customer saying what they liked.\n\nKeep each one under 60 seconds and post it on Facebook, Instagram, TikTok and YouTube Shorts.\n\nDaniel King\nViral Attraction` });
+    const w3 = add('Viral Attraction welcome 3: free call', { subject: 'Want a free video plan, {first_name}?', preheader: 'A free 20-minute call, no pressure',
+      heading: 'Let us plan your next videos for free', button_text: 'Book a free call', button_url: va,
+      body: `Hi {first_name},\n\nIf you'd like help getting more customers from video, I'd be happy to look at your business and give you a simple video plan on a free 20-minute call. No pressure at all.\n\nJust tap the button below, or reply to this email with a good time.\n\nDaniel King\nViral Attraction` });
+    const p1 = add('Parade news welcome', { subject: "You're on the Fuquay-Varina Christmas Parade list!", preheader: 'Parade news, sponsor spots and ways to help',
+      heading: 'Thanks for joining the parade list!', button_text: 'Visit the parade website', button_url: parade,
+      body: `Hi {first_name},\n\nThank you for signing up for Fuquay-Varina Christmas Parade news! We'll keep you posted on the parade date, route and fun extras.\n\nWant to be part of it? On our website you can **sponsor** the parade, **shop** parade gear, **register** an entry or **donate**:\n${parade}\n\nSee you downtown!\nDaniel King\nFuquay-Varina Christmas Parade` });
+    save({ name: 'Welcome series: Viral Attraction subscribers', trigger: { type: 'email_opt_in', group: 'Viral Attraction lead' }, steps: [
+      { type: 'email', template_id: w1 },
+      { type: 'wait', amount: 2, unit: 'days' },
+      { type: 'email', template_id: w2 },
+      { type: 'wait', amount: 3, unit: 'days', if_stage: 'New' },
+      { type: 'email', template_id: w3 },
+    ] });
+    save({ name: 'Welcome: parade news subscribers', trigger: { type: 'email_opt_in', group: 'Parade entry, Volunteer, Vendor, Donor, Other' }, steps: [
+      { type: 'email', template_id: p1 },
+    ] });
+    db.prepare("INSERT INTO crm_flags (name) VALUES ('starter_email_flows')").run();
   })();
 }
 

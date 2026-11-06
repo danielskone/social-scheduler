@@ -13,6 +13,7 @@ const tiktok = require('./tiktok');
 const crm = require('./crm');
 const website = require('./website');
 const automations = require('./automations');
+const campaigns = require('./campaigns');
 const gcal = require('./gcal');
 
 const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram, youtube: youtube.publishYouTube, tiktok: tiktok.publishTikTok };
@@ -157,6 +158,8 @@ function start() {
   website.check().catch(() => {});
   // CRM automations: carry on the ones whose "wait" is over.
   cron.schedule('* * * * *', () => { try { automations.runWaiting(); } catch (e) { console.error(e); } });
+  // Email campaigns: read opens/clicks from Brevo and mark anyone who unsubscribed as "Do not contact".
+  cron.schedule('41 * * * *', () => campaigns.hourly().catch((e) => console.error(e)));
   // Google Calendar bookings (the website's "Book a free call" page) -> Contacts + Appointments.
   cron.schedule('*/5 * * * *', () => gcal.check().catch((e) => console.error(e)));
   gcal.check().catch(() => {});

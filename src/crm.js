@@ -85,6 +85,11 @@ CREATE TABLE IF NOT EXISTS crm_templates (
 if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_tasks') WHERE name='template_id'").get()) {
   db.exec('ALTER TABLE crm_tasks ADD COLUMN template_id INTEGER REFERENCES crm_templates(id) ON DELETE SET NULL');
 }
+// Email templates can also be designed emails (heading, picture, button) for campaigns and flows.
+const DESIGN = ['preheader', 'heading', 'image_url', 'button_text', 'button_url'];
+for (const col of DESIGN) {
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_templates') WHERE name=?").get(col)) db.exec(`ALTER TABLE crm_templates ADD COLUMN ${col} TEXT`);
+}
 
 if (!db.prepare('SELECT 1 FROM crm_templates LIMIT 1').get()) {
   const add = db.prepare('INSERT INTO crm_templates (name, channel, subject, body) VALUES (?,?,?,?)');
@@ -133,7 +138,10 @@ const cols = [...FIELDS, 'email_ok_at'];
 function createContact(body, { source = 'manual', form } = {}) {
   const c = clean(body);
   const r = db.prepare(`INSERT INTO contacts (${cols.join(',')}) VALUES (${cols.map((k) => '@' + k).join(',')})`).run(c);
-  if (source !== 'import') emit('contact_added', { contact: getContact(r.lastInsertRowid), source, form });
+  if (source !== 'import') {
+    emit('contact_added', { contact: getContact(r.lastInsertRowid), source, form });
+    if (c.email_ok) emit('email_opt_in', { contact: getContact(r.lastInsertRowid), source, form });
+  }
   return getContact(r.lastInsertRowid);
 }
 
@@ -144,6 +152,7 @@ function updateContact(id, body) {
   db.prepare(`UPDATE contacts SET ${cols.map((k) => `${k}=@${k}`).join(',')}, updated_at=datetime('now') WHERE id=@id`).run({ ...c, id: old.id });
   if (old.email_ok && !c.email_ok) logActivity(old.id, { kind: 'Note', note: 'Removed from email list (no longer OK to email).' });
   if (!old.email_ok && c.email_ok) logActivity(old.id, { kind: 'Note', note: `OK to email: ${c.email_ok_source}` });
+  if (!old.email_ok && c.email_ok) emit('email_opt_in', { contact: getContact(old.id) });
   if (old.stage !== c.stage) emit('stage_changed', { contact: getContact(old.id), from: old.stage, to: c.stage });
   return getContact(old.id);
 }
@@ -326,8 +335,12 @@ function fillTemplate(text, c) {
 function saveTemplate(body, id) {
   const t = { name: String(body.name || '').trim(), channel: body.channel === 'text' ? 'text' : 'email', subject: String(body.subject || '').trim() || null, body: String(body.body || '').trim() };
   if (!t.name || !t.body) throw err400('A template needs a name and a message.');
-  if (id) db.prepare('UPDATE crm_templates SET name=@name, channel=@channel, subject=@subject, body=@body WHERE id=@id').run({ ...t, id });
-  else id = db.prepare('INSERT INTO crm_templates (name, channel, subject, body) VALUES (@name,@channel,@subject,@body)').run(t).lastInsertRowid;
+  for (const k of DESIGN) t[k] = t.channel === 'email' ? String(body[k] || '').trim().slice(0, 500) || null : null;
+  if (t.button_text && !/^https?:\/\//i.test(t.button_url || '')) throw err400('The button needs a web address that starts with https://');
+  if (t.image_url && !/^https:\/\//i.test(t.image_url)) throw err400('The picture needs a web address that starts with https:// (for example from your website).');
+  const cols = ['name', 'channel', 'subject', 'body', ...DESIGN];
+  if (id) db.prepare(`UPDATE crm_templates SET ${cols.map((k) => `${k}=@${k}`).join(',')} WHERE id=@id`).run({ ...t, id });
+  else id = db.prepare(`INSERT INTO crm_templates (${cols.join(',')}) VALUES (${cols.map((k) => '@' + k).join(',')})`).run(t).lastInsertRowid;
   return db.prepare('SELECT * FROM crm_templates WHERE id=?').get(id);
 }
 // Builds the message for one contact and logs it. Refuses people marked "Do not contact".
@@ -420,7 +433,7 @@ function submitForm(form, body, opts = {}) {
     isNew = true;
   }
   logActivity(contact.id, { kind: 'Form', note: `Filled out "${form.title}"${message ? `:\n${message}` : ''}` });
-  emit('form_filled', { contact: getContact(contact.id), form: form.title, isNew });
+  emit('form_filled', { contact: getContact(contact.id), form: form.title, isNew, newsletterOnly: Boolean(opts.newsletterOnly ?? (opts.optIn && !message)) });
   return { contact: getContact(contact.id), isNew };
 }
 

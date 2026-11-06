@@ -21,7 +21,7 @@
   let timer;
 
   async function renderContacts(sub) {
-    tab = ['pipeline', 'tasks', 'appointments', 'forms', 'templates', 'automations'].includes(sub) ? sub : 'list';
+    tab = ['pipeline', 'tasks', 'appointments', 'forms', 'templates', 'automations', 'email'].includes(sub) ? sub : 'list';
     document.querySelectorAll('#crm-tabs a').forEach((a) => a.classList.toggle('active', a.dataset.tab === tab));
     document.querySelectorAll('.crm-panel').forEach((p) => (p.hidden = p.dataset.panel !== tab));
     meta = await call('/meta');
@@ -36,7 +36,7 @@
     q$('#crm-tiles').innerHTML = [
       ['Contacts', s.total], ['To-dos due', s.due + s.tasksDue], ['Committed (not paid yet)', money(s.pledged)], ['Paid', money(s.paid)], ['OK to email', s.emailable],
     ].map(([l, v]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v ?? 0}</div></div>`).join('');
-    await ({ list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations }[tab])();
+    await ({ list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
   }
   window.renderContacts = renderContacts;
   const refresh = () => renderContacts(tab);
@@ -316,17 +316,149 @@
 
   function editTemplate(t) {
     const dlg = q$('#crm-edit-dialog');
+    dlg.classList.add('wide');
     dlg.innerHTML = `<form id="tpl-form"><h1>${t.id ? 'Edit template' : 'New template'}</h1>
+      <div class="tpl-grid"><div>
       <label class="field"><span>Name</span><input name="name" required value="${h(t.name)}" style="width:100%"></label>
       <label class="field"><span>Type</span><select name="channel"><option value="email"${t.channel !== 'text' ? ' selected' : ''}>Email</option><option value="text"${t.channel === 'text' ? ' selected' : ''}>Text message</option></select></label>
-      <label class="field"><span>Subject <small>(email only)</small></span><input name="subject" value="${h(t.subject)}" style="width:100%"></label>
-      <label class="field"><span>Message <small>{first_name}, {name}, {company} are filled in for you</small></span><textarea name="body" rows="8" required>${h(t.body)}</textarea></label>
+      <label class="field" data-em><span>Subject</span><input name="subject" value="${h(t.subject)}" style="width:100%"></label>
+      <label class="field" data-em><span>Preview line <small>(shown next to the subject in the inbox; optional)</small></span><input name="preheader" value="${h(t.preheader)}" style="width:100%"></label>
+      <label class="field" data-em><span>Big heading <small>(optional)</small></span><input name="heading" value="${h(t.heading)}" style="width:100%"></label>
+      <label class="field" data-em><span>Picture web address <small>(https://…, optional; right-click a picture on your website > Copy image address)</small></span><input name="image_url" value="${h(t.image_url)}" style="width:100%"></label>
+      <label class="field"><span>Message <small>{first_name}, {name}, {company} are filled in. **bold** works. Leave a blank line between paragraphs.</small></span><textarea name="body" rows="9" required>${h(t.body)}</textarea></label>
+      <div class="row" data-em>
+        <label class="field"><span>Button text <small>(optional)</small></span><input name="button_text" value="${h(t.button_text)}" placeholder="Book a free call"></label>
+        <label class="field" style="flex:1"><span>Button link</span><input name="button_url" value="${h(t.button_url)}" placeholder="https://viralattraction.com" style="width:100%"></label>
+      </div>
+      </div><div data-em><div class="muted small">Preview (with a sample name)</div><iframe id="tpl-preview" title="Email preview" style="width:100%;height:520px;border:1px solid var(--line);border-radius:10px;background:#f3f4f8"></iframe></div></div>
       <div class="row"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="tpl-msg"></span></div></form>`;
+    const form = q$('#tpl-form', dlg);
+    let pt;
+    const preview = () => {
+      const data = Object.fromEntries(new FormData(form));
+      dlg.querySelectorAll('[data-em]').forEach((el) => (el.hidden = data.channel !== 'email'));
+      if (data.channel !== 'email') return;
+      clearTimeout(pt);
+      pt = setTimeout(async () => {
+        const res = await fetch('/api/crm/email/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).catch(() => null);
+        if (res && res.ok) q$('#tpl-preview', dlg).srcdoc = await res.text();
+      }, 250);
+    };
+    form.addEventListener('input', preview); preview();
     q$('[data-close]', dlg).onclick = () => dlg.close();
-    q$('#tpl-form', dlg).onsubmit = async (e) => {
+    dlg.onclose = () => dlg.classList.remove('wide');
+    form.onsubmit = async (e) => {
       e.preventDefault();
       try { await call(t.id ? `/templates/${t.id}` : '/templates', { method: t.id ? 'PUT' : 'POST', json: Object.fromEntries(new FormData(e.target)) }); dlg.close(); refresh(); }
       catch (err) { q$('#tpl-msg', dlg).textContent = err.message; }
+    };
+    dlg.showModal();
+  }
+
+  // ---------- Email marketing ----------
+  const pct = (x) => (x == null ? '–' : `${Math.round(x * 100)}%`);
+  const when = (iso) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+  const STATUS = { draft: 'Draft', sending: 'Sending…', scheduled: 'Scheduled', sent: 'Sent', failed: 'Problem' };
+  async function renderEmail() {
+    const [d, tpls, autos] = await Promise.all([call('/email'), call('/templates'), call('/automations')]);
+    const o = d.overview, em = d.email;
+    q$('#em-tiles').innerHTML = [['Subscribers', o.subscribers], ['New in 30 days', o.newSubs], ['Campaigns sent', o.campaignsSent], ['Flow emails (30 days)', o.flowEmails],
+      ['Open rate', pct(o.openRate)], ['Click rate', pct(o.clickRate)], ['Unsubscribes', o.unsubscribed]]
+      .map(([l, v]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v ?? 0}</div></div>`).join('');
+    q$('#em-setup').innerHTML = em.ready ? '' : `<div class="note" style="max-width:none">Email is not connected yet, so nothing can be sent. It's free: make a Brevo account, then in Terminal run <b>cd ~/social-scheduler && npm run email-setup</b>. You can still build designs, segments and campaigns now.</div>`;
+    const emailTpls = tpls.filter((t) => t.channel === 'email');
+    const statBar = (c) => (c.stats ? `<div class="muted small">Delivered ${c.stats.delivered} · Opened ${c.stats.opened} (${pct(c.stats.delivered ? c.stats.opened / c.stats.delivered : null)}) · Clicked ${c.stats.clicked} (${pct(c.stats.delivered ? c.stats.clicked / c.stats.delivered : null)}) · Unsubscribed ${c.stats.unsubscribed}${c.stats.bounced ? ` · Bounced ${c.stats.bounced}` : ''}</div>` : '');
+    q$('#em-campaigns').innerHTML = d.campaigns.map((c) => `<div class="item" data-camp="${c.id}">
+      <b>${h(c.name)}</b> <span class="pill"${c.status === 'failed' ? ' style="color:var(--bad)"' : ''}>${STATUS[c.status] || h(c.status)}</span>
+      <div class="muted">${h(c.template_name || 'No design yet')} → ${h(c.segment_name || 'nobody picked yet')}</div>
+      <div class="muted small">${c.status === 'sent' ? `Sent ${when(c.sent_at)} to ${c.recipients}` : c.status === 'scheduled' ? `Goes out ${when(c.send_at)} to ${c.recipients}` : c.send_at ? `Will go out ${when(c.send_at)}` : 'Sends as soon as you press Send'}</div>
+      ${statBar(c)}${c.error ? `<div class="muted small" style="color:var(--bad)">${h(c.error)}</div>` : ''}
+      <div class="row">${['draft', 'failed'].includes(c.status) ? `<button class="btn primary" data-send>${c.send_at ? 'Schedule' : 'Send'}</button><button class="btn ghost" data-edit>Edit</button>` : ''}
+        <button class="btn ghost" data-copy>Copy</button>${['draft', 'failed'].includes(c.status) ? '<button class="btn danger" data-del>Delete</button>' : ''}</div></div>`).join('')
+      || '<p class="muted">No campaigns yet. Click "+ New campaign".</p>';
+    const flows = autos.automations.filter((a) => a.steps.some((s) => s.type === 'email'));
+    q$('#em-flows').innerHTML = flows.map((a) => `<div class="item"><b>${h(a.name)}</b> ${a.active ? '<span class="pill">On</span>' : '<span class="pill" style="color:var(--bad)">Off</span>'}
+      <div class="muted small">${a.steps.filter((s) => s.type === 'email').length} email${a.steps.filter((s) => s.type === 'email').length === 1 ? '' : 's'} · ran ${a.runs} time${a.runs === 1 ? '' : 's'}</div>
+      <ol style="margin:6px 0 0 18px;padding:0">${a.steps.filter((s) => s.type === 'email' || s.type === 'wait').map((s) => `<li class="small">${s.type === 'wait' ? `wait ${s.amount} ${s.unit}` : h((tpls.find((t) => t.id === s.template_id) || {}).subject || 'email')}</li>`).join('')}</ol></div>`).join('')
+      || '<p class="muted">No email flows yet.</p>';
+    q$('#em-segments').innerHTML = d.segments.map((s) => `<div class="item" data-seg="${s.id}"><b>${h(s.name)}</b> <span class="pill">${s.count} ${s.count === 1 ? 'person' : 'people'}</span>
+      <div class="muted small">${s.groups.length ? `Groups: ${h(s.groups.join(', '))}` : 'All groups'}${s.stages.length ? ` · Stages: ${h(s.stages.join(', '))}` : ''}${s.joined_days ? ` · Said yes in the last ${s.joined_days} days` : ''}</div>
+      <div class="row"><button class="btn ghost" data-people>See who</button><button class="btn ghost" data-edit>Edit</button><button class="btn danger" data-del>Delete</button></div><div data-list></div></div>`).join('');
+    q$('#em-designs').innerHTML = emailTpls.map((t) => `<div class="item" data-tpl="${t.id}"><b>${h(t.name)}</b><div class="muted small">Subject: ${h(t.subject || t.name)}</div>
+      <iframe loading="lazy" src="/api/crm/email/preview/${t.id}" title="Preview" style="width:100%;height:220px;border:1px solid var(--line);border-radius:8px;pointer-events:none;background:#f3f4f8"></iframe>
+      <div class="row"><button class="btn ghost" data-edit>Edit</button></div></div>`).join('');
+
+    q$('#em-campaigns').onclick = async (e) => {
+      const el = e.target.closest('[data-camp]'); if (!el) return;
+      const c = d.campaigns.find((x) => x.id === Number(el.dataset.camp));
+      try {
+        if ('edit' in e.target.dataset) editCampaign(c, d, emailTpls);
+        if ('copy' in e.target.dataset) { await call(`/email/campaigns/${c.id}/copy`, { method: 'POST' }); refresh(); }
+        if ('del' in e.target.dataset && confirm(`Delete "${c.name}"?`)) { await call(`/email/campaigns/${c.id}`, { method: 'DELETE' }); refresh(); }
+        if ('send' in e.target.dataset) {
+          const seg = d.segments.find((s) => s.id === c.segment_id);
+          if (!confirm(`${c.send_at ? `Schedule "${c.name}" for ${when(c.send_at)}` : `Send "${c.name}" now`} to ${seg ? `${seg.count} people in "${seg.name}"` : 'this segment'}? This can't be undone.`)) return;
+          e.target.disabled = true; e.target.textContent = 'Sending…';
+          await call(`/email/campaigns/${c.id}/send`, { method: 'POST' }); say(c.send_at ? 'Scheduled. Brevo will send it at that time, even if your Mac is off.' : 'Sent! Stats show up within an hour (or press Refresh stats).'); refresh();
+        }
+      } catch (err) { say(err.message, true); refresh(); }
+    };
+    q$('#em-segments').onclick = async (e) => {
+      const el = e.target.closest('[data-seg]'); if (!el) return;
+      const s = d.segments.find((x) => x.id === Number(el.dataset.seg));
+      if ('edit' in e.target.dataset) editSegment(s, d);
+      if ('del' in e.target.dataset && confirm(`Delete the segment "${s.name}"? Nobody is removed from your contacts.`)) { await call(`/email/segments/${s.id}`, { method: 'DELETE' }); refresh(); }
+      if ('people' in e.target.dataset) {
+        const people = await call(`/email/segments/${s.id}/people`);
+        q$('[data-list]', el).innerHTML = `<ul class="history">${people.slice(0, 50).map((p) => `<li><a href="#" data-open="${p.id}">${h(p.name)}</a> · ${h(p.email)}</li>`).join('') || '<li class="muted">Nobody yet.</li>'}${people.length > 50 ? `<li class="muted">…and ${people.length - 50} more</li>` : ''}</ul>`;
+      }
+      if (e.target.dataset.open) { e.preventDefault(); openContact(Number(e.target.dataset.open)); }
+    };
+    q$('#em-designs').onclick = (e) => { const el = e.target.closest('[data-tpl]'); if (el && 'edit' in e.target.dataset) editTemplate(tpls.find((t) => t.id === Number(el.dataset.tpl))); };
+    q$('#em-camp-add').onclick = () => editCampaign({ name: '', template_id: emailTpls[0]?.id, segment_id: d.segments[0]?.id }, d, emailTpls);
+    q$('#em-seg-add').onclick = () => editSegment({ name: '', groups: [], stages: [] }, d);
+    q$('#em-tpl-add').onclick = () => editTemplate({ channel: 'email', name: '', subject: '', body: 'Hi {first_name},\n\n' });
+    q$('#em-refresh').onclick = async () => { try { await call('/email/refresh', { method: 'POST' }); refresh(); } catch (err) { say(err.message, true); } };
+  }
+
+  function editCampaign(c, d, emailTpls) {
+    const dlg = q$('#crm-edit-dialog');
+    const local = (iso) => { if (!iso) return ''; const t = new Date(iso); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 16); };
+    dlg.innerHTML = `<form id="camp-form"><h1>${c.id ? 'Edit campaign' : 'New campaign'}</h1>
+      <label class="field"><span>Name <small>(just for you)</small></span><input name="name" required value="${h(c.name)}" placeholder="e.g. December newsletter" style="width:100%"></label>
+      <label class="field"><span>Email design</span><select name="template_id">${emailTpls.map((t) => `<option value="${t.id}"${t.id === c.template_id ? ' selected' : ''}>${h(t.name)}</option>`).join('')}</select></label>
+      <label class="field"><span>Send to</span><select name="segment_id">${d.segments.map((s) => `<option value="${s.id}"${s.id === c.segment_id ? ' selected' : ''}>${h(s.name)} (${s.count})</option>`).join('')}</select></label>
+      <label class="field"><span>When <small>(leave empty to send when you press Send)</small></span><input type="datetime-local" name="send_at" value="${local(c.send_at)}"></label>
+      <p class="muted small">Only people who said yes to email get it. Brevo adds a one-click unsubscribe link and your mailing address is at the bottom.</p>
+      <div class="row"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="camp-msg"></span></div></form>`;
+    q$('[data-close]', dlg).onclick = () => dlg.close();
+    q$('#camp-form', dlg).onsubmit = async (e) => {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData(e.target));
+      data.send_at = data.send_at ? new Date(data.send_at).toISOString() : null;
+      try { await call(c.id ? `/email/campaigns/${c.id}` : '/email/campaigns', { method: c.id ? 'PUT' : 'POST', json: data }); dlg.close(); refresh(); }
+      catch (err) { q$('#camp-msg', dlg).textContent = err.message; }
+    };
+    dlg.showModal();
+  }
+
+  function editSegment(s, d) {
+    const dlg = q$('#crm-edit-dialog');
+    const groups = [...new Set([...meta.groups, ...s.groups])];
+    dlg.innerHTML = `<form id="seg-form"><h1>${s.id ? 'Edit segment' : 'New segment'}</h1>
+      <label class="field"><span>Name</span><input name="name" required value="${h(s.name)}" style="width:100%"></label>
+      <div class="field"><span>Groups <small>(none ticked = all groups)</small></span><div class="row">${groups.map((g) => `<label class="check"><input type="checkbox" name="g" value="${h(g)}" ${s.groups.includes(g) ? 'checked' : ''}> ${h(g)}</label>`).join('')}</div></div>
+      <div class="field"><span>Stages <small>(none ticked = all stages)</small></span><div class="row">${d.stages.map((g) => `<label class="check"><input type="checkbox" name="st" value="${h(g)}" ${s.stages.includes(g) ? 'checked' : ''}> ${h(g)}</label>`).join('')}</div></div>
+      <label class="field"><span>Only people who said yes in the last … days <small>(optional)</small></span><input type="number" name="joined_days" min="1" value="${h(s.joined_days || '')}" style="width:110px"></label>
+      <div class="row"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="seg-msg"></span></div></form>`;
+    q$('[data-close]', dlg).onclick = () => dlg.close();
+    q$('#seg-form', dlg).onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const json = { name: q$('[name=name]', f).value, joined_days: q$('[name=joined_days]', f).value,
+        groups: [...f.querySelectorAll('[name=g]:checked')].map((x) => x.value), stages: [...f.querySelectorAll('[name=st]:checked')].map((x) => x.value) };
+      try { await call(s.id ? `/email/segments/${s.id}` : '/email/segments', { method: s.id ? 'PUT' : 'POST', json }); dlg.close(); refresh(); }
+      catch (err) { q$('#seg-msg', dlg).textContent = err.message; }
     };
     dlg.showModal();
   }
@@ -411,9 +543,10 @@
       <label class="field"><span>Name</span><input name="name" required value="${h(a.name)}" placeholder="e.g. New volunteer: welcome call" style="width:100%"></label>
       <div class="row">
         <label class="field"><span>When</span><select name="type">${Object.entries(triggers).map(([k, v]) => `<option value="${k}"${k === a.trigger.type ? ' selected' : ''}>${h(v)}</option>`).join('')}</select></label>
-        <label class="field"><span>In group</span><input name="group" list="auto-groups" value="${h(a.trigger.group || '')}" placeholder="any group"></label>
+         <label class="field"><span>In group <small>(several: separate with commas)</small></span><input name="group" list="auto-groups" value="${h(a.trigger.group || '')}" placeholder="any group"></label>
         <label class="field"><span id="auto-stage-label">Stage</span><select name="stage"></select></label>
-        <label class="field" id="auto-form-field"><span>Form name has <small>(optional)</small></span><input name="form" value="${h(a.trigger.form || '')}" placeholder="e.g. sponsor"></label>
+        <label class="field" id="auto-form-field"><span>Form name has <small>(optional)</small></span><input name="form" value="${h(a.trigger.form || '')}" placeholder="e.g. sponsor">
+          <label class="check" style="font-weight:400"><input type="checkbox" name="skip_newsletter" ${a.trigger.skip_newsletter ? 'checked' : ''}> Skip newsletter-only sign-ups</label></label>
       </div>
       <datalist id="auto-groups">${meta.groups.map((g) => `<option value="${h(g)}">`).join('')}</datalist>
       <div class="field"><span>Then do these steps, in order</span><ol id="auto-steps" style="list-style:none;padding:0;margin:0"></ol>
@@ -441,7 +574,7 @@
       e.preventDefault();
       const v = (n) => q$(`[name=${n}]`, e.target);
       const json = { name: v('name').value, active: v('active').checked, steps: steps.map((s) => ({ ...s, template_id: s.template_id ? Number(s.template_id) : null })),
-        trigger: { type: v('type').value, group: v('group').value, stage: v('stage').value, form: v('form').value } };
+        trigger: { type: v('type').value, group: v('group').value, stage: v('stage').value, form: v('form').value, skip_newsletter: v('skip_newsletter').checked } };
       try { await call(a.id ? `/automations/${a.id}` : '/automations', { method: a.id ? 'PUT' : 'POST', json }); dlg.close(); refresh(); }
       catch (err) { q$('#auto-msg', dlg).textContent = err.message; }
     };
