@@ -97,7 +97,7 @@ function importEvent(ev, owner, s = settings()) {
     if (!c.company && info.company) patch.company = info.company;
     if (Object.keys(patch).length) c = crm.updateContact(c.id, patch);
   } else {
-    c = crm.createContact({ name, email: who.email, phone: info.phone, company: info.company, group_name: s.group, stage: 'New' });
+    c = crm.createContact({ name, email: who.email, phone: info.phone, company: info.company, group_name: s.group, stage: 'New' }, { source: 'booking', form: 'Google Calendar booking' });
     isNew = true;
   }
   const ends = ev.dtend || new Date(Date.parse(ev.dtstart) + 30 * 60e3).toISOString();
@@ -106,6 +106,7 @@ function importEvent(ev, owner, s = settings()) {
     .run(c.id, title, ev.dtstart, ends, info.text || null).lastInsertRowid;
   db.prepare('INSERT INTO gcal_bookings (uid, appointment_id, contact_id, starts_at) VALUES (?,?,?,?)').run(ev.uid, apptId, c.id, ev.dtstart);
   crm.logActivity(c.id, { kind: 'Meeting', note: `Booked "${title}" for ${booking.niceWhen(ev.dtstart)} (Google Calendar)${info.text ? `:\n${info.text}` : ''}` });
+  crm.emit('appointment_booked', { contact: crm.getContact(c.id), form: title, when: booking.niceWhen(ev.dtstart) });
   return { contact: crm.getContact(c.id), isNew, when: ev.dtstart, title };
 }
 

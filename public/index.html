@@ -213,6 +213,8 @@
         <a href="#contacts/appointments" data-tab="appointments">Appointments</a>
         <a href="#contacts/forms" data-tab="forms">Sign-up forms</a>
         <a href="#contacts/templates" data-tab="templates">Message templates</a>
+        <a href="#contacts/email" data-tab="email">Email marketing</a>
+        <a href="#contacts/automations" data-tab="automations">Automations</a>
       </div>
       <div id="crm-tiles" class="tiles"></div>
 
@@ -273,6 +275,33 @@
           <span class="muted">Use {first_name}, {name} or {company}. Templates open in your own Mail or Messages app, one person at a time.</span>
         </div>
         <div class="cards" id="tpl-list"></div>
+      </div>
+
+      <div class="crm-panel" data-panel="email" hidden>
+        <div id="em-tiles" class="tiles"></div>
+        <div id="em-setup"></div>
+        <h2>Campaigns <button class="btn primary" id="em-camp-add" style="padding:4px 12px;font-size:.9rem">+ New campaign</button>
+          <button class="btn ghost" id="em-refresh" style="padding:4px 12px;font-size:.9rem" title="Get the latest opens, clicks and unsubscribes from Brevo">Refresh stats</button></h2>
+        <p class="muted small" style="margin-top:0">A campaign is one email to a group of subscribers, sent now or at a time you pick. Brevo adds a one-click unsubscribe link and tracks opens and clicks.</p>
+        <div class="cards" id="em-campaigns"></div>
+        <h2>Flows</h2>
+        <p class="muted small" style="margin-top:0">Flows are emails that go out by themselves, like a welcome series when someone subscribes. They live in <a href="#contacts/automations">Automations</a> (look for "Send email now" steps).</p>
+        <div class="cards" id="em-flows"></div>
+        <h2>Segments <button class="btn ghost" id="em-seg-add" style="padding:4px 12px;font-size:.9rem">+ New segment</button></h2>
+        <p class="muted small" style="margin-top:0">Segments pick who gets a campaign. They only ever include people who said yes to email and aren't "Do not contact".</p>
+        <div class="cards" id="em-segments"></div>
+        <h2>Email designs <button class="btn ghost" id="em-tpl-add" style="padding:4px 12px;font-size:.9rem">+ New design</button></h2>
+        <div class="cards" id="em-designs"></div>
+      </div>
+
+      <div class="crm-panel" data-panel="automations" hidden>
+        <div class="row crm-filters">
+          <button class="btn primary" id="auto-add">+ New automation</button>
+          <span class="muted">When something happens (a new lead, a form, a stage change, a booking), these steps run by themselves. Texts are never sent automatically. Emails go out only through "Send email now" steps, after you connect a free Brevo account.</span>
+        </div>
+        <div class="cards" id="auto-list"></div>
+        <h2>Recent runs</h2>
+        <ul class="history" id="auto-log"></ul>
       </div>
     </section>
 
