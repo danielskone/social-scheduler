@@ -57,8 +57,9 @@ async function route() {
   const acctLoad = api('/accounts').then((a) => (accounts = a));
   if (view === 'calendar') { renderCalendar(); return; } // the calendar doesn't need the account list
   await acctLoad;
-  if (view === 'compose') renderCompose(params.get('date'), params.get('clip'));
+  if (view === 'compose') renderCompose(params.get('date'), params.get('clip'), params.get('ad') && { id: params.get('ad'), format: params.get('f') || '9x16' });
   if (view === 'clips') renderClips();
+  if (view === 'ads') renderAds(sub);
   if (view === 'analytics') renderAnalytics();
   if (view === 'contacts') renderContacts(sub);
   if (view === 'accounts') renderAccounts();
@@ -296,9 +297,9 @@ async function openPost(id) {
 // ---------- Compose ----------
 const form = $('#compose-form');
 
-let composeClip = null; // a clip from the Clips tab, used instead of an uploaded video
+let composeClip = null; // a clip from the Clips tab (or an ad from Viral Ads Studio), used instead of an uploaded video
 
-async function renderCompose(dateIso, clipId) {
+async function renderCompose(dateIso, clipId, ad) {
   const box = $('#compose-accounts');
   box.innerHTML = accounts.length
     ? accounts.map((a) => `<label><input type="checkbox" name="accountIds" value="${a.id}" data-platform="${a.platform}"${accounts.length === 1 ? ' checked' : ''}>
@@ -309,9 +310,9 @@ async function renderCompose(dateIso, clipId) {
   form.scheduledAt.value = toLocalInput(when);
   $('#compose-msg').textContent = '';
   composeClip = null;
-  if (clipId) {
+  if (clipId || ad) {
     try {
-      composeClip = await api(`/clips/clip/${clipId}`);
+      composeClip = ad ? await api(`/ads/${ad.id}/out/${ad.format}`) : await api(`/clips/clip/${clipId}`);
       form.media.value = '';
       if (!form.caption.value.trim()) form.caption.value = composeClip.caption || composeClip.title || '';
       if (!form.title.value.trim()) form.title.value = (composeClip.title || '').slice(0, 100);
@@ -328,7 +329,9 @@ function showComposeClip() {
   if (!composeClip) return;
   box.querySelector('img').src = composeClip.poster_url || '';
   box.querySelector('b').textContent = composeClip.title;
-  box.querySelector('small').textContent = `Clip · ${Math.round(composeClip.length)} seconds · vertical 9:16`;
+  box.querySelector('small').textContent = composeClip.ref
+    ? `Ad · ${Math.round(composeClip.length)} seconds · ${composeClip.label}`
+    : `Clip · ${Math.round(composeClip.length)} seconds · vertical 9:16`;
 }
 form.media.addEventListener('change', () => { if (form.media.files[0] && composeClip) { composeClip = null; showComposeClip(); } });
 $('#compose-clip-remove').onclick = () => { composeClip = null; showComposeClip(); updatePreview(); };
@@ -344,7 +347,8 @@ function updatePreview() {
   $('#preview-name').textContent = first ? (first.username ? '@' + first.username : first.name) : 'Your account';
   const file = form.media.files[0];
   const media = $('#preview-media');
-  if (!file && composeClip && media.dataset.clip === String(composeClip.id)) return; // keep the clip playing while typing
+  const clipKey = composeClip ? String(composeClip.ref || composeClip.id) : '';
+  if (!file && composeClip && media.dataset.clip === clipKey) return; // keep the clip playing while typing
   media.dataset.clip = '';
   if (media.dataset.url) URL.revokeObjectURL(media.dataset.url);
   media.dataset.url = '';
@@ -354,7 +358,7 @@ function updatePreview() {
     media.dataset.url = url;
     media.innerHTML = file.type.startsWith('video') ? `<video src="${url}" muted controls></video>` : `<img src="${url}" alt="">`;
   } else if (composeClip) {
-    media.dataset.clip = String(composeClip.id);
+    media.dataset.clip = clipKey;
     media.innerHTML = `<video src="${esc(composeClip.url)}" poster="${esc(composeClip.poster_url || '')}" controls playsinline></video>`;
   }
 }
@@ -365,7 +369,7 @@ async function submitPost(now) {
   const when = now ? new Date() : new Date(form.scheduledAt.value);
   fd.set('scheduledAt', when.toISOString());
   if (!form.media.files[0]) fd.delete('media');
-  if (!form.media.files[0] && composeClip) fd.set('clipId', composeClip.id);
+  if (!form.media.files[0] && composeClip) fd.set(composeClip.ref ? 'adRef' : 'clipId', composeClip.ref || composeClip.id);
   const msg = $('#compose-msg');
   msg.textContent = 'Saving…';
   form.querySelectorAll('button').forEach((b) => (b.disabled = true));
