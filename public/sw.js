@@ -1,7 +1,7 @@
-// Makes Viral Post open instantly on the phone: the app's own files are kept on the phone
-// and refreshed in the background; previews are kept; data always comes fresh from the Mac
+// Keeps Viral Post usable on the phone with a weak signal: the app's own files always come
+// fresh from the Mac (so updates show on the first load), with the saved copy as a fallback; previews are kept; data always comes fresh from the Mac
 // (or, if the signal is gone, the last copy is shown).
-const SHELL = 'vp-shell-v1';
+const SHELL = 'vp-shell-v2';
 const PICS = 'vp-pics-v1';
 const SHELL_FILES = ['/', '/app.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
 
@@ -42,12 +42,10 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // App files: show the saved copy right away, update it in the background.
-  const key = req.mode === 'navigate' ? '/' : req;
-  e.respondWith(caches.open(SHELL).then(async (c) => {
-    const hit = await c.match(key);
-    const update = fetch(req).then((res) => { if (good(res)) c.put(key, res.clone()); return res; }).catch(() => null);
-    if (hit) { e.waitUntil(update); return hit; }
-    return (await update) || Response.error();
-  }));
+  // App files: fresh from the Mac so updates show right away; the saved copy if there's no signal.
+  const key = req.mode === 'navigate' && url.pathname === '/' ? '/' : req;
+  e.respondWith(fetch(req).then((res) => {
+    if (good(res)) { const copy = res.clone(); caches.open(SHELL).then((c) => c.put(key, copy)); }
+    return res;
+  }).catch(async () => (await caches.match(key)) || (req.mode === 'navigate' && !url.pathname.startsWith('/f/') && (await caches.match('/'))) || Response.error()));
 });
