@@ -35,7 +35,8 @@ const PRESETS = {
   console.log('  2) Gmail');
   console.log('  3) Another email provider');
   console.log('  4) Brevo (free email service)\n');
-  const pick = (await ask('Type 1, 2, 3 or 4: ')) || '1';
+  let pick = (await ask('Type 1, 2, 3 or 4: ')) || '1';
+  while (!['1', '2', '3', '4'].includes(pick)) pick = (await ask('Just the number please. Type 1, 2, 3 or 4: ')) || '1';
   let text = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
   const env = {};
 
