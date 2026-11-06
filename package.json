@@ -17,7 +17,8 @@
     "password": "node scripts/set-password.js",
     "phone-app": "node scripts/phone-app.js",
     "mac-app": "node scripts/mac-app.js",
-    "website": "node scripts/website.js"
+    "website": "node scripts/website.js",
+    "email-setup": "node scripts/email-setup.js"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

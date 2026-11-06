@@ -327,9 +327,10 @@
   }
 
   // ---------- Automations ----------
-  const STEP_NAMES = { alert: 'Buzz my phone', task: 'Make a task', stage: 'Move to stage', group: 'Put in group', follow_up: 'Set next follow-up', note: 'Add a note', wait: 'Wait' };
+  const STEP_NAMES = { alert: 'Buzz my phone', email: 'Send email now', task: 'Make a task', stage: 'Move to stage', group: 'Put in group', follow_up: 'Set next follow-up', note: 'Add a note', wait: 'Wait' };
   const stepText = (s, tpls) => ({
     alert: () => `Buzz my phone: "${s.title}"`,
+    email: () => `Send email now: "${(tpls.find((t) => t.id === s.template_id) || {}).name || 'deleted template'}"`,
     task: () => `Make a task: "${s.title}"${s.due_days ? `, due in ${s.due_days} day${s.due_days === 1 ? '' : 's'}` : ''}${s.template_id ? ` with "${(tpls.find((t) => t.id === s.template_id) || {}).name || 'a template'}" ready to send` : ''}`,
     stage: () => `Move to "${s.stage}"`,
     group: () => `Put in group "${s.group}"`,
@@ -341,7 +342,13 @@
 
   async function renderAutomations() {
     const [data, tpls] = await Promise.all([call('/automations'), call('/templates')]);
-    q$('#auto-list').innerHTML = data.automations.map((a) => `<div class="item" data-auto="${a.id}">
+    const em = data.email;
+    const emailCard = `<div class="item" style="grid-column:1/-1"><b>Automatic emails</b> ${em.ready ? '<span class="pill">Connected</span>' : '<span class="pill">Not set up</span>'}
+      <div class="muted">${em.ready
+        ? `"Send email now" steps go out from <b>${h(em.from)}</b> through Brevo (free). ${em.sentToday} sent in the last day (limit ${em.limit}). Emails only go to people who just contacted you or said yes to email, never to "Do not contact", and each one has your address and an unsubscribe line. If someone replies "unsubscribe", open them and tick "Do not contact".`
+        : 'Welcome emails are switched off until you connect a free Brevo account. In Terminal run: <b>cd ~/social-scheduler && npm run email-setup</b>. Until then those steps are skipped and everything else still runs.'}</div>
+      ${em.recent.length ? `<details style="margin-top:6px"><summary>Recent emails</summary><ul class="history">${em.recent.map((e) => `<li><b>${h(e.status === 'sent' ? 'Sent' : e.status === 'failed' ? 'Failed' : 'Sending')}</b> · ${h(e.contact_name || e.to_email)} · ${h(e.subject || '')}${e.error ? `<br><span style="color:var(--bad)">${h(e.error)}</span>` : ''}</li>`).join('')}</ul></details>` : ''}</div>`;
+    q$('#auto-list').innerHTML = emailCard + data.automations.map((a) => `<div class="item" data-auto="${a.id}">
       <b>${h(a.name)}</b> ${a.active ? '<span class="pill">On</span>' : '<span class="pill" style="color:var(--bad)">Off</span>'}
       <div class="muted"><b>When:</b> ${h(triggerText(a.trigger, data.triggers))}</div>
       <ol style="margin:6px 0 6px 18px;padding:0">${a.steps.map((s) => `<li>${h(stepText(s, tpls))}</li>`).join('')}</ol>
@@ -371,6 +378,8 @@
     const stepFields = (s, i) => {
       const inp = (k, ph = '', type = 'text', extra = '') => `<input data-i="${i}" data-k="${k}" type="${type}" value="${h(s[k] ?? '')}" placeholder="${h(ph)}" ${extra}>`;
       return {
+        email: () => `<select data-i="${i}" data-k="template_id">${tpls.filter((t) => t.channel === 'email').map((t) => `<option value="${t.id}"${t.id === Number(s.template_id) ? ' selected' : ''}>${h(t.name)}</option>`).join('')}</select>
+          <span class="muted small">Goes out by itself, only to people who contacted you or said yes to email.</span>`,
         alert: () => `${inp('title', 'Alert title', 'text', 'style="width:160px"')} ${inp('message', 'Message, e.g. {name} needs a call', 'text', 'style="flex:1;min-width:180px"')}`,
         task: () => `${inp('title', 'e.g. Call {name}', 'text', 'style="flex:1;min-width:180px"')} <label class="muted">due in ${inp('due_days', '0', 'number', 'min="0" max="365" style="width:64px"')} days</label>
           <select data-i="${i}" data-k="template_id"><option value="">No message</option>${tpls.map((t) => `<option value="${t.id}"${t.id === Number(s.template_id) ? ' selected' : ''}>With message: ${h(t.name)}</option>`).join('')}</select>`,
@@ -404,7 +413,7 @@
       <datalist id="auto-groups">${meta.groups.map((g) => `<option value="${h(g)}">`).join('')}</datalist>
       <div class="field"><span>Then do these steps, in order</span><ol id="auto-steps" style="list-style:none;padding:0;margin:0"></ol>
         <div class="row"><select id="auto-step-type">${Object.entries(STEP_NAMES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select><button type="button" class="btn ghost" id="auto-step-add">+ Add step</button></div></div>
-      <p class="muted small">Fill-ins: {first_name}, {name}, {company}, {email}, {phone}, {group}, {stage}, {form}, {when} (appointment time). Nothing is ever emailed or texted automatically.</p>
+      <p class="muted small">Fill-ins: {first_name}, {name}, {company}, {email}, {phone}, {group}, {stage}, {form}, {when} (appointment time). Email templates use {first_name}, {name}, {company}. Texts are never sent automatically.</p>
       <label class="check"><input type="checkbox" name="active" ${a.active ? 'checked' : ''}> Automation is on</label>
       <div class="row" style="margin-top:12px"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="auto-msg"></span></div></form>`;
     drawTrigger(); drawSteps();
@@ -418,7 +427,7 @@
     };
     q$('#auto-step-add', dlg).onclick = () => {
       const type = q$('#auto-step-type', dlg).value;
-      steps.push({ alert: { type, title: 'Viral Touch CRM', message: '{name}' }, task: { type, title: '', due_days: 0 }, stage: { type, stage: meta.stages[1] }, group: { type, group: '' },
+      steps.push({ email: { type, template_id: (tpls.find((t) => t.channel === 'email') || {}).id }, alert: { type, title: 'Viral Touch CRM', message: '{name}' }, task: { type, title: '', due_days: 0 }, stage: { type, stage: meta.stages[1] }, group: { type, group: '' },
         follow_up: { type, days: 1 }, note: { type, note: '' }, wait: { type, amount: 1, unit: 'days', if_stage: '' } }[type]);
       drawSteps();
     };

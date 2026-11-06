@@ -8,13 +8,15 @@
 // add a note, or wait some hours/days (optionally only carrying on if they are still in
 // a stage, so "still New after 3 days" reminders stop once you've reached out).
 //
-// On purpose, automations never send email or texts by themselves. A "message" step makes
-// a task with the filled-in message one tap away, and you press Send. That keeps your
-// accounts safe from spam flags and keeps every email personal and wanted.
+// Email: a "message" task puts a filled-in message one tap away and you press Send. The
+// "send email now" step sends by itself, but only through a proper email service (Brevo,
+// see email.js), only to people who just reached out to you or said yes to email, with your
+// address and an unsubscribe line in every email. Texts are never sent automatically.
 const express = require('express');
 const db = require('./db');
 const crm = require('./crm');
 const notify = require('./notify');
+const email = require('./email');
 
 const TRIGGERS = {
   contact_added: 'A new contact is added',
@@ -22,7 +24,7 @@ const TRIGGERS = {
   stage_changed: 'A contact moves to a stage',
   appointment_booked: 'Someone books an appointment',
 };
-const STEPS = ['alert', 'task', 'stage', 'group', 'follow_up', 'note', 'wait'];
+const STEPS = ['alert', 'email', 'task', 'stage', 'group', 'follow_up', 'note', 'wait'];
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS crm_automations (
@@ -72,6 +74,11 @@ function cleanStep(s) {
   const type = STEPS.includes(s?.type) ? s.type : null;
   if (!type) throw err400('Each step needs a type.');
   if (type === 'alert') return { type, title: str(s.title, 80) || 'Viral Touch CRM', message: str(s.message, 500) || '{name}' };
+  if (type === 'email') {
+    const t = db.prepare("SELECT * FROM crm_templates WHERE id=? AND channel='email'").get(Number(s.template_id));
+    if (!t) throw err400('A "send email" step needs one of your email templates.');
+    return { type, template_id: t.id };
+  }
   if (type === 'task') {
     const title = str(s.title, 200);
     if (!title) throw err400('A "make a task" step needs a task name.');
@@ -166,6 +173,8 @@ function runSteps(a, contactId, from, vars, now = new Date()) {
     if (s.type === 'alert') {
       notify.send(fill(s.title, c, vars), fill(s.message, c, vars), { tags: 'robot' }).catch(() => {});
       done.push('phone alert');
+    } else if (s.type === 'email') {
+      done.push(sendEmail(a, c, s, vars));
     } else if (s.type === 'task') {
       // Never line up a message for someone who asked not to be contacted.
       if (s.template_id && c.do_not_contact) { done.push('skipped message (Do not contact)'); continue; }
@@ -187,11 +196,38 @@ function runSteps(a, contactId, from, vars, now = new Date()) {
   return done;
 }
 
+const QUIET = 'email skipped (not set up yet)'; // shown in Recent runs, kept out of contact history
+const forHistory = (done) => done.filter((d) => d !== QUIET);
+
+// Sends one template email through Brevo (in the background) and reports what happened.
+function sendEmail(a, c, s, vars = {}) {
+  const t = db.prepare('SELECT * FROM crm_templates WHERE id=?').get(s.template_id);
+  if (!t) return 'skipped email (template was deleted)';
+  if (!email.ready()) return QUIET; // not connected to Brevo yet: everything else still runs
+  // CAN-SPAM and good sense: only people who contacted you, or who said yes to email.
+  if (!vars.reached_out && !c.email_ok) return `skipped email: ${c.name} didn't contact you or say yes to email`;
+  const subject = crm.fillTemplate(t.subject || t.name, c), text = crm.fillTemplate(t.body, c);
+  let rowId;
+  try { rowId = email.claim({ contact: c, automationId: a.id, templateId: t.id, subject }); }
+  catch (e) { return `skipped email: ${e.message}`; }
+  const reason = vars.reached_out ? `you contacted us${vars.form ? ` ("${vars.form}")` : ''}` : 'you signed up to get email from us';
+  email.deliver(rowId, { to: c.email, toName: c.name, subject, text, reason }).then((r) => {
+    try {
+      if (r.ok) crm.logActivity(c.id, { kind: 'Email', note: `Sent "${t.name}" automatically ("${subject}")` });
+      else {
+        log(a, c.id, `Email to ${c.email} failed: ${r.error}`);
+        notify.send('Automatic email failed', `"${t.name}" to ${c.name}: ${r.error}`, { tags: 'warning', priority: 'high' }).catch(() => {});
+      }
+    } catch {} // contact may have been deleted meanwhile
+  });
+  return `email "${t.name}"`;
+}
+
 function start(a, contactId, vars, now) {
   const done = runSteps(a, contactId, 0, vars, now);
   db.prepare("UPDATE crm_automations SET runs=runs+1, last_run_at=datetime('now') WHERE id=?").run(a.id);
   log(a, contactId, done.join(', ') || 'nothing to do');
-  if (done.length) crm.logActivity(contactId, { kind: 'Automation', note: `"${a.name}": ${done.join(', ')}` });
+  if (forHistory(done).length) crm.logActivity(contactId, { kind: 'Automation', note: `"${a.name}": ${forHistory(done).join(', ')}` });
 }
 
 function handle(event, data) {
@@ -200,7 +236,9 @@ function handle(event, data) {
   try {
     for (const a of list()) {
       if (!a.active || !matches(a, event, data)) continue;
-      try { start(a, data.contact.id, { form: data.form, when: data.when }); }
+      // They reached out themselves (form, website, booking): a reply email is welcome.
+      const reached_out = event === 'form_filled' || event === 'appointment_booked' || (event === 'contact_added' && ['form', 'booking'].includes(data.source));
+      try { start(a, data.contact.id, { form: data.form, when: data.when, reached_out }); }
       catch (e) { console.error(`[automation] "${a.name}" failed: ${e.message}`); try { log(a, data.contact.id, `Problem: ${e.message}`); } catch {} }
     }
   } finally { depth--; }
@@ -221,7 +259,7 @@ function runWaiting(now = new Date()) {
       depth++;
       const done = runSteps(a, c.id, w.next_step, JSON.parse(w.vars_json || '{}'), now);
       log(a, c.id, done.join(', ') || 'nothing to do');
-      if (done.length) crm.logActivity(c.id, { kind: 'Automation', note: `"${a.name}": ${done.join(', ')}` });
+      if (forHistory(done).length) crm.logActivity(c.id, { kind: 'Automation', note: `"${a.name}": ${forHistory(done).join(', ')}` });
       ran++;
     } catch (e) {
       console.error(`[automation] "${a.name}" failed: ${e.message}`);
@@ -235,8 +273,14 @@ function runWaiting(now = new Date()) {
 db.exec('CREATE TABLE IF NOT EXISTS crm_flags (name TEXT PRIMARY KEY)');
 if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_automations'").get()) {
   const tpl = (name) => db.prepare('SELECT id FROM crm_templates WHERE name=?').get(name)?.id || null;
+  const addTpl = (name, subject, body) => tpl(name) || crm.saveTemplate({ name, channel: 'email', subject, body }).id;
   db.transaction(() => {
+    const welcomeVA = addTpl('Website lead welcome', 'Thanks for reaching out to Viral Attraction!',
+      `Hi {first_name},\n\nThanks for reaching out to Viral Attraction! I got your message and I'll get back to you personally within one business day.\n\nIf it's easier, just reply to this email with a good time to talk.\n\nTalk soon,\nDaniel King\nViral Attraction\nhttps://viralattraction.com`);
+    const welcomeSponsor = addTpl('Sponsor lead welcome', 'Thank you for your interest in sponsoring the parade!',
+      `Hi {first_name},\n\nThank you for your interest in sponsoring the Fuquay-Varina Christmas Parade! I'll reach out soon with the details.\n\nIn the meantime, you can see the sponsor levels and sign up here: https://fuquayvarinachristmasparade.org/parade/sponsorship\n\nThank you,\nDaniel King\nFuquay-Varina Christmas Parade`);
     save({ name: 'New website lead: reply fast', trigger: { type: 'contact_added', group: 'Viral Attraction lead' }, steps: [
+      { type: 'email', template_id: welcomeVA },
       { type: 'task', title: 'Reply to {name} (new Viral Attraction lead)', due_days: 0 },
       { type: 'follow_up', days: 2 },
       { type: 'wait', amount: 3, unit: 'days', if_stage: 'New' },
@@ -244,6 +288,7 @@ if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_automations'").get(
       { type: 'task', title: 'Follow up with {name}: no reply yet', due_days: 0 },
     ] });
     save({ name: 'New sponsor lead: send sponsor levels', trigger: { type: 'contact_added', group: 'Parade sponsor' }, steps: [
+      { type: 'email', template_id: welcomeSponsor },
       { type: 'task', title: 'Send sponsor levels to {company}', due_days: 0, template_id: tpl('Sponsor ask') },
       { type: 'wait', amount: 5, unit: 'days', if_stage: 'New' },
       { type: 'task', title: 'Call {name} about sponsoring', due_days: 0 },
@@ -272,6 +317,7 @@ router.get('/', wrap((req, res) => {
   const waiting = db.prepare('SELECT automation_id, COUNT(*) AS n FROM crm_automation_waits GROUP BY automation_id').all();
   res.json({
     triggers: TRIGGERS,
+    email: email.status(),
     automations: list().map((a) => ({ ...a, waiting: waiting.find((w) => w.automation_id === a.id)?.n || 0 })),
     log: db.prepare(`SELECT l.*, a.name AS automation_name, c.name AS contact_name FROM crm_automation_log l
       LEFT JOIN crm_automations a ON a.id=l.automation_id LEFT JOIN contacts c ON c.id=l.contact_id ORDER BY l.id DESC LIMIT 30`).all(),

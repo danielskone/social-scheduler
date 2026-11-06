@@ -130,10 +130,10 @@ const cols = [...FIELDS, 'email_ok_at'];
 
 // opts.source: 'manual', 'form', 'booking' or 'import'. Imports don't start automations,
 // so loading an old spreadsheet can't create hundreds of tasks at once.
-function createContact(body, { source = 'manual' } = {}) {
+function createContact(body, { source = 'manual', form } = {}) {
   const c = clean(body);
   const r = db.prepare(`INSERT INTO contacts (${cols.join(',')}) VALUES (${cols.map((k) => '@' + k).join(',')})`).run(c);
-  if (source !== 'import') emit('contact_added', { contact: getContact(r.lastInsertRowid), source });
+  if (source !== 'import') emit('contact_added', { contact: getContact(r.lastInsertRowid), source, form });
   return getContact(r.lastInsertRowid);
 }
 
@@ -416,7 +416,7 @@ function submitForm(form, body, opts = {}) {
     if (optIn && !existing.email_ok && !existing.do_not_contact) Object.assign(patch, { email_ok: true, email_ok_source: source });
     contact = Object.keys(patch).length ? updateContact(existing.id, patch) : existing;
   } else {
-    contact = createContact({ name, email, phone, company, group_name: form.group_name, stage: 'New', email_ok: optIn, email_ok_source: optIn ? source : null }, { source: 'form' });
+    contact = createContact({ name, email, phone, company, group_name: form.group_name, stage: 'New', email_ok: optIn, email_ok_source: optIn ? source : null }, { source: 'form', form: form.title });
     isNew = true;
   }
   logActivity(contact.id, { kind: 'Form', note: `Filled out "${form.title}"${message ? `:\n${message}` : ''}` });
