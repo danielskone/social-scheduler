@@ -189,41 +189,113 @@ async function reachable(url) {
   } catch { return false; }
 }
 
+// Instagram can't take a file upload for photos: it downloads them from a link. The Mac's own
+// public link (a quick tunnel) is what made posts fail with "unknown error (code 1)", so instead
+// the photo is first uploaded to the linked Facebook Page as a hidden, unpublished photo (it never
+// shows on the Page), and Instagram downloads it from Facebook's servers. It's removed afterwards.
+async function hostOnFacebook(token, file) {
+  const page = await call('GET', 'me', { fields: 'id', access_token: token });
+  const form = new FormData();
+  form.set('access_token', token);
+  form.set('published', 'false');
+  form.set('source', await fileBlob(file), file);
+  const photo = await call('POST', `${page.id}/photos`, {}, { body: form });
+  const info = await call('GET', photo.id, { fields: 'images', access_token: token });
+  const best = (info.images || []).slice().sort((a, b) => (b.width || 0) - (a.width || 0))[0];
+  if (!best || !best.source) throw new GraphError('Facebook did not return a link for the uploaded photo.');
+  return { url: best.source, remove: () => call('DELETE', photo.id, { access_token: token }).catch(() => {}) };
+}
+
+// Videos are sent straight to Instagram ("resumable upload"), so nothing has to be downloaded
+// from this Mac either.
+async function uploadReel(account, post) {
+  const token = account.access_token;
+  const container = await call('POST', `${account.external_id}/media`, { media_type: 'REELS', upload_type: 'resumable', caption: post.caption, access_token: token });
+  const buf = await fs.promises.readFile(path.join(config.mediaDir, post.media_file));
+  const uri = container.uri || `${config.igUploadBase}/ig-api-upload/${config.graphVersion}/${container.id}`;
+  let res;
+  try {
+    res = await fetch(uri, { method: 'POST', headers: { Authorization: `OAuth ${token}`, offset: '0', file_size: String(buf.length) }, body: buf });
+  } catch (e) {
+    throw new GraphError(`Could not send the video to Instagram: ${e.message}`); // nothing is posted until media_publish
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error || data.success === false) {
+    const err = data.error || data.debug_info || {};
+    throw new GraphError(`Instagram didn't accept the video upload: ${err.message || `HTTP ${res.status}`}`, { code: err.code });
+  }
+  return container;
+}
+
 async function publishInstagram(account, post, { pollMs = 5000, maxPolls = 60 } = {}) {
   if (!post.media_file) throw new GraphError('Instagram posts need a photo or video.');
+  const token = account.access_token;
+  let container, hosted = null;
+
+  if (post.media_type === 'image') {
+    let imageUrl;
+    try {
+      hosted = await hostOnFacebook(token, post.media_file);
+      imageUrl = hosted.url;
+    } catch (e) {
+      // Fall back to the Mac's public link.
+      console.error(`[instagram] couldn't stage the photo on Facebook (${e.message}); using this Mac's link instead`);
+      imageUrl = await macLink(post.media_file);
+    }
+    container = await call('POST', `${account.external_id}/media`, { caption: post.caption, image_url: imageUrl, access_token: token });
+  } else {
+    try {
+      container = await uploadReel(account, post);
+    } catch (e) {
+      if (e.code === 190 || e.code === 10 || (e.code >= 200 && e.code < 300)) throw e;
+      console.error(`[instagram] direct video upload failed (${e.message}); using this Mac's link instead`);
+      container = await call('POST', `${account.external_id}/media`, { caption: post.caption, media_type: 'REELS', video_url: await macLink(post.media_file), access_token: token });
+    }
+  }
+
+  try {
+    // Media has to finish processing on Instagram's side before it can be published.
+    for (let i = 0; i < maxPolls; i++) {
+      const s = await call('GET', container.id, { fields: 'status_code,status', access_token: token });
+      if (s.status_code === 'FINISHED') break;
+      if (s.status_code === 'ERROR' || s.status_code === 'EXPIRED') {
+        throw new GraphError(`Instagram couldn't process the media: ${s.status || s.status_code}`);
+      }
+      if (i === maxPolls - 1) throw new GraphError('Timed out waiting for Instagram to process the media.');
+      await sleep(pollMs);
+    }
+    const published = await call('POST', `${account.external_id}/media_publish`, { creation_id: container.id, access_token: token });
+    let permalink = null;
+    try {
+      permalink = (await call('GET', published.id, { fields: 'permalink', access_token: token })).permalink || null;
+    } catch { /* not critical */ }
+    return { id: published.id, permalink };
+  } finally {
+    if (hosted) await hosted.remove();
+  }
+}
+
+// The old way: Instagram downloads the file from this Mac's public link.
+async function macLink(file) {
   if (!/^https:\/\//.test(config.publicBaseUrl)) {
     throw new GraphError('Instagram needs PUBLIC_BASE_URL to be a public https address so it can download your media.');
   }
-  // Instagram downloads the file from this Mac's public link. If that link isn't working right
-  // now (Mac just woke up, tunnel restarting), say so plainly; the scheduler will try again.
-  const mediaUrl = mediaPublicUrl(post.media_file);
-  if (!(await reachable(mediaUrl))) {
+  const url = mediaPublicUrl(file);
+  if (!(await reachable(url))) {
     throw new GraphError("Instagram can't reach your Mac's public link right now, so it couldn't download the media. Will try again.");
   }
-  const token = account.access_token;
-  const params = { caption: post.caption, access_token: token };
-  if (post.media_type === 'image') params.image_url = mediaPublicUrl(post.media_file);
-  else Object.assign(params, { media_type: 'REELS', video_url: mediaPublicUrl(post.media_file) });
+  return url;
+}
 
-  const container = await call('POST', `${account.external_id}/media`, params);
-
-  // Media has to finish processing on Instagram's side before it can be published.
-  for (let i = 0; i < maxPolls; i++) {
-    const s = await call('GET', container.id, { fields: 'status_code,status', access_token: token });
-    if (s.status_code === 'FINISHED') break;
-    if (s.status_code === 'ERROR' || s.status_code === 'EXPIRED') {
-      throw new GraphError(`Instagram couldn't process the media: ${s.status || s.status_code}`);
-    }
-    if (i === maxPolls - 1) throw new GraphError('Timed out waiting for Instagram to process the media.');
-    await sleep(pollMs);
-  }
-
-  const published = await call('POST', `${account.external_id}/media_publish`, { creation_id: container.id, access_token: token });
-  let permalink = null;
+// Quick check that a Facebook/Instagram connection still works (used for the heads-up check).
+async function tokenWorks(account) {
   try {
-    permalink = (await call('GET', published.id, { fields: 'permalink', access_token: token })).permalink || null;
-  } catch { /* not critical */ }
-  return { id: published.id, permalink };
+    await call('GET', 'me', { fields: 'id', access_token: account.access_token });
+    return { ok: true };
+  } catch (e) {
+    // Only a clear "signed out / no permission" answer counts; a network blip isn't a problem.
+    return { ok: !(e.code === 190 || e.code === 10 || (e.code >= 200 && e.code < 300)), error: e.message };
+  }
 }
 
 // ---------- Stats ----------
@@ -276,6 +348,7 @@ module.exports = {
   accountsForUserToken,
   publishFacebook,
   publishInstagram,
+  tokenWorks,
   facebookPostStats,
   instagramPostStats,
   followerCount,

@@ -1,5 +1,8 @@
 // Publishes due posts and refreshes stats. Runs inside the web server process.
+const fs = require('fs');
+const path = require('path');
 const cron = require('node-cron');
+const config = require('./config');
 const db = require('./db');
 const meta = require('./meta');
 const media = require('./mediafetch');
@@ -74,6 +77,42 @@ async function publishDue(now = new Date()) {
   }
 }
 
+// Heads-up check: looks at the posts coming up in the next 3 hours and buzzes your phone early if
+// one of them is going to fail (picture missing, Facebook/Instagram signed out), so there is time
+// to fix it before it's due. Each problem is only reported once.
+const warned = new Set();
+async function headsUp(now = new Date()) {
+  const soon = new Date(now.getTime() + 3 * 3600e3).toISOString();
+  const rows = db.prepare(`
+    SELECT t.id AS target_id, p.id AS post_id, p.caption, p.scheduled_at, p.media_file, p.media_source_url,
+           a.id AS account_id, a.platform, a.access_token, a.name AS account_name
+    FROM post_targets t JOIN posts p ON p.id = t.post_id JOIN accounts a ON a.id = t.account_id
+    WHERE t.status = 'scheduled' AND p.scheduled_at <= ? ORDER BY p.scheduled_at`).all(soon);
+  const tokenOk = new Map();
+  const problems = [];
+  for (const r of rows) {
+    if (warned.has(r.target_id)) continue;
+    let problem = null;
+    if (r.media_file && !fs.existsSync(path.join(config.mediaDir, r.media_file))) problem = 'its picture/video file is missing';
+    else if (!r.media_file && r.media_source_url) {
+      try { await media.ensureMedia(r.post_id); } catch (e) { problem = `its picture/video couldn't be downloaded (${e.message})`; }
+    }
+    if (!problem && (r.platform === 'facebook' || r.platform === 'instagram')) {
+      if (!tokenOk.has(r.account_id)) tokenOk.set(r.account_id, await meta.tokenWorks(r));
+      if (!tokenOk.get(r.account_id).ok) problem = `${r.account_name} needs to be reconnected (Accounts page)`;
+    }
+    if (problem) {
+      warned.add(r.target_id);
+      const when = new Date(r.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: process.env.BOOKING_TIMEZONE || 'America/New_York' });
+      problems.push(`${when} ${r.platform} "${String(r.caption || '').slice(0, 40)}": ${problem}`);
+    }
+  }
+  if (problems.length) {
+    await notify.send('Heads up: fix before it posts', problems.join('\n'), { priority: 'high', tags: 'warning' }).catch(() => {});
+  }
+  return problems;
+}
+
 async function refreshStats({ days = 30 } = {}) {
   const since = new Date(Date.now() - days * 864e5).toISOString();
   const rows = db.prepare(`
@@ -109,6 +148,7 @@ function start() {
   db.prepare(`UPDATE post_targets SET status='failed', error='App restarted while publishing. Check the platform, then retry if it did not post.' WHERE status='publishing'`).run();
   cron.schedule('* * * * *', () => publishDue().catch((e) => console.error(e)));
   cron.schedule('*/2 * * * *', () => media.prefetch().catch((e) => console.error(e)));
+  cron.schedule('7-59/15 * * * *', () => headsUp().catch((e) => console.error(e)));
   // Contacts: one phone alert at 8am (Eastern unless BOOKING_TIMEZONE says otherwise) with today's appointments, tasks and follow-ups.
   cron.schedule('0 8 * * *', () => crm.sendFollowUpReminder().catch((e) => console.error(e)), { timezone: process.env.BOOKING_TIMEZONE || 'America/New_York' });
   // Website sign-ups (e.g. viralattraction.com) -> Contacts, every 2 minutes.
@@ -120,4 +160,4 @@ function start() {
   cron.schedule('17 */3 * * *', () => refreshStats().catch((e) => console.error(e)));
 }
 
-module.exports = { start, publishDue, refreshStats };
+module.exports = { start, publishDue, refreshStats, headsUp };
