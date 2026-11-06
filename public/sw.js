@@ -19,7 +19,7 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== location.origin) return;
-  if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/login') || url.pathname.startsWith('/media/') || url.pathname.startsWith('/clipfile/')) return;
+  if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/login') || url.pathname.startsWith('/media/') || url.pathname.startsWith('/clipfile/') || url.pathname.startsWith('/adfile/') || url.pathname.startsWith('/adlib/')) return;
 
   // Previews never change: keep them.
   if (url.pathname.startsWith('/thumb/')) {

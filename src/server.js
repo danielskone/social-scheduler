@@ -17,6 +17,7 @@ const automations = require('./automations');
 const campaigns = require('./campaigns');
 const gcal = require('./gcal');
 const clipper = require('./clipper');
+const ads = require('./ads');
 const compression = require('compression');
 const { thumbFor } = require('./thumbs');
 
@@ -102,6 +103,9 @@ app.get('/thumb/:file', async (req, res) => {
 
 // Finished clips from the Clips tab (only for signed-in users).
 app.get('/clipfile/:job/:file', clipper.serveFile);
+// Finished ads and the Ads Studio library (photos, videos, logos, music).
+app.get('/adfile/:id/:file', ads.serveAdFile);
+app.get('/adlib/:file', ads.serveLibFile);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -255,8 +259,11 @@ api.post('/posts', upload.single('media'), (req, res) => {
   const caption = (req.body.caption || '').trim();
   const accountIds = [].concat(req.body.accountIds || []).flatMap((v) => String(v).split(',')).filter(Boolean).map(Number);
   // A clip from the Clips tab can be used instead of an uploaded file.
-  const clipFile = !req.file && req.body.clipId ? clipper.copyClipToMedia(Number(req.body.clipId)) : null;
-  if (!req.file && req.body.clipId && !clipFile) return res.status(400).json({ error: 'That clip is not ready yet. Try again in a minute.' });
+  // ...and so can a finished ad from Viral Ads Studio.
+  const clipFile = req.file ? null
+    : req.body.clipId ? clipper.copyClipToMedia(Number(req.body.clipId))
+    : req.body.adRef ? ads.copyAdToMedia(req.body.adRef) : null;
+  if (!req.file && (req.body.clipId || req.body.adRef) && !clipFile) return res.status(400).json({ error: `That ${req.body.adRef ? 'ad' : 'clip'} is not ready yet. Try again in a minute.` });
   const mediaType = req.file ? (req.file.mimetype.startsWith('video') ? 'video' : 'image') : clipFile ? 'video' : null;
   let error = validatePost({ caption, scheduledAt: req.body.scheduledAt, accountIds, mediaType });
   if (!error && req.file?.mimetype === 'image/png' && accountIds.length &&
@@ -355,6 +362,7 @@ api.post('/analytics/refresh', async (req, res) => {
 });
 
 app.use('/api/clips', clipper.router);
+app.use('/api/ads', ads.router);
 app.use('/api/crm/booking', booking.router);
 app.use('/api/crm/automations', automations.router);
 app.use('/api/crm/email', campaigns.router);
@@ -375,6 +383,7 @@ app.use((err, req, res, next) => {
 function startApp() {
   scheduler.start();
   clipper.start();
+  ads.start();
   app.listen(config.port, () => console.log(`Scheduler running at http://localhost:${config.port}`));
 }
 
