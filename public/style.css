@@ -828,3 +828,22 @@ input[type=color] { width: 100%; height: 42px; padding: 4px; cursor: pointer; }
 .ad-scene.drop { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: var(--accent-soft); }
 .ad-scene.busy { opacity: .6; }
 @media (max-width: 800px) { .ad-ai-sites { grid-template-columns: 1fr; } }
+
+/* Presenters */
+.ads-presenters { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.ads-presenter { position: relative; display: grid; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 8px; }
+.ads-presenter img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 10px; display: block; }
+.ads-presenter input { font: inherit; font-weight: 700; font-size: .88rem; border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 4px 6px; min-width: 0; color: inherit; }
+.ads-presenter input:hover, .ads-presenter input:focus { border-color: var(--line); background: var(--bg); }
+.ads-presenter .iconbtn { position: absolute; top: 14px; right: 14px; width: 30px; height: 30px; }
+.ad-presenter-pick { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 8px; }
+.ad-presenter-pick button { flex: 0 0 76px; display: grid; gap: 3px; border: 2px solid transparent; background: none; border-radius: 12px; padding: 3px; cursor: pointer; color: inherit; font: inherit; }
+.ad-presenter-pick img { width: 66px; height: 82px; object-fit: cover; border-radius: 9px; display: block; }
+.ad-presenter-pick small { font-size: .72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ad-presenter-pick button.on { border-color: var(--accent); background: var(--accent-soft); }
+.ad-presenter-how { border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin: 6px 0 12px; display: grid; gap: 8px; }
+.ad-presenter-how .btn.sm { padding: 4px 9px; font-size: .8rem; display: inline-flex; gap: 4px; align-items: center; }
+.ad-presenter-how .btn.sm svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
+.ad-presenter-hp { margin-bottom: 12px; }
+.ad-presenter-hp summary { cursor: pointer; padding: 6px 0; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; }

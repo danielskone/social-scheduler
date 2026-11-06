@@ -126,6 +126,18 @@ test('details -> ad video in two shapes -> scheduled post', { timeout: 240000 },
   assert.ok(Math.abs(ad.outputs['9x16'].duration - 6) < 0.6, String(ad.outputs['9x16'].duration));
   assert.equal((await fetch(`${root}${ad.outputs['16x9'].url}`)).status, 200);
 
+  // Presenters: named from the file, renamed, and the ad's voiceover can be saved.
+  const pf = new FormData();
+  pf.append('files', new Blob([fs.readFileSync(photo)], { type: 'image/jpeg' }), '17_Malik.jpg');
+  const [pr] = await (await fetch(`${root}/api/ads/presenters`, { method: 'POST', body: pf })).json();
+  assert.equal(pr.presenter, 'Malik');
+  assert.equal((await (await fetch(`${root}/api/ads/presenters/${pr.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'malik j' }) })).json()).presenter, 'Malik j');
+  assert.deepEqual((await (await fetch(`${root}/api/ads/presenters`)).json()).map((m) => m.presenter), ['Malik j']);
+  const vo = await fetch(`${root}/api/ads/${ad.id}/voiceover`);
+  assert.equal(vo.status, 200);
+  assert.match(vo.headers.get('content-disposition'), /voiceover\.m4a/);
+  assert.ok((await vo.arrayBuffer()).byteLength > 5000);
+
   // Schedule it.
   const out = await (await fetch(`${root}/api/ads/${ad.id}/out/16x9`)).json();
   assert.equal(out.ref, `${ad.id}:16x9`);

@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS ads (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+// Presenters are photos of people (in the library) with a name, for talking-head ads.
+try { db.exec('ALTER TABLE ad_media ADD COLUMN presenter TEXT'); } catch {}
 
 // ---------- Choices ----------
 const FORMATS = {
@@ -266,7 +268,7 @@ async function speak(text, { voice, pace = 'normal' } = {}, outBase) {
   const engine = ttsEngine();
   if (!engine || !clean(text)) return null;
   const txt = `${outBase}.txt`;
-  fs.writeFileSync(txt, clean(text, 1000));
+  fs.writeFileSync(txt, clean(text, 4000));
   const rate = PACES[pace] || PACES.normal;
   try {
     if (engine === 'say') {
@@ -604,7 +606,7 @@ function start() {
 
 // ---------- Output for the page ----------
 const mediaOut = (m) => m && ({
-  id: m.id, file: m.file, kind: m.kind, name: m.name, width: m.width, height: m.height, duration: m.duration, has_audio: Boolean(m.has_audio),
+  id: m.id, file: m.file, kind: m.kind, name: m.name, presenter: m.presenter || null, width: m.width, height: m.height, duration: m.duration, has_audio: Boolean(m.has_audio),
   url: `/adlib/${m.file}`, thumb_url: m.kind === 'video' ? `/adlib/${m.file.replace(/\.[^.]+$/, '')}.thumb.jpg` : m.kind === 'image' ? `/adlib/${m.file}` : null,
 });
 const brandOut = (b) => b && ({ ...b, logo_url: b.logo ? `/adlib/${b.logo}` : null });
@@ -719,6 +721,33 @@ router.delete('/media/:id', (req, res) => {
   fs.rmSync(libPath(m.file), { force: true });
   fs.rmSync(libPath(`${m.file.replace(/\.[^.]+$/, '')}.thumb.jpg`), { force: true });
   res.json({ ok: true });
+});
+
+// Presenters: photos of people to put in ads. "17_Malik.png" is named Malik.
+const presenterName = (original) => cap(clean(String(original || '').replace(/\.[^.]+$/, '').replace(/^[\d\s_.-]+/, '').replace(/[_-]+/g, ' '), 40)) || 'Presenter';
+router.get('/presenters', (req, res) => res.json(db.prepare("SELECT * FROM ad_media WHERE presenter IS NOT NULL ORDER BY presenter COLLATE NOCASE").all().map(mediaOut)));
+router.post('/presenters', upload.array('files', 60), async (req, res) => {
+  const out = [];
+  for (const f of req.files || []) {
+    const info = await probeAny(f.path);
+    if (!info.width || !(/^image\//.test(f.mimetype) || /\.(jpe?g|png|webp|heic)$/i.test(f.originalname))) { fs.rmSync(f.path, { force: true }); continue; }
+    let file = f.filename;
+    if (!/\.(jpe?g|png)$/i.test(file)) {
+      const jpg = file.replace(/\.[^.]*$/, '') + '.jpg';
+      try { await run(ffmpegPath(), ['-hide_banner', '-y', '-i', f.path, '-q:v', '3', path.join(libDir, jpg)]); fs.rmSync(f.path, { force: true }); file = jpg; } catch { fs.rmSync(f.path, { force: true }); continue; }
+    }
+    const { lastInsertRowid } = db.prepare('INSERT INTO ad_media (file, kind, name, width, height, presenter) VALUES (?,?,?,?,?,?)')
+      .run(file, 'image', clean(f.originalname, 120), info.width, info.height, presenterName(f.originalname));
+    out.push(mediaOut(db.prepare('SELECT * FROM ad_media WHERE id=?').get(lastInsertRowid)));
+  }
+  if (!out.length) return res.status(400).json({ error: 'Those photos could not be read. Use JPG, PNG or HEIC photos.' });
+  res.status(201).json(out);
+});
+router.patch('/presenters/:id', (req, res) => {
+  const m = db.prepare('SELECT * FROM ad_media WHERE id=? AND presenter IS NOT NULL').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Not found' });
+  db.prepare('UPDATE ad_media SET presenter=? WHERE id=?').run(cap(clean(req.body?.name, 40)) || m.presenter, m.id);
+  res.json(mediaOut(db.prepare('SELECT * FROM ad_media WHERE id=?').get(m.id)));
 });
 
 // Brands: name, logo, colour, website and the usual call to action.
@@ -854,6 +883,23 @@ router.patch('/:id', (req, res) => {
   if (Array.isArray(b.scenes)) fields.scenes = JSON.stringify(cleanScenes(b.scenes));
   setAd(a.id, fields);
   res.json(adOut(getAd(a.id)));
+});
+
+// The ad's whole voiceover as one sound file, for AI sites that make a photo talk.
+router.get('/:id/voiceover', async (req, res) => {
+  const a = getAd(req.params.id);
+  if (!a) return res.status(404).json({ error: 'Not found' });
+  const text = JSON.parse(a.scenes || '[]').map((s) => String(s.say || '').trim()).filter(Boolean).join(' ');
+  if (!text) return res.status(400).json({ error: 'This ad has no words to say yet.' });
+  const base = path.join(os.tmpdir(), `vo-${crypto.randomBytes(4).toString('hex')}`);
+  try {
+    const file = await speak(text, { voice: a.voice, pace: a.pace }, base);
+    if (!file) return res.status(400).json({ error: 'There is no voice on this computer.' });
+    const m4a = `${base}.m4a`;
+    await run(ffmpegPath(), ['-hide_banner', '-y', '-i', file, '-af', 'loudnorm=I=-16:TP=-1.5', '-c:a', 'aac', '-b:a', '128k', m4a]);
+    res.attachment(`${clean(a.name, 60).replace(/[^\w -]/g, '') || 'ad'} voiceover.m4a`).type('audio/mp4').send(fs.readFileSync(m4a));
+    [file, m4a].forEach((f) => fs.rmSync(f, { force: true }));
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Write the script again (a different version each time).
