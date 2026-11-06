@@ -10,6 +10,7 @@ const youtube = require('./youtube');
 const tiktok = require('./tiktok');
 const scheduler = require('./scheduler');
 const { importBundle } = require('./importer');
+const crm = require('./crm');
 const compression = require('compression');
 const { thumbFor } = require('./thumbs');
 
@@ -21,9 +22,10 @@ app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next
 // The Cloudflare tunnel exists only so Instagram can download media. Anything else that
 // arrives through it (it adds a cf-connecting-ip header) is refused, so the dashboard is
 // never reachable from the open internet. Phones reach it over home Wi-Fi or Tailscale.
+// The CRM's public sign-up forms (/f/...) are the one other exception: they are meant to be shared.
 const viaTunnel = (req) => Boolean(req.headers['cf-connecting-ip']);
 app.use((req, res, next) => {
-  if (viaTunnel(req) && !req.path.startsWith('/media/')) return res.status(404).send('Not found');
+  if (viaTunnel(req) && !req.path.startsWith('/media/') && !req.path.startsWith('/f/')) return res.status(404).send('Not found');
   next();
 });
 
@@ -33,6 +35,9 @@ app.use('/media', express.static(config.mediaDir, { fallthrough: false, maxAge: 
 
 // Pages and data are squeezed before they're sent, which matters a lot on cellular.
 app.use(compression({ filter: (req, res) => !req.path.startsWith('/thumb/') && compression.filter(req, res) }));
+
+// Public sign-up forms from the Contacts tab. No password, so anyone with the link can fill one in.
+app.use('/f', crm.publicForms);
 
 // ---------- Password protection ----------
 // On this Mac (localhost) the password is optional. From a phone or any other device a
@@ -335,6 +340,7 @@ api.post('/analytics/refresh', async (req, res) => {
   res.json({ ok: true });
 });
 
+app.use('/api/crm', crm.router);
 app.use('/api', api);
 
 app.use((err, req, res, next) => {

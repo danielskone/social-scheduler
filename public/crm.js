@@ -1,0 +1,318 @@
+// Viral Touch CRM tab (personal CRM). Loaded before app.js; app.js calls renderContacts(subTab) on #contacts.
+(() => {
+  const q$ = (s, el = document) => el.querySelector(s);
+  const h = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const money = (n) => (n == null ? '' : Number(n).toLocaleString([], { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }));
+  const todayStr = () => { const d = new Date(), p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
+  const niceDate = (s) => (s ? new Date(`${s}T12:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '');
+  const dueClass = (d) => (!d ? '' : d < todayStr() ? 'overdue' : d === todayStr() ? 'due-today' : '');
+  async function call(path, opts = {}) {
+    if (opts.json) { opts.body = JSON.stringify(opts.json); opts.headers = { 'Content-Type': 'application/json' }; delete opts.json; }
+    const res = await fetch(`/api/crm${path}`, opts);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    return data;
+  }
+  const say = (msg, err) => { const b = q$('#banner'); b.textContent = msg; b.className = `banner${err ? ' error' : ''}`; b.hidden = !msg; };
+  const opt = (list, cur) => list.map((x) => `<option${x === cur ? ' selected' : ''}>${h(x)}</option>`).join('');
+
+  let meta = { groups: [], stages: [] };
+  let tab = 'list';
+  let timer;
+
+  async function renderContacts(sub) {
+    tab = ['pipeline', 'tasks', 'forms', 'templates'].includes(sub) ? sub : 'list';
+    document.querySelectorAll('#crm-tabs a').forEach((a) => a.classList.toggle('active', a.dataset.tab === tab));
+    document.querySelectorAll('.crm-panel').forEach((p) => (p.hidden = p.dataset.panel !== tab));
+    meta = await call('/meta');
+    const fill = (sel, items, label) => {
+      const el = q$(sel), cur = el.value;
+      el.innerHTML = `<option value="">${label}</option>` + items.map((g) => `<option${g === cur ? ' selected' : ''}>${h(g)}</option>`).join('');
+    };
+    fill('#crm-group', meta.groups, 'All groups');
+    fill('#pipe-group', meta.groups, 'All groups');
+    fill('#crm-stage', meta.stages, 'All stages');
+    const s = meta.summary;
+    q$('#crm-tiles').innerHTML = [
+      ['Contacts', s.total], ['To-dos due', s.due + s.tasksDue], ['Committed (not paid yet)', money(s.pledged)], ['Paid', money(s.paid)], ['OK to email', s.emailable],
+    ].map(([l, v]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v ?? 0}</div></div>`).join('');
+    await ({ list: renderList, pipeline: renderBoard, tasks: renderTasks, forms: renderForms, templates: renderTemplates }[tab])();
+  }
+  window.renderContacts = renderContacts;
+  const refresh = () => renderContacts(tab);
+
+  // ---------- People ----------
+  async function renderList() {
+    const p = new URLSearchParams();
+    if (q$('#crm-q').value.trim()) p.set('q', q$('#crm-q').value.trim());
+    if (q$('#crm-group').value) p.set('group', q$('#crm-group').value);
+    if (q$('#crm-stage').value) p.set('stage', q$('#crm-stage').value);
+    if (q$('#crm-due').checked) p.set('due', '1');
+    const rows = await call(`/contacts?${p}`);
+    q$('#crm-table tbody').innerHTML = rows.map((c) => `<tr data-id="${c.id}">
+      <td><b>${h(c.name)}</b>${c.company && c.company !== c.name ? `<div class="muted">${h(c.company)}</div>` : ''}${c.do_not_contact ? ' <span class="pill" style="color:var(--bad)">Do not contact</span>' : ''}</td>
+      <td><span class="pill">${h(c.group_name)}</span></td>
+      <td>${h(c.stage)}</td>
+      <td>${money(c.amount)}</td>
+      <td>${c.phone ? `<a href="tel:${h(c.phone)}">${h(c.phone)}</a><br>` : ''}${c.email ? `<a href="mailto:${h(c.email)}">${h(c.email)}</a>${c.email_ok ? ' ✓' : ''}` : ''}</td>
+      <td class="${dueClass(c.next_follow_up)}">${niceDate(c.next_follow_up)}</td>
+    </tr>`).join('') || `<tr><td colspan="6" class="muted">${meta.summary.total ? 'No contacts match.' : 'No contacts yet. Click "+ Add contact", import a spreadsheet saved as CSV, or share a sign-up form.'}</td></tr>`;
+  }
+  q$('#crm-q').oninput = () => { clearTimeout(timer); timer = setTimeout(renderList, 200); };
+  ['#crm-group', '#crm-stage', '#crm-due'].forEach((s) => (q$(s).onchange = renderList));
+  q$('#crm-table tbody').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr && !e.target.closest('a')) openContact(Number(tr.dataset.id)); };
+  q$('#crm-add').onclick = () => openContact(null);
+  q$('#crm-task-add').onclick = () => editTask({});
+
+  q$('#crm-import').onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    say(`Importing ${file.name}…`);
+    try {
+      const r = await call('/import', { method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: await file.text() });
+      say(`Imported ${r.imported} contact(s)${r.skipped ? `, skipped ${r.skipped} already here (same email)` : ''}.${r.errors.length ? ' Problems: ' + r.errors.join('; ') : ''}`, r.errors.length > 0);
+      refresh();
+    } catch (err) { say(err.message, true); }
+  };
+
+  // ---------- Pipeline board ----------
+  async function renderBoard() {
+    const group = q$('#pipe-group').value;
+    const rows = await call(`/contacts${group ? `?group=${encodeURIComponent(group)}` : ''}`);
+    q$('#pipe-board').innerHTML = meta.stages.map((st) => {
+      const cards = rows.filter((c) => c.stage === st);
+      const total = cards.reduce((n, c) => n + (c.amount || 0), 0);
+      return `<div class="col" data-stage="${h(st)}"><h3>${h(st)}</h3><div class="muted">${cards.length} · ${money(total)}</div>
+        ${cards.map((c) => `<div class="card" draggable="true" data-id="${c.id}"><b>${h(c.company || c.name)}</b>
+          ${c.company && c.company !== c.name ? `<div>${h(c.name)}</div>` : ''}
+          ${c.amount ? `<div class="amt">${money(c.amount)}</div>` : ''}
+          <div class="meta"><span class="pill">${h(c.group_name)}</span>${c.next_follow_up ? ` <span class="${dueClass(c.next_follow_up)}">${niceDate(c.next_follow_up)}</span>` : ''}</div></div>`).join('')}
+      </div>`;
+    }).join('');
+  }
+  q$('#pipe-group').onchange = renderBoard;
+  const board = q$('#pipe-board');
+  board.addEventListener('dragstart', (e) => { const c = e.target.closest('.card'); if (c) e.dataTransfer.setData('text/plain', c.dataset.id); });
+  board.addEventListener('dragover', (e) => { const col = e.target.closest('.col'); if (col) { e.preventDefault(); col.classList.add('over'); } });
+  board.addEventListener('dragleave', (e) => { const col = e.target.closest('.col'); if (col && !col.contains(e.relatedTarget)) col.classList.remove('over'); });
+  board.addEventListener('drop', async (e) => {
+    const col = e.target.closest('.col');
+    if (!col) return;
+    e.preventDefault();
+    const id = e.dataTransfer.getData('text/plain');
+    try { await call(`/contacts/${id}`, { method: 'PUT', json: { stage: col.dataset.stage } }); } catch (err) { say(err.message, true); }
+    refresh();
+  });
+  board.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c) openContact(Number(c.dataset.id)); });
+
+  // ---------- Tasks ----------
+  const taskRow = (t, showWho = true) => `<li class="${t.done_at ? 'done' : ''}" data-task="${t.id}">
+    <input type="checkbox" data-done ${t.done_at ? 'checked' : ''} title="Mark done">
+    <span class="title">${h(t.title)}${showWho && t.contact_name ? ` <a href="#" data-open="${t.contact_id}" class="muted">· ${h(t.contact_name)}</a>` : ''}</span>
+    <span class="${t.done_at ? 'muted' : dueClass(t.due_on)}">${niceDate(t.due_on)}</span>
+    <button class="x" data-edit title="Edit">✎</button><button class="x" data-del title="Delete">×</button></li>`;
+  async function renderTasks() {
+    const tasks = await call(`/tasks${q$('#task-show-done').checked ? '' : '?open=1'}`);
+    q$('#task-list').innerHTML = tasks.map((t) => taskRow(t)).join('') || '<li class="muted">No tasks. Click "+ Task" to add one.</li>';
+  }
+  q$('#task-show-done').onchange = renderTasks;
+  async function taskClick(e, after) {
+    const li = e.target.closest('li[data-task]');
+    if (e.target.dataset.open) { e.preventDefault(); return openContact(Number(e.target.dataset.open)); }
+    if (!li) return;
+    const id = Number(li.dataset.task);
+    if ('done' in e.target.dataset) { await call(`/tasks/${id}`, { method: 'PUT', json: { done: e.target.checked } }); after(); }
+    if ('del' in e.target.dataset && confirm('Delete this task?')) { await call(`/tasks/${id}`, { method: 'DELETE' }); after(); }
+    if ('edit' in e.target.dataset) { const t = (await call('/tasks')).find((x) => x.id === id); editTask(t, after); }
+  }
+  q$('#task-list').onclick = (e) => taskClick(e, refresh);
+
+  async function editTask(t, after = refresh) {
+    const people = await call('/contacts');
+    const dlg = q$('#crm-edit-dialog');
+    dlg.innerHTML = `<form id="task-form"><h1>${t.id ? 'Edit task' : 'New task'}</h1>
+      <label class="field"><span>To do</span><input name="title" required value="${h(t.title)}" placeholder="e.g. Call about sponsor invoice" style="width:100%"></label>
+      <label class="field"><span>Due</span><input type="date" name="due_on" value="${h(t.due_on || todayStr())}"></label>
+      <label class="field"><span>For</span><select name="contact_id" style="width:100%"><option value="">(nobody in particular)</option>
+        ${people.map((p) => `<option value="${p.id}"${p.id === t.contact_id ? ' selected' : ''}>${h(p.name)}${p.company && p.company !== p.name ? ` (${h(p.company)})` : ''}</option>`).join('')}</select></label>
+      <div class="row"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="task-msg"></span></div></form>`;
+    q$('[data-close]', dlg).onclick = () => dlg.close();
+    q$('#task-form', dlg).onsubmit = async (e) => {
+      e.preventDefault();
+      try { await call(t.id ? `/tasks/${t.id}` : '/tasks', { method: t.id ? 'PUT' : 'POST', json: Object.fromEntries(new FormData(e.target)) }); dlg.close(); after(); }
+      catch (err) { q$('#task-msg', dlg).textContent = err.message; }
+    };
+    dlg.showModal();
+  }
+
+  // ---------- Sign-up forms ----------
+  async function renderForms() {
+    const forms = await call('/forms');
+    const url = forms[0]?.url || '';
+    const note = /localhost|127\.0\.0\.1/.test(url) ? 'Forms only work for other people when the app has a public web address (the same one Instagram uses). Right now it only has this computer\'s address, so wait a minute and refresh.'
+      : /trycloudflare\.com/.test(url) ? 'Heads up: these links change whenever your Mac restarts. Copy a fresh link here each time you share one, and update any old posts that use it.' : '';
+    q$('#form-list').innerHTML = (note ? `<div class="note">${note}</div>` : '')
+      + (forms.map((f) => `<div class="item" data-form="${f.id}">
+        <b>${h(f.title)}</b> ${f.active ? '' : '<span class="pill" style="color:var(--bad)">Off</span>'}
+        <div class="muted">Adds people to <b>${h(f.group_name)}</b> · ${f.submissions} sign-up${f.submissions === 1 ? '' : 's'}</div>
+        <div class="linkbox"><input readonly value="${h(f.url)}"><button class="btn" data-copy>Copy link</button></div>
+        <div class="row"><a class="btn ghost" href="${h(f.url)}" target="_blank" rel="noopener">Open</a><button class="btn ghost" data-edit>Edit</button><button class="btn danger" data-del>Delete</button></div>
+      </div>`).join('') || '<p class="muted">No forms yet. Try one for "Become a parade sponsor" or "Register a parade entry".</p>');
+    q$('#form-list').onclick = async (e) => {
+      const el = e.target.closest('[data-form]');
+      if (!el) return;
+      const f = forms.find((x) => x.id === Number(el.dataset.form));
+      if ('copy' in e.target.dataset) { await navigator.clipboard.writeText(f.url).catch(() => {}); e.target.textContent = 'Copied'; }
+      if ('edit' in e.target.dataset) editForm(f);
+      if ('del' in e.target.dataset && confirm(`Delete the form "${f.title}"? The link will stop working. People who already signed up stay in your contacts.`)) { await call(`/forms/${f.id}`, { method: 'DELETE' }); refresh(); }
+    };
+  }
+  q$('#form-add').onclick = () => editForm({ group_name: 'Parade sponsor', ask_company: 1, ask_phone: 1, ask_message: 1, active: 1,
+    email_checkbox: 'Yes, email me parade news and updates. I can unsubscribe any time.' });
+
+  function editForm(f) {
+    const dlg = q$('#crm-edit-dialog');
+    const box = (name, label) => `<label class="check" style="margin:4px 0"><input type="checkbox" name="${name}" ${f[name] ? 'checked' : ''}> ${label}</label>`;
+    dlg.innerHTML = `<form id="form-form"><h1>${f.id ? 'Edit form' : 'New sign-up form'}</h1>
+      <label class="field"><span>Title</span><input name="title" required value="${h(f.title)}" placeholder="Become a parade sponsor" style="width:100%"></label>
+      <label class="field"><span>Short intro <small>(optional)</small></span><textarea name="intro" rows="3">${h(f.intro)}</textarea></label>
+      <label class="field"><span>Put new people in group</span><input name="group_name" list="form-groups" value="${h(f.group_name)}" style="width:100%"><datalist id="form-groups">${meta.groups.map((g) => `<option value="${h(g)}">`).join('')}</datalist></label>
+      <div class="field"><span>Also ask for</span>${box('ask_company', 'Business or organization')}${box('ask_phone', 'Phone')}${box('ask_message', 'Message')}</div>
+      <label class="field"><span>Email permission box <small>(left unchecked for them to tick; leave empty for no box)</small></span><input name="email_checkbox" value="${h(f.email_checkbox)}" style="width:100%"></label>
+      <label class="field"><span>Thank-you message <small>(optional)</small></span><textarea name="thank_you" rows="2">${h(f.thank_you)}</textarea></label>
+      ${box('active', 'Form is on (people can fill it in)')}
+      <div class="row" style="margin-top:12px"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="form-msg"></span></div></form>`;
+    q$('[data-close]', dlg).onclick = () => dlg.close();
+    q$('#form-form', dlg).onsubmit = async (e) => {
+      e.preventDefault();
+      const fm = e.target, data = Object.fromEntries(new FormData(fm));
+      ['ask_company', 'ask_phone', 'ask_message', 'active'].forEach((k) => (data[k] = fm[k].checked));
+      try { await call(f.id ? `/forms/${f.id}` : '/forms', { method: f.id ? 'PUT' : 'POST', json: data }); dlg.close(); refresh(); }
+      catch (err) { q$('#form-msg', dlg).textContent = err.message; }
+    };
+    dlg.showModal();
+  }
+
+  // ---------- Message templates ----------
+  async function renderTemplates() {
+    const list = await call('/templates');
+    q$('#tpl-list').innerHTML = list.map((t) => `<div class="item" data-tpl="${t.id}">
+      <b>${h(t.name)}</b> <span class="pill">${t.channel === 'text' ? 'Text' : 'Email'}</span>
+      ${t.subject ? `<div class="muted">Subject: ${h(t.subject)}</div>` : ''}<p>${h(t.body)}</p>
+      <div class="row"><button class="btn ghost" data-edit>Edit</button><button class="btn danger" data-del>Delete</button></div></div>`).join('') || '<p class="muted">No templates yet.</p>';
+    q$('#tpl-list').onclick = async (e) => {
+      const el = e.target.closest('[data-tpl]');
+      if (!el) return;
+      const t = list.find((x) => x.id === Number(el.dataset.tpl));
+      if ('edit' in e.target.dataset) editTemplate(t);
+      if ('del' in e.target.dataset && confirm(`Delete "${t.name}"?`)) { await call(`/templates/${t.id}`, { method: 'DELETE' }); refresh(); }
+    };
+  }
+  q$('#tpl-add').onclick = () => editTemplate({ channel: 'email' });
+
+  function editTemplate(t) {
+    const dlg = q$('#crm-edit-dialog');
+    dlg.innerHTML = `<form id="tpl-form"><h1>${t.id ? 'Edit template' : 'New template'}</h1>
+      <label class="field"><span>Name</span><input name="name" required value="${h(t.name)}" style="width:100%"></label>
+      <label class="field"><span>Type</span><select name="channel"><option value="email"${t.channel !== 'text' ? ' selected' : ''}>Email</option><option value="text"${t.channel === 'text' ? ' selected' : ''}>Text message</option></select></label>
+      <label class="field"><span>Subject <small>(email only)</small></span><input name="subject" value="${h(t.subject)}" style="width:100%"></label>
+      <label class="field"><span>Message <small>{first_name}, {name}, {company} are filled in for you</small></span><textarea name="body" rows="8" required>${h(t.body)}</textarea></label>
+      <div class="row"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="tpl-msg"></span></div></form>`;
+    q$('[data-close]', dlg).onclick = () => dlg.close();
+    q$('#tpl-form', dlg).onsubmit = async (e) => {
+      e.preventDefault();
+      try { await call(t.id ? `/templates/${t.id}` : '/templates', { method: t.id ? 'PUT' : 'POST', json: Object.fromEntries(new FormData(e.target)) }); dlg.close(); refresh(); }
+      catch (err) { q$('#tpl-msg', dlg).textContent = err.message; }
+    };
+    dlg.showModal();
+  }
+
+  // ---------- One contact ----------
+  async function openContact(id) {
+    const c = id ? await call(`/contacts/${id}`) : { group_name: q$('#crm-group').value || 'Parade sponsor', stage: 'New', activities: [], tasks: [] };
+    const templates = id ? await call('/templates') : [];
+    const dlg = q$('#contact-dialog');
+    const field = (name, label, type = 'text', extra = '') => `<label class="field"><span>${label}</span><input type="${type}" name="${name}" value="${h(c[name])}" ${extra}></label>`;
+    const usable = templates.filter((t) => (t.channel === 'email' ? c.email : c.phone));
+    dlg.innerHTML = `<form method="dialog" id="contact-form">
+      <header class="view-head"><h1>${id ? h(c.name) : 'New contact'}</h1><button class="btn ghost" value="cancel" formnovalidate>Close</button></header>
+      ${id && !c.do_not_contact && usable.length ? `<div class="send-row"><select id="send-tpl">${usable.map((t) => `<option value="${t.id}">${t.channel === 'text' ? 'Text' : 'Email'}: ${h(t.name)}</option>`).join('')}</select>
+        <button class="btn" type="button" id="send-go">Open in Mail / Messages</button><span class="muted small" style="margin:0">Opens a filled-in message for just this person. You press Send.</span></div>` : ''}
+      <div class="form-grid">
+        ${field('name', 'Name')}
+        ${field('company', 'Company / organization')}
+        ${field('phone', 'Phone', 'tel')}
+        ${field('email', 'Email', 'email')}
+        ${field('website', 'Website')}
+        ${field('address', 'Address')}
+        <label class="field"><span>Group</span><input name="group_name" list="crm-groups" value="${h(c.group_name)}"><datalist id="crm-groups">${meta.groups.map((g) => `<option value="${h(g)}">`).join('')}</datalist></label>
+        <label class="field"><span>Stage</span><select name="stage">${opt(meta.stages, c.stage)}</select></label>
+        ${field('amount', 'Amount ($) <small>pledged, paid or spent</small>', 'text', 'inputmode="decimal"')}
+        ${field('next_follow_up', 'Next follow-up', 'date')}
+        <label class="field full"><span>Notes</span><textarea name="notes" rows="3">${h(c.notes)}</textarea></label>
+        <div class="consent full">
+          <label class="check"><input type="checkbox" name="email_ok" ${c.email_ok ? 'checked' : ''}> <b>OK to email</b> <small class="muted">only if they said yes</small></label>
+          <input type="text" name="email_ok_source" placeholder="How they said yes, e.g. signed up on parade website" value="${h(c.email_ok_source)}" style="width:100%;margin-top:8px">
+          ${c.email_ok_at ? `<div class="muted small" style="margin-top:6px">Agreed on ${new Date(c.email_ok_at).toLocaleDateString()}</div>` : ''}
+          <label class="check" style="margin-top:8px"><input type="checkbox" name="do_not_contact" ${c.do_not_contact ? 'checked' : ''}> Do not contact <small class="muted">(asked to be left alone or unsubscribed)</small></label>
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn primary" value="save">Save</button>
+        ${id ? '<button class="btn danger" value="delete" formnovalidate>Delete contact</button>' : ''}
+        <span id="contact-msg" class="muted"></span>
+      </div>
+    </form>
+    ${id ? `<h2>Tasks <button class="btn ghost" id="c-task-add" style="padding:3px 10px;font-size:.85rem">+ Task</button></h2>
+      <ul class="tasklist" id="c-tasks">${c.tasks.map((t) => taskRow(t, false)).join('') || '<li class="muted">No tasks for this person.</li>'}</ul>
+      <h2>History</h2>
+      <form id="activity-form" class="row">
+        <select name="kind">${opt(['Note', 'Call', 'Text', 'Email', 'Meeting', 'Payment'], 'Call')}</select>
+        <input type="date" name="happened_on" value="${todayStr()}">
+        <input type="text" name="note" placeholder="What happened?" style="flex:1;min-width:200px" required>
+        <button class="btn">Add</button>
+      </form>
+      <ul class="history">${c.activities.map((a) => `<li><button title="Delete" data-del="${a.id}">×</button><b>${h(a.kind)} · ${niceDate(a.happened_on)}</b><br>${h(a.note)}</li>`).join('') || '<li class="muted">Nothing logged yet.</li>'}</ul>` : ''}`;
+
+    const reopen = () => { openContact(id); refresh(); };
+    const form = q$('#contact-form', dlg);
+    form.onsubmit = async (e) => {
+      const action = e.submitter?.value;
+      if (action === 'cancel') return;
+      e.preventDefault();
+      if (action === 'delete') {
+        if (!confirm(`Delete ${c.name} and all their history?`)) return;
+        await call(`/contacts/${id}`, { method: 'DELETE' });
+        dlg.close(); refresh(); return;
+      }
+      const data = Object.fromEntries(new FormData(form));
+      data.email_ok = form.email_ok.checked; data.do_not_contact = form.do_not_contact.checked;
+      try {
+        const saved = await call(id ? `/contacts/${id}` : '/contacts', { method: id ? 'PUT' : 'POST', json: data });
+        refresh();
+        if (id) dlg.close(); else openContact(saved.id);
+      } catch (err) { q$('#contact-msg', dlg).textContent = err.message; }
+    };
+    const go = q$('#send-go', dlg);
+    if (go) go.onclick = async () => {
+      try { const m = await call(`/contacts/${id}/message`, { method: 'POST', json: { template_id: Number(q$('#send-tpl', dlg).value) } }); location.href = m.link; setTimeout(reopen, 800); }
+      catch (err) { q$('#contact-msg', dlg).textContent = err.message; }
+    };
+    const act = q$('#activity-form', dlg);
+    if (act) {
+      act.onsubmit = async (e) => {
+        e.preventDefault();
+        await call(`/contacts/${id}/activities`, { method: 'POST', json: Object.fromEntries(new FormData(act)) });
+        openContact(id);
+      };
+      q$('.history', dlg).onclick = async (e) => {
+        const del = e.target.dataset.del;
+        if (del && confirm('Delete this history entry?')) { await call(`/activities/${del}`, { method: 'DELETE' }); openContact(id); }
+      };
+      q$('#c-tasks', dlg).onclick = (e) => taskClick(e, reopen);
+      q$('#c-task-add', dlg).onclick = () => editTask({ contact_id: id }, reopen);
+    }
+    if (!dlg.open) dlg.showModal();
+  }
+})();

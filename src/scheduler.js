@@ -7,6 +7,7 @@ const notify = require('./notify');
 
 const youtube = require('./youtube');
 const tiktok = require('./tiktok');
+const crm = require('./crm');
 
 const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram, youtube: youtube.publishYouTube, tiktok: tiktok.publishTikTok };
 const postStats = { facebook: meta.facebookPostStats, instagram: meta.instagramPostStats, youtube: youtube.videoStats, tiktok: tiktok.videoStats };
@@ -84,6 +85,8 @@ function start() {
   db.prepare(`UPDATE post_targets SET status='failed', error='App restarted while publishing. Check the platform, then retry if it did not post.' WHERE status='publishing'`).run();
   cron.schedule('* * * * *', () => publishDue().catch((e) => console.error(e)));
   cron.schedule('*/2 * * * *', () => media.prefetch().catch((e) => console.error(e)));
+  // Contacts: one phone alert each morning listing follow-ups due today or overdue.
+  cron.schedule('0 8 * * *', () => crm.sendFollowUpReminder().catch((e) => console.error(e)));
   cron.schedule('17 */3 * * *', () => refreshStats().catch((e) => console.error(e)));
 }
 

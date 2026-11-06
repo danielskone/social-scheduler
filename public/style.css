@@ -415,3 +415,65 @@ dialog textarea, dialog input { width: 100%; min-width: 0; }
   dialog { width: 100%; max-width: 100%; margin: auto 0 0; border-radius: 24px 24px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); max-height: 88vh; overflow-y: auto; }
   dialog .row .btn { flex: 1; }
 }
+
+/* Contacts */
+.crm-filters { margin: 18px 0 12px; }
+.crm-filters input[type=search] { flex: 1; min-width: 220px; }
+.check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.crm-table tbody tr { cursor: pointer; }
+.crm-table tbody tr:hover td { background: var(--bg); }
+.crm-table td:first-child { white-space: normal; }
+.crm-table .overdue { color: var(--bad); font-weight: 600; }
+.crm-table .due-today { color: var(--warn); font-weight: 600; }
+.pill { font-size: .75rem; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.small { font-size: .82rem; max-width: 760px; margin-top: 14px; }
+dialog.wide { width: min(760px, 94vw); }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.form-grid .full { grid-column: 1 / -1; }
+.form-grid .field input, .form-grid .field select { width: 100%; }
+.consent { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 18px; }
+.history { list-style: none; padding: 0; margin: 8px 0 0; }
+.history li { border-left: 3px solid var(--line); padding: 4px 10px; margin-bottom: 8px; font-size: .9rem; white-space: pre-wrap; }
+.history li b { font-size: .8rem; color: var(--muted); font-weight: 600; }
+.history button { border: 0; background: none; color: var(--muted); cursor: pointer; float: right; }
+@media (max-width: 800px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .crm-table th:nth-child(5), .crm-table td:nth-child(5) { display: none; }
+}
+.subtabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 18px; overflow-x: auto; }
+.subtabs a { padding: 9px 14px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
+.subtabs a.active { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(185px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+.col { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; min-height: 300px; }
+.col.over { outline: 2px dashed var(--accent); }
+.col h3 { font-size: .9rem; margin: 0 0 2px; }
+.col .muted { font-size: .78rem; margin-bottom: 10px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 8px; cursor: grab; font-size: .88rem; }
+.card .amt { font-weight: 700; }
+.card .meta { color: var(--muted); font-size: .78rem; margin-top: 4px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.cards .item { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+.cards .item p { white-space: pre-wrap; font-size: .88rem; margin: 8px 0; max-height: 9em; overflow: hidden; }
+.linkbox { display: flex; gap: 6px; margin: 8px 0; }
+.linkbox input { flex: 1; font-size: .8rem; }
+.tasklist { list-style: none; padding: 0; margin: 0; max-width: 760px; }
+.tasklist li { display: flex; gap: 10px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; }
+.tasklist li.done .title { text-decoration: line-through; color: var(--muted); }
+.tasklist .title { flex: 1; }
+.tasklist .x { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; }
+.send-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 14px; }
+#crm-tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.nav-short { display: none; }
+@media (max-width: 800px) {
+  nav { grid-template-columns: repeat(5, 1fr); }
+  .nav-long { display: none; }
+  .nav-short { display: inline; }
+  #crm-tiles { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 800px) {
+  .crm-table th:nth-child(3), .crm-table td:nth-child(3), .crm-table th:nth-child(4), .crm-table td:nth-child(4) { display: none; }
+}
+@media (max-width: 800px) {
+  .crm-table th, .crm-table td { padding: 9px 8px; }
+  .crm-table td a { word-break: break-all; }
+}

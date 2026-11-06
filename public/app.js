@@ -48,7 +48,8 @@ function banner(msg, isError = false) {
 
 // ---------- Routing ----------
 async function route() {
-  const [view, query] = (location.hash.slice(1) || 'calendar').split('?');
+  const [path, query] = (location.hash.slice(1) || 'calendar').split('?');
+  const [view, sub] = path.split('/');
   const params = new URLSearchParams(query);
   banner(params.get('error') ? `Couldn't connect: ${params.get('error')}` : params.get('connected') ? `Connected ${params.get('connected')} account(s).` : '', Boolean(params.get('error')));
   document.querySelectorAll('.view').forEach((v) => (v.hidden = v.id !== `view-${view}`));
@@ -58,6 +59,7 @@ async function route() {
   await acctLoad;
   if (view === 'compose') renderCompose(params.get('date'));
   if (view === 'analytics') renderAnalytics();
+  if (view === 'contacts') renderContacts(sub);
   if (view === 'accounts') renderAccounts();
 }
 window.addEventListener('hashchange', route);
