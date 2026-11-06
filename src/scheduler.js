@@ -9,6 +9,7 @@ const youtube = require('./youtube');
 const tiktok = require('./tiktok');
 const crm = require('./crm');
 const website = require('./website');
+const gcal = require('./gcal');
 
 const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram, youtube: youtube.publishYouTube, tiktok: tiktok.publishTikTok };
 const postStats = { facebook: meta.facebookPostStats, instagram: meta.instagramPostStats, youtube: youtube.videoStats, tiktok: tiktok.videoStats };
@@ -91,6 +92,9 @@ function start() {
   // Website sign-ups (e.g. viralattraction.com) -> Contacts, every 2 minutes.
   cron.schedule('1-59/2 * * * *', () => website.check().catch((e) => console.error(e)));
   website.check().catch(() => {});
+  // Google Calendar bookings (the website's "Book a free call" page) -> Contacts + Appointments.
+  cron.schedule('*/5 * * * *', () => gcal.check().catch((e) => console.error(e)));
+  gcal.check().catch(() => {});
   cron.schedule('17 */3 * * *', () => refreshStats().catch((e) => console.error(e)));
 }
 

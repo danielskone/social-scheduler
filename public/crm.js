@@ -152,6 +152,10 @@
     const url = forms[0]?.url || '';
     const note = /localhost|127\.0\.0\.1/.test(url) ? 'Forms only work for other people when the app has a public web address (the same one Instagram uses). Right now it only has this computer\'s address, so wait a minute and refresh.'
       : /trycloudflare\.com/.test(url) ? 'Heads up: these links change whenever your Mac restarts. Copy a fresh link here each time you share one, and update any old posts that use it.' : '';
+    const cal = site && site.calendar;
+    const calLine = !cal ? '' : cal.connected
+      ? `<div class="muted" style="margin-top:6px">📅 <b>Google Calendar bookings</b> also come in (events named "${h(cal.match)}"), with an alert. ${cal.imported} so far.${cal.lastError ? ` <span style="color:var(--bad)">${h(cal.lastError)}</span>` : ''}</div>`
+      : '<div class="muted" style="margin-top:6px">📅 Using a Google Calendar booking page? Run <b>npm run calendar</b> so bookings land here too.</div>';
     const siteCard = !site ? '' : `<div class="item" style="grid-column:1/-1">
         <b>Your website's forms</b> ${site.connected ? (site.lastError ? '<span class="pill" style="color:var(--bad)">Problem</span>' : '<span class="pill">Connected</span>') : '<span class="pill">Not set up</span>'}
         ${site.connected
@@ -160,6 +164,7 @@
             <details style="margin-top:6px"><summary>Code for your website</summary><p class="muted">Paste this once into your website's "custom code" spot for every page (or before &lt;/body&gt;). Your forms keep working as before; this just copies each sign-up here.</p>
             <textarea readonly rows="6" style="width:100%;font:12px ui-monospace,monospace">${h(site.snippet)}</textarea>
             <div class="row"><button class="btn" data-site-copy>Copy code</button></div></details>
+            ${calLine}
             <div class="row"><button class="btn ghost" data-site-check>Check now</button><span class="muted" data-site-msg></span></div>`
           : '<div class="muted">Want sign-ups from your website (like viralattraction.com) to show up here by themselves? Follow the steps in <b>website-inbox/README.md</b>, then run <b>npm run website</b> in Terminal.</div>'}
       </div>`;
@@ -175,7 +180,7 @@
       if ('siteCheck' in e.target.dataset) {
         e.target.disabled = true;
         const r = await call('/website/check', { method: 'POST' }).catch((err) => ({ error: err.message }));
-        q$('[data-site-msg]').textContent = r.error ? r.error : `Done: ${r.added || 0} new, ${r.updated || 0} updated.`;
+        q$('[data-site-msg]').textContent = r.error ? r.error : `Done: ${r.added || 0} new, ${r.updated || 0} updated, ${r.booked || 0} new bookings.`;
         e.target.disabled = false; return;
       }
       const el = e.target.closest('[data-form]');

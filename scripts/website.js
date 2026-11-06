@@ -18,12 +18,14 @@ function setVar(text, key, value) {
 
 (async () => {
   console.log('\nConnect your website forms to Viral Touch CRM.\n');
-  const url = await ask('Web app URL (starts with https://script.google.com/ and ends with /exec): ');
+  let url = '';
+  while (!url) url = await ask('Web app URL (starts with https://script.google.com/ and ends with /exec): ');
   if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) {
     console.log('\nThat does not look like the Web app URL. Nothing was saved. Run `npm run website` to try again.');
     process.exit(1);
   }
-  const key = await ask('Secret key (from the Apps Script log): ');
+  let key = '';
+  while (!key) key = await ask('Secret key (from the Apps Script log): ');
   if (!/^[a-f0-9]{20,}$/i.test(key)) {
     console.log('\nThat does not look like the secret key. Nothing was saved. Run `npm run website` to try again.');
     process.exit(1);
