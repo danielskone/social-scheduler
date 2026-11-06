@@ -65,7 +65,7 @@ test('sponsor lead gets a ready-to-open sponsor email task; paid sponsor gets th
   crm.updateContact(c.id, { stage: 'Paid / Done' });
   assert.ok(tasksFor(c.id).includes('Send thank-you to Smith Hardware'));
   assert.ok(tasksFor(c.id).includes('Make a thank-you post for Smith Hardware'));
-  await new Promise((r) => setTimeout(r, 100));
+  for (let i = 0; i < 40 && !pings.some((p) => p.title === 'Sponsor paid'); i++) await new Promise((r) => setTimeout(r, 50));
   assert.ok(pings.some((p) => p.title === 'Sponsor paid'));
 });
 

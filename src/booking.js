@@ -278,4 +278,4 @@ router.delete('/pages/:id', wrap((req, res) => { db.prepare('DELETE FROM crm_boo
 router.get('/appointments', wrap((req, res) => res.json(listAppointments({ past: req.query.past === '1' }))));
 router.post('/appointments/:id/cancel', wrap((req, res) => { cancel(Number(req.params.id)); res.json({ ok: true }); }));
 
-module.exports = { router, publicBooking, savePage, slotsFor, book, cancel, listAppointments, todaysLines, zoned, parts };
+module.exports = { router, publicBooking, savePage, slotsFor, book, cancel, listAppointments, todaysLines, zoned, parts, niceWhen };

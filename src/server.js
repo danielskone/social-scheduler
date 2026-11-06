@@ -14,6 +14,7 @@ const crm = require('./crm');
 const booking = require('./booking');
 const website = require('./website');
 const automations = require('./automations');
+const gcal = require('./gcal');
 const clipper = require('./clipper');
 const compression = require('compression');
 const { thumbFor } = require('./thumbs');
@@ -304,7 +305,7 @@ api.patch('/posts/:id', (req, res) => {
 });
 
 api.post('/posts/:id/retry', (req, res) => {
-  db.prepare(`UPDATE post_targets SET status='scheduled', error=NULL WHERE post_id=? AND status='failed'`).run(req.params.id);
+  db.prepare(`UPDATE post_targets SET status='scheduled', error=NULL, attempts=0, retry_at=NULL WHERE post_id=? AND status='failed'`).run(req.params.id);
   db.prepare(`UPDATE posts SET scheduled_at=? WHERE id=?`).run(new Date().toISOString(), req.params.id);
   scheduler.publishDue().catch(() => {});
   res.json(loadPost(req.params.id));
@@ -356,8 +357,11 @@ app.use('/api/clips', clipper.router);
 app.use('/api/crm/booking', booking.router);
 app.use('/api/crm/automations', automations.router);
 // Website sign-ups (see website.js): status for the Forms tab, and a "check now" button.
-app.get('/api/crm/website', (req, res) => res.json(website.status()));
-app.post('/api/crm/website/check', async (req, res) => res.json({ ...(await website.check()), ...website.status() }));
+app.get('/api/crm/website', (req, res) => res.json({ ...website.status(), calendar: gcal.status() }));
+app.post('/api/crm/website/check', async (req, res) => {
+  const [w, g] = await Promise.all([website.check(), gcal.check()]);
+  res.json({ ...w, booked: g.added || 0, error: w.error || g.error, ...website.status(), calendar: gcal.status() });
+});
 app.use('/api/crm', crm.router);
 app.use('/api', api);
 

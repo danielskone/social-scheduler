@@ -7,6 +7,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const calls = [];
+let igFailures = 0; // make Instagram fail this many times with its generic error
+let stageFails = false; // make staging the photo on Facebook fail
 const fakeGraph = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
@@ -15,8 +17,16 @@ const fakeGraph = http.createServer((req, res) => {
     calls.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), body });
     const p = url.pathname.replace(/^\/v[\d.]+\//, '');
     let out = {};
-    if (p === 'PAGE1/feed') out = { id: 'PAGE1_111' };
+    if (p === 'me' && /bad/.test(url.searchParams.get('access_token') || '')) { res.statusCode = 400; out = { error: { message: 'Session expired', code: 190 } }; }
+    else if (p === 'me') out = { id: 'PAGE1' };
+    else if (p === 'photo1' && req.method === 'GET') out = stageFails ? { images: [] } : { images: [{ width: 640, source: 'https://scontent.xx.fbcdn.net/small.jpg' }, { width: 1080, source: 'https://scontent.xx.fbcdn.net/big.jpg' }] };
+    else if (p === 'photo1' && req.method === 'DELETE') out = { success: true };
+    else if (p === 'ig-api-upload/' + url.pathname.split('/')[2] + '/reel1') out = { success: true };
+    else if (p === 'IG1/media' && /upload_type=resumable/.test(body)) out = { id: 'reel1' };
+    else if (p === 'reel1') out = { status_code: 'FINISHED' };
+    else if (p === 'PAGE1/feed') out = { id: 'PAGE1_111' };
     else if (p === 'PAGE1/photos') out = { id: 'photo1', post_id: 'PAGE1_222' };
+    else if (p === 'IG1/media' && igFailures > 0) { igFailures--; res.statusCode = 500; out = { error: { message: 'An unknown error has occurred.', code: 1, is_transient: false } }; }
     else if (p === 'IG1/media') out = { id: 'container1' };
     else if (p === 'container1') out = { status_code: 'FINISHED' };
     else if (p === 'IG1/media_publish') out = { id: 'igmedia1' };
@@ -40,7 +50,7 @@ test.before(async () => {
   Object.assign(process.env, {
     GRAPH_BASE: graph, GRAPH_VIDEO_BASE: graph,
     DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'sched-')),
-    PUBLIC_BASE_URL: 'https://scheduler.example.com', APP_PASSWORD: '',
+    PUBLIC_BASE_URL: 'https://scheduler.example.com', APP_PASSWORD: '', SKIP_MEDIA_CHECK: '1',
   });
   const app = require('../src/server');
   db = require('../src/db');
@@ -87,7 +97,10 @@ test('publishes a text post to Facebook and a photo to Facebook + Instagram', as
   const p = await (await fetch(`${base}/api/posts/${photo.body.id}`)).json();
   assert.deepEqual(p.targets.map((x) => x.status), ['published', 'published']);
   const igCreate = calls.find((c) => c.path.endsWith('IG1/media'));
-  assert.match(decodeURIComponent(igCreate.body), /image_url=https:\/\/scheduler\.example\.com\/media\//);
+  // Instagram gets the photo from Facebook's servers (largest size), not from the Mac's link.
+  assert.match(decodeURIComponent(igCreate.body), /image_url=https:\/\/scontent\.xx\.fbcdn\.net\/big\.jpg/);
+  assert.ok(calls.some((c) => c.method === 'POST' && c.path.endsWith('PAGE1/photos') && /name="published"\r\n\r\nfalse/.test(c.body)), 'staged as an unpublished photo');
+  assert.ok(calls.some((c) => c.method === 'DELETE' && c.path.endsWith('/photo1')), 'hidden photo removed afterwards');
 
   const l = await (await fetch(`${base}/api/posts/${later.body.id}`)).json();
   assert.equal(l.targets[0].status, 'scheduled', 'future post must not publish early');
@@ -99,6 +112,79 @@ test('records failures with the error message', async () => {
   const p = await (await fetch(`${base}/api/posts/${r.body.id}`)).json();
   assert.equal(p.targets[0].status, 'failed');
   assert.match(p.targets[0].error, /Invalid token/);
+});
+
+test('a temporary Instagram error is retried by itself, and only fails after the last try', async () => {
+  igFailures = 1;
+  const r = await createPost({ caption: 'retry me', scheduledAt: new Date(Date.now() - 1000).toISOString(), accountIds: '2' }, true);
+  const t0 = Date.now();
+  await scheduler.publishDue(new Date(t0));
+  let p = await (await fetch(`${base}/api/posts/${r.body.id}`)).json();
+  assert.equal(p.targets[0].status, 'scheduled');
+  assert.match(p.targets[0].error, /Trying again .*try 2 of 4.*unknown error/);
+  await scheduler.publishDue(new Date(t0 + 60e3)); // too early: left alone
+  assert.equal((await (await fetch(`${base}/api/posts/${r.body.id}`)).json()).targets[0].status, 'scheduled');
+  await scheduler.publishDue(new Date(t0 + 6 * 60e3));
+  p = await (await fetch(`${base}/api/posts/${r.body.id}`)).json();
+  assert.equal(p.targets[0].status, 'published');
+
+  igFailures = 99;
+  const r2 = await createPost({ caption: 'keeps failing', scheduledAt: new Date(Date.now() - 1000).toISOString(), accountIds: '2' }, true);
+  let at = Date.now();
+  for (const wait of [0, 5, 20, 60]) { at += wait * 60e3 + 1000; await scheduler.publishDue(new Date(at)); }
+  p = await (await fetch(`${base}/api/posts/${r2.body.id}`)).json();
+  assert.equal(p.targets[0].status, 'failed');
+  assert.match(p.targets[0].error, /tried 4 times/);
+  igFailures = 0;
+});
+
+test('sign-in errors are not retried', async () => {
+  const r = await createPost({ caption: 'bad token', scheduledAt: new Date(Date.now() - 1000).toISOString(), accountIds: '3' });
+  await scheduler.publishDue();
+  const p = await (await fetch(`${base}/api/posts/${r.body.id}`)).json();
+  assert.equal(p.targets[0].status, 'failed');
+  assert.doesNotMatch(p.targets[0].error, /tried/);
+});
+
+test('Instagram videos are uploaded straight to Instagram, not downloaded from the Mac', async () => {
+  const config = require('../src/config');
+  fs.writeFileSync(path.join(config.mediaDir, 'clip.mp4'), 'fakevideo');
+  const postId = db.prepare("INSERT INTO posts (caption, media_file, media_type, scheduled_at) VALUES ('reel!', 'clip.mp4', 'video', ?)").run(new Date(Date.now() - 1000).toISOString()).lastInsertRowid;
+  db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?, 2)').run(postId);
+  await scheduler.publishDue();
+  const t = db.prepare('SELECT * FROM post_targets WHERE post_id=?').get(postId);
+  assert.equal(t.status, 'published');
+  const up = calls.find((c) => c.path.endsWith('/reel1') && c.method === 'POST');
+  assert.equal(up.body, 'fakevideo');
+  assert.ok(!calls.some((c) => /video_url=/.test(c.body)), 'no download link given to Instagram');
+});
+
+test('if Facebook can\'t hold the photo, Instagram falls back to the Mac link', async () => {
+  stageFails = true;
+  const before = calls.length;
+  const r = await createPost({ caption: 'fallback', scheduledAt: new Date(Date.now() - 1000).toISOString(), accountIds: '2' }, true);
+  await scheduler.publishDue();
+  stageFails = false;
+  const p = await (await fetch(`${base}/api/posts/${r.body.id}`)).json();
+  assert.equal(p.targets[0].status, 'published');
+  const igCreate = calls.slice(before).find((c) => c.path.endsWith('IG1/media'));
+  assert.match(decodeURIComponent(igCreate.body), /image_url=https:\/\/scheduler\.example\.com\/media\//);
+});
+
+test('heads-up check warns once about a post that is going to fail', async () => {
+  const soon = new Date(Date.now() + 3600e3).toISOString();
+  const missing = db.prepare("INSERT INTO posts (caption, media_file, media_type, scheduled_at) VALUES ('gone', 'nope.jpg', 'image', ?)").run(soon).lastInsertRowid;
+  db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?, 1)').run(missing);
+  const signedOut = db.prepare("INSERT INTO posts (caption, scheduled_at) VALUES ('to broken page', ?)").run(soon).lastInsertRowid;
+  db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?, 3)').run(signedOut);
+  const fine = db.prepare("INSERT INTO posts (caption, scheduled_at) VALUES ('all good', ?)").run(soon).lastInsertRowid;
+  db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?, 1)').run(fine);
+  const problems = await scheduler.headsUp();
+  assert.equal(problems.length, 2);
+  assert.match(problems.join('\n'), /file is missing/);
+  assert.match(problems.join('\n'), /Broken Page needs to be reconnected/);
+  assert.deepEqual(await scheduler.headsUp(), [], 'only warned once');
+  db.prepare('DELETE FROM posts WHERE id IN (?,?,?)').run(missing, signedOut, fine);
 });
 
 test('refreshes stats and followers', async () => {

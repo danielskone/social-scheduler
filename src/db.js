@@ -73,6 +73,11 @@ if (!db.prepare('PRAGMA table_info(posts)').all().some((c) => c.name === 'title'
   db.exec('ALTER TABLE posts ADD COLUMN title TEXT');
 }
 
+// Added later: automatic retries for posts that fail for a temporary reason.
+const targetCols = db.prepare('PRAGMA table_info(post_targets)').all().map((c) => c.name);
+if (!targetCols.includes('attempts')) db.exec('ALTER TABLE post_targets ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
+if (!targetCols.includes('retry_at')) db.exec('ALTER TABLE post_targets ADD COLUMN retry_at TEXT');
+
 // Fix Facebook Reel links saved as "/reel/123/" (they opened on localhost).
 db.prepare(`UPDATE post_targets SET permalink = 'https://www.facebook.com' || permalink WHERE permalink LIKE '/%'`).run();
 
