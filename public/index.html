@@ -113,37 +113,41 @@
         <div><h1>Clips</h1><p class="muted head-sub">Turn a long video into short vertical clips with captions, ready for Reels, Shorts and TikTok.</p></div>
       </header>
       <form id="clip-form" class="panel clip-new">
-        <label class="clip-drop" id="clip-drop">
-          <input type="file" name="video" accept="video/*,.mp4,.mov,.m4v,.webm,.mkv" hidden>
-          <span class="clip-drop-ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z"/></svg></span>
-          <b id="clip-file-name">Choose a long video</b>
-          <span class="muted small">MP4, MOV, M4V, WebM or MKV. Talking videos work best (interviews, speeches, podcasts, live streams).</span>
-        </label>
-        <details class="clip-link" id="clip-link">
-          <summary>Is your video on YouTube, TikTok, Instagram or Facebook? Paste its link</summary>
-          <input type="url" id="clip-link-input" placeholder="Paste the link to your own video here" autocomplete="off">
-          <div id="clip-link-steps" class="clip-link-steps"></div>
-        </details>
-        <div class="clip-options">
-          <div class="field"><span>Clip length</span>
-            <div class="seg" id="clip-length"><button type="button" data-v="short">15–35s</button><button type="button" data-v="medium" class="on">30–60s</button><button type="button" data-v="long">55–90s</button></div>
+        <div class="clip-new-grid">
+          <div class="clip-new-left">
+            <label class="clip-drop" id="clip-drop">
+              <input type="file" name="video" accept="video/*,.mp4,.mov,.m4v,.webm,.mkv" hidden>
+              <span class="clip-drop-ico"><svg viewBox="0 0 24 24"><path d="M12 15.5V4.5M7.5 9 12 4.5 16.5 9"/><path d="M4.5 14.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/></svg></span>
+              <b id="clip-file-name">Drop a long video here, or click to choose</b>
+              <span class="muted clip-drop-sub">MP4, MOV, M4V, WebM or MKV · talking videos work best</span>
+            </label>
+            <details class="clip-link" id="clip-link">
+              <summary>Video on YouTube, TikTok, Instagram or Facebook? Paste its link</summary>
+              <input type="url" id="clip-link-input" placeholder="Paste the link to your own video here" autocomplete="off">
+              <div id="clip-link-steps" class="clip-link-steps"></div>
+            </details>
           </div>
-          <div class="field"><span>Captions</span>
-            <div class="seg" id="clip-captions"><button type="button" data-v="bold" class="on">Bold</button><button type="button" data-v="clean">Clean</button><button type="button" data-v="none">Off</button></div>
+          <div class="clip-new-right">
+            <div class="clip-options">
+              <div class="field"><span>Clip length</span>
+                <div class="seg" id="clip-length"><button type="button" data-v="short">15–35s</button><button type="button" data-v="medium" class="on">30–60s</button><button type="button" data-v="long">55–90s</button></div>
+              </div>
+              <div class="field"><span>Captions</span>
+                <div class="seg" id="clip-captions"><button type="button" data-v="bold" class="on">Bold</button><button type="button" data-v="clean">Clean</button><button type="button" data-v="none">Off</button></div>
+              </div>
+              <label class="field"><span>Framing</span>
+                <select name="framing"><option value="center">Fill screen · center</option><option value="left">Fill screen · left side</option><option value="right">Fill screen · right side</option><option value="fit">Whole video</option></select>
+              </label>
+              <label class="field"><span>How many clips</span>
+                <select name="count"><option>3</option><option>5</option><option selected>8</option><option>12</option></select>
+              </label>
+            </div>
+            <button class="btn primary clip-go" type="submit"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>Find my best clips</button>
+            <div class="bar" id="clip-upload-bar" hidden><i></i></div>
+            <p id="clip-msg" class="clip-msg" aria-live="polite"></p>
+            <p class="muted clip-fine">Runs on your Mac for free. The first video also downloads a free speech model (about 200 MB, one time). You can leave this page while it works.</p>
           </div>
-          <label class="field"><span>Framing</span>
-            <select name="framing"><option value="center">Fill the screen (center)</option><option value="left">Fill the screen (left side)</option><option value="right">Fill the screen (right side)</option><option value="fit">Show the whole video</option></select>
-          </label>
-          <label class="field"><span>How many clips</span>
-            <select name="count"><option>3</option><option>5</option><option selected>8</option><option>12</option></select>
-          </label>
         </div>
-        <div class="row">
-          <button class="btn primary" type="submit">Find my best clips</button>
-          <span id="clip-msg" class="muted"></span>
-        </div>
-        <div class="bar" id="clip-upload-bar" hidden><i></i></div>
-        <p class="muted small clip-fine">Everything runs on your Mac for free. The first time, it downloads a free speech-to-text model (about 200 MB). A 30-minute video usually takes 5 to 15 minutes. You can leave this page; it keeps working.</p>
       </form>
       <div id="clip-jobs"></div>
     </section>

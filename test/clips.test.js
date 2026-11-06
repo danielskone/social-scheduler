@@ -22,7 +22,7 @@ test.before(async () => {
   await new Promise((r) => server.once('listening', r));
   root = `http://127.0.0.1:${server.address().port}`;
 });
-test.after(() => { server.close(); fake.close(); });
+test.after(() => { server.close(); server.closeAllConnections(); fake.close(); fake.closeAllConnections(); });
 
 const seg = (start, end, text) => ({ start, end, text, words: text.split(' ').map((w, i, a) => ({ text: w, start: start + ((end - start) * i) / a.length, end: start + ((end - start) * (i + 1)) / a.length })) });
 
