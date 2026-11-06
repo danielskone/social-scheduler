@@ -156,6 +156,7 @@ clipForm.onsubmit = (e) => {
     try { data = JSON.parse(xhr.responseText); } catch {}
     if (xhr.status >= 400) { msg.textContent = data.error || `Upload failed (${xhr.status}).`; return; }
     msg.textContent = 'Got it! Finding your best clips…';
+    setTimeout(() => { if (msg.textContent.startsWith('Got it')) msg.textContent = ''; }, 8000);
     clipForm.video.value = '';
     clipForm.video.onchange();
     await loadClipJobs();
@@ -238,3 +239,44 @@ function openClipEditor(id) {
   dlg.showModal();
 }
 $('#clip-dialog').addEventListener('close', () => { $('#clip-dialog').innerHTML = ''; }); // stops a playing preview
+
+// ---------- "Paste a link" helper ----------
+// Viral Post never downloads from YouTube, TikTok, Instagram or Facebook (their rules don't allow
+// it). For your own videos, this shows the official way to get the file from each one.
+function youtubeId(url) {
+  const m = url.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/|studio\.youtube\.com\/video\/)([\w-]{11})/i);
+  return m ? m[1] : null;
+}
+
+function linkSteps(raw) {
+  const url = raw.trim();
+  if (!url) return '';
+  const last = '<li>Come back here, click <b>Choose a long video</b> above and pick the file you saved.</li>';
+  const id = youtubeId(url);
+  if (id) {
+    return `<p>This is a YouTube video. If it's on <b>your</b> channel, YouTube lets you download it:</p>
+      <ol><li><a class="btn primary" href="https://studio.youtube.com/video/${esc(id)}/edit" target="_blank" rel="noopener">Open this video in YouTube Studio</a>
+        <br><small>Sign in with the account that owns the channel if it asks.</small></li>
+      <li>At the top right, click <b>⋮</b> (three dots), then <b>Download</b>. The video saves to your Downloads folder.</li>
+      ${last}</ol>
+      <p class="muted small">If YouTube Studio says you don't have access, the video belongs to someone else. Ask them to send you the file and their OK to post clips from it.</p>`;
+  }
+  if (/youtube\.com|youtu\.be/i.test(url)) return '<p>That looks like a YouTube link, but not to a single video. Open the video itself and copy its link from the address bar or the Share button.</p>';
+  if (/tiktok\.com/i.test(url)) {
+    return `<p>This is a TikTok video. For your own videos:</p>
+      <ol><li>In the TikTok app, open the video and tap <b>Share</b> (the arrow), then <b>Save video</b>. It goes to your phone's Photos.</li>
+      <li>On your iPhone, open Viral Post, go to <b>Clips</b> and pick it from Photos. Or AirDrop it to your Mac.</li></ol>`;
+  }
+  if (/instagram\.com/i.test(url)) {
+    return `<p>This is an Instagram video. The best copy is the original on your phone (Photos app). If you don't have it anymore:</p>
+      <ol><li>In Instagram, go to your profile, tap <b>☰</b>, then <b>Your activity</b> → <b>Download your information</b>, and ask for your media.</li>
+      <li>Instagram emails a link when the file is ready.</li>${last}</ol>`;
+  }
+  if (/^https?:\/\/([\w-]+\.)*(facebook\.com|fb\.watch)\//i.test(url)) {
+    return `<p>This is a Facebook video. For videos you posted:</p>
+      <ol><li><a class="btn primary" href="${esc(url)}" target="_blank" rel="noopener">Open it on Facebook</a></li>
+      <li>Click <b>⋯</b> (three dots) on the post, then <b>Download video</b>.</li>${last}</ol>`;
+  }
+  return '<p>Use the original video file from your phone, camera or computer, then click <b>Choose a long video</b> above.</p>';
+}
+$('#clip-link-input').addEventListener('input', (e) => { $('#clip-link-steps').innerHTML = linkSteps(e.target.value); });

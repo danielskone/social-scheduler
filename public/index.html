@@ -119,6 +119,11 @@
           <b id="clip-file-name">Choose a long video</b>
           <span class="muted small">MP4, MOV, M4V, WebM or MKV. Talking videos work best (interviews, speeches, podcasts, live streams).</span>
         </label>
+        <details class="clip-link" id="clip-link">
+          <summary>Is your video on YouTube, TikTok, Instagram or Facebook? Paste its link</summary>
+          <input type="url" id="clip-link-input" placeholder="Paste the link to your own video here" autocomplete="off">
+          <div id="clip-link-steps" class="clip-link-steps"></div>
+        </details>
         <div class="clip-options">
           <div class="field"><span>Clip length</span>
             <div class="seg" id="clip-length"><button type="button" data-v="short">15–35s</button><button type="button" data-v="medium" class="on">30–60s</button><button type="button" data-v="long">55–90s</button></div>

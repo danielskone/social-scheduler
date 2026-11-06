@@ -550,3 +550,10 @@ dialog.wide { width: min(760px, 94vw); }
 .field[hidden] { display: none; }
 .clip-actions .btn.primary { flex: 1 1 100%; }
 .clip-actions .btn:not(.primary):not(.icon-btn) { flex: 1; }
+.clip-link { margin: -6px 0 18px; }
+.clip-link summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: .9rem; }
+.clip-link input { width: 100%; margin-top: 10px; }
+.clip-link-steps p { margin: 12px 0 6px; }
+.clip-link-steps ol { margin: 6px 0; padding-left: 22px; }
+.clip-link-steps li { margin-bottom: 8px; }
+.clip-link-steps .btn { margin-bottom: 4px; }
