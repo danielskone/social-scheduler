@@ -47,5 +47,5 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(fetch(req).then((res) => {
     if (good(res)) { const copy = res.clone(); caches.open(SHELL).then((c) => c.put(key, copy)); }
     return res;
-  }).catch(async () => (await caches.match(key)) || (req.mode === 'navigate' && !url.pathname.startsWith('/f/') && (await caches.match('/'))) || Response.error()));
+  }).catch(async () => (await caches.match(key)) || (req.mode === 'navigate' && !url.pathname.startsWith('/f/') && !url.pathname.startsWith('/book/') && (await caches.match('/'))) || Response.error()));
 });

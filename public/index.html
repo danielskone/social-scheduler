@@ -160,6 +160,7 @@
         <a href="#contacts" data-tab="list">People</a>
         <a href="#contacts/pipeline" data-tab="pipeline">Pipeline</a>
         <a href="#contacts/tasks" data-tab="tasks">Tasks</a>
+        <a href="#contacts/appointments" data-tab="appointments">Appointments</a>
         <a href="#contacts/forms" data-tab="forms">Sign-up forms</a>
         <a href="#contacts/templates" data-tab="templates">Message templates</a>
       </div>
@@ -203,6 +204,17 @@
           <span class="muted">Share a form's link (on social posts, your website or a QR code). Each sign-up lands here and pings your iPhone.</span>
         </div>
         <div class="cards" id="form-list"></div>
+      </div>
+
+      <div class="crm-panel" data-panel="appointments" hidden>
+        <div class="row crm-filters">
+          <button class="btn primary" id="bp-add">+ New booking page</button>
+          <label class="check"><input type="checkbox" id="appt-past"> Show past and cancelled</label>
+        </div>
+        <ul class="tasklist" id="appt-list"></ul>
+        <h2>Booking pages</h2>
+        <p class="muted small" style="margin-top:0">Share a booking link (in a post, your bio or a text). People pick an open time, it shows up here, and your iPhone gets an alert.</p>
+        <div class="cards" id="bp-list"></div>
       </div>
 
       <div class="crm-panel" data-panel="templates" hidden>
