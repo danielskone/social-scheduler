@@ -477,3 +477,5 @@ dialog.wide { width: min(760px, 94vw); }
   .crm-table th, .crm-table td { padding: 9px 8px; }
   .crm-table td a { word-break: break-all; }
 }
+.linkbox .btn { white-space: nowrap; }
+.linkbox input { min-width: 0; }

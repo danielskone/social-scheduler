@@ -152,7 +152,7 @@
     const url = forms[0]?.url || '';
     const note = /localhost|127\.0\.0\.1/.test(url) ? 'Forms only work for other people when the app has a public web address (the same one Instagram uses). Right now it only has this computer\'s address, so wait a minute and refresh.'
       : /trycloudflare\.com/.test(url) ? 'Heads up: these links change whenever your Mac restarts. Copy a fresh link here each time you share one, and update any old posts that use it.' : '';
-    q$('#form-list').innerHTML = (note ? `<div class="note">${note}</div>` : '')
+    q$('#form-list').innerHTML = (note ? `<div class="note" style="grid-column:1/-1;max-width:none">${note}</div>` : '')
       + (forms.map((f) => `<div class="item" data-form="${f.id}">
         <b>${h(f.title)}</b> ${f.active ? '' : '<span class="pill" style="color:var(--bad)">Off</span>'}
         <div class="muted">Adds people to <b>${h(f.group_name)}</b> · ${f.submissions} sign-up${f.submissions === 1 ? '' : 's'}</div>

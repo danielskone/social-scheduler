@@ -172,3 +172,9 @@ test('through the public tunnel only sign-up forms are reachable, not the CRM da
   assert.strictEqual((await fetch(`${root}/f/${form.slug}`, tunnel)).status, 200);
   assert.strictEqual((await fetch(`${base}/contacts`, tunnel)).status, 404);
 });
+
+test('starter parade forms exist once, with the email box unticked by default', () => {
+  const forms = require('../src/db').prepare("SELECT * FROM crm_forms WHERE title LIKE '%parade%' OR title LIKE '%Parade%'").all();
+  assert.deepStrictEqual(forms.map((f) => f.group_name).sort(), ['Parade entry', 'Parade sponsor', 'Volunteer']);
+  assert.ok(forms.every((f) => f.active && /unsubscribe/.test(f.email_checkbox)));
+});
