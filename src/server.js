@@ -13,6 +13,7 @@ const { importBundle } = require('./importer');
 const crm = require('./crm');
 const booking = require('./booking');
 const website = require('./website');
+const automations = require('./automations');
 const clipper = require('./clipper');
 const compression = require('compression');
 const { thumbFor } = require('./thumbs');
@@ -353,6 +354,7 @@ api.post('/analytics/refresh', async (req, res) => {
 
 app.use('/api/clips', clipper.router);
 app.use('/api/crm/booking', booking.router);
+app.use('/api/crm/automations', automations.router);
 // Website sign-ups (see website.js): status for the Forms tab, and a "check now" button.
 app.get('/api/crm/website', (req, res) => res.json(website.status()));
 app.post('/api/crm/website/check', async (req, res) => res.json({ ...(await website.check()), ...website.status() }));

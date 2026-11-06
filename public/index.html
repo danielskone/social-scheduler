@@ -213,6 +213,7 @@
         <a href="#contacts/appointments" data-tab="appointments">Appointments</a>
         <a href="#contacts/forms" data-tab="forms">Sign-up forms</a>
         <a href="#contacts/templates" data-tab="templates">Message templates</a>
+        <a href="#contacts/automations" data-tab="automations">Automations</a>
       </div>
       <div id="crm-tiles" class="tiles"></div>
 
@@ -273,6 +274,16 @@
           <span class="muted">Use {first_name}, {name} or {company}. Templates open in your own Mail or Messages app, one person at a time.</span>
         </div>
         <div class="cards" id="tpl-list"></div>
+      </div>
+
+      <div class="crm-panel" data-panel="automations" hidden>
+        <div class="row crm-filters">
+          <button class="btn primary" id="auto-add">+ New automation</button>
+          <span class="muted">When something happens (a new lead, a form, a stage change, a booking), these steps run by themselves. They never send email or texts on their own: a message step makes a task, and you press Send.</span>
+        </div>
+        <div class="cards" id="auto-list"></div>
+        <h2>Recent runs</h2>
+        <ul class="history" id="auto-log"></ul>
       </div>
     </section>
 

@@ -12,6 +12,13 @@ const express = require('express');
 const db = require('./db');
 const notify = require('./notify');
 const config = require('./config');
+const { EventEmitter } = require('events');
+
+// Automations (automations.js) listen here: contact_added, form_filled, stage_changed, appointment_booked.
+const events = new EventEmitter();
+function emit(event, data) {
+  try { events.emit('crm', { event, ...data }); } catch (e) { console.error(`[crm] automation error: ${e.message}`); }
+}
 
 const GROUPS = ['Parade sponsor', 'Donor', 'Parade entry', 'Volunteer', 'Vendor', 'Viral Attraction lead', 'Auto customer', 'Other'];
 const STAGES = ['New', 'Contacted', 'Interested', 'Committed', 'Paid / Done', 'Not this year'];
@@ -74,6 +81,10 @@ CREATE TABLE IF NOT EXISTS crm_templates (
   body TEXT NOT NULL
 );
 `);
+// Tasks can carry a message template (automations use this), ready to open with one tap.
+if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_tasks') WHERE name='template_id'").get()) {
+  db.exec('ALTER TABLE crm_tasks ADD COLUMN template_id INTEGER REFERENCES crm_templates(id) ON DELETE SET NULL');
+}
 
 if (!db.prepare('SELECT 1 FROM crm_templates LIMIT 1').get()) {
   const add = db.prepare('INSERT INTO crm_templates (name, channel, subject, body) VALUES (?,?,?,?)');
@@ -117,9 +128,12 @@ function clean(body, existing = {}) {
 
 const cols = [...FIELDS, 'email_ok_at'];
 
-function createContact(body) {
+// opts.source: 'manual', 'form', 'booking' or 'import'. Imports don't start automations,
+// so loading an old spreadsheet can't create hundreds of tasks at once.
+function createContact(body, { source = 'manual' } = {}) {
   const c = clean(body);
   const r = db.prepare(`INSERT INTO contacts (${cols.join(',')}) VALUES (${cols.map((k) => '@' + k).join(',')})`).run(c);
+  if (source !== 'import') emit('contact_added', { contact: getContact(r.lastInsertRowid), source });
   return getContact(r.lastInsertRowid);
 }
 
@@ -130,6 +144,7 @@ function updateContact(id, body) {
   db.prepare(`UPDATE contacts SET ${cols.map((k) => `${k}=@${k}`).join(',')}, updated_at=datetime('now') WHERE id=@id`).run({ ...c, id: old.id });
   if (old.email_ok && !c.email_ok) logActivity(old.id, { kind: 'Note', note: 'Removed from email list (no longer OK to email).' });
   if (!old.email_ok && c.email_ok) logActivity(old.id, { kind: 'Note', note: `OK to email: ${c.email_ok_source}` });
+  if (old.stage !== c.stage) emit('stage_changed', { contact: getContact(old.id), from: old.stage, to: c.stage });
   return getContact(old.id);
 }
 
@@ -137,7 +152,7 @@ function getContact(id) {
   const c = db.prepare('SELECT * FROM contacts WHERE id=?').get(id);
   if (!c) return null;
   c.activities = db.prepare('SELECT * FROM contact_activities WHERE contact_id=? ORDER BY happened_on DESC, id DESC').all(id);
-  c.tasks = db.prepare('SELECT * FROM crm_tasks WHERE contact_id=? ORDER BY (done_at IS NOT NULL), (due_on IS NULL), due_on, id').all(id);
+  c.tasks = db.prepare('SELECT t.*, (SELECT name FROM crm_templates WHERE id=t.template_id) AS template_name FROM crm_tasks t WHERE contact_id=? ORDER BY (done_at IS NOT NULL), (due_on IS NULL), due_on, id').all(id);
   return c;
 }
 
@@ -227,7 +242,7 @@ function importCsv(text) {
       if (body.stage) body.stage = STAGES.find((s) => s.toLowerCase() === String(body.stage).trim().toLowerCase()) || 'New';
       const email = String(body.email || '').trim();
       if (email && db.prepare('SELECT 1 FROM contacts WHERE lower(email)=lower(?)').get(email)) { skipped++; return; }
-      try { createContact(body); imported++; } catch (e) { errors.push(`Row ${i + 2}: ${e.message}`); }
+      try { createContact(body, { source: 'import' }); imported++; } catch (e) { errors.push(`Row ${i + 2}: ${e.message}`); }
     });
   });
   run();
@@ -281,7 +296,8 @@ function listTasks({ open, contact_id } = {}) {
   const where = [], args = {};
   if (open) where.push('t.done_at IS NULL');
   if (contact_id) { where.push('t.contact_id=@cid'); args.cid = Number(contact_id); }
-  return db.prepare(`SELECT t.*, c.name AS contact_name FROM crm_tasks t LEFT JOIN contacts c ON c.id=t.contact_id
+  return db.prepare(`SELECT t.*, c.name AS contact_name, (SELECT name FROM crm_templates WHERE id=t.template_id) AS template_name
+    FROM crm_tasks t LEFT JOIN contacts c ON c.id=t.contact_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY (t.done_at IS NOT NULL), (t.due_on IS NULL), t.due_on, t.id`).all(args);
 }
@@ -400,11 +416,12 @@ function submitForm(form, body, opts = {}) {
     if (optIn && !existing.email_ok && !existing.do_not_contact) Object.assign(patch, { email_ok: true, email_ok_source: source });
     contact = Object.keys(patch).length ? updateContact(existing.id, patch) : existing;
   } else {
-    contact = createContact({ name, email, phone, company, group_name: form.group_name, stage: 'New', email_ok: optIn, email_ok_source: optIn ? source : null });
+    contact = createContact({ name, email, phone, company, group_name: form.group_name, stage: 'New', email_ok: optIn, email_ok_source: optIn ? source : null }, { source: 'form' });
     isNew = true;
   }
   logActivity(contact.id, { kind: 'Form', note: `Filled out "${form.title}"${message ? `:\n${message}` : ''}` });
-  return { contact, isNew };
+  emit('form_filled', { contact: getContact(contact.id), form: form.title, isNew });
+  return { contact: getContact(contact.id), isNew };
 }
 
 const page = (title, inner) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -518,4 +535,4 @@ router.get('/export.csv', wrap((req, res) => {
   res.send('﻿' + exportCsv({ emailList }));
 }));
 
-module.exports = { html: { page, esc, nl }, router, publicForms, listTasks, saveTask, saveTemplate, fillTemplate, prepareMessage, saveForm, submitForm, tooMany, createContact, updateContact, getContact, listContacts, logActivity, importCsv, exportCsv, parseCsv, summary, sendFollowUpReminder, GROUPS, STAGES };
+module.exports = { events, emit, html: { page, esc, nl }, router, publicForms, listTasks, saveTask, saveTemplate, fillTemplate, prepareMessage, saveForm, submitForm, tooMany, createContact, updateContact, getContact, listContacts, logActivity, importCsv, exportCsv, parseCsv, summary, sendFollowUpReminder, GROUPS, STAGES };

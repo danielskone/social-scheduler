@@ -148,7 +148,7 @@ function book(pg, body, now = new Date()) {
   if (!name) throw err400('Please enter your name.');
   if (!phone && !email) throw err400('Please enter a phone number or email so we can confirm.');
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw err400('That email address does not look right.');
-  return db.transaction(() => {
+  const out = db.transaction(() => {
     if (!slotsFor(pg, now).includes(when)) throw err400('Sorry, that time was just taken. Please pick another time.');
     const digits = phone.replace(/\D/g, '').slice(-10);
     let c = email ? db.prepare('SELECT * FROM contacts WHERE lower(email)=?').get(email) : null;
@@ -162,7 +162,7 @@ function book(pg, body, now = new Date()) {
       if (optIn && !c.email_ok && !c.do_not_contact) Object.assign(patch, { email: c.email || email, email_ok: true, email_ok_source: source });
       if (Object.keys(patch).length) c = crm.updateContact(c.id, patch);
     } else {
-      c = crm.createContact({ name, email, phone, group_name: pg.group_name, stage: 'New', email_ok: optIn, email_ok_source: optIn ? source : null });
+      c = crm.createContact({ name, email, phone, group_name: pg.group_name, stage: 'New', email_ok: optIn, email_ok_source: optIn ? source : null }, { source: 'booking' });
     }
     const ends = new Date(Date.parse(when) + pg.minutes * 60e3).toISOString();
     const id = db.prepare('INSERT INTO crm_appointments (page_id, contact_id, title, starts_at, ends_at, note) VALUES (?,?,?,?,?,?)')
@@ -170,6 +170,8 @@ function book(pg, body, now = new Date()) {
     crm.logActivity(c.id, { kind: 'Meeting', note: `Booked "${pg.title}" for ${niceWhen(when)}${note ? `:\n${note}` : ''}` });
     return { appointment: db.prepare('SELECT * FROM crm_appointments WHERE id=?').get(id), contact: c };
   })();
+  crm.emit('appointment_booked', { contact: crm.getContact(out.contact.id), form: out.appointment.title, when: niceWhen(out.appointment.starts_at) });
+  return { ...out, contact: crm.getContact(out.contact.id) };
 }
 
 function listAppointments({ past } = {}) {
