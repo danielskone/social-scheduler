@@ -325,6 +325,7 @@ function videoFilter({ width, height }, framing) {
   return `[0:v]crop=${cropW}:${cropH}:(iw-${cropW})*${pos}:(ih-${cropH})/2,scale=${W}:${H},setsar=1,fps=30,format=yuv420p[v]`;
 }
 
+const RENDER_THREADS = Math.max(1, Math.floor((os.cpus()?.length || 2) / 2));
 const escFilterPath = (p) => p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
 
 async function renderClip(job, clip, transcript) {
@@ -346,7 +347,9 @@ async function renderClip(job, clip, transcript) {
   const args = ['-hide_banner', '-y', '-ss', String(clip.start), '-t', String(len.toFixed(2)), '-i', job.source_file,
     '-filter_complex', filter, '-map', '[v]', '-map', '0:a?',
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-profile:v', 'high', '-level', '4.1',
-    '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', file];
+    '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart',
+    // Use only half of the Mac's processor so everything else stays smooth while clips are made.
+    '-threads', String(RENDER_THREADS), '-filter_complex_threads', String(RENDER_THREADS), file];
   try {
     await run(ffmpegPath(), args, { cwd: dir });
   } catch (err) {

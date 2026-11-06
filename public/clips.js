@@ -26,7 +26,7 @@ async function loadClipJobs() {
 function drawClipJobs() {
   const box = $('#clip-jobs');
   if (!clipState.jobs.length) {
-    box.innerHTML = '<p class="muted empty-clips">Your clips will show up here.</p>';
+    box.innerHTML = `<div class="empty-clips"><span>${CI.play}</span><b>No clips yet</b><p class="muted">Add a long video above. Your best moments will show up here, ready to schedule.</p></div>`;
     clipState.shown.clear();
     return;
   }
@@ -58,44 +58,110 @@ function drawClipJobs() {
   });
 }
 
+const CI = {
+  edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>',
+  save: '<svg viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19.5h14"/></svg>',
+  trash: '<svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7"/></svg>',
+  play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>',
+  flame: '<svg viewBox="0 0 24 24"><path d="M12 2.5c.6 3.2 4.8 5.3 4.8 10a4.8 4.8 0 0 1-9.6 0c0-2.2 1.2-3.6 2.2-4.6.2 1.6.9 2.6 1.9 2.9-.6-2.6-.1-5.6.7-8.3z"/></svg>',
+  retry: '<svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v4h4"/></svg>',
+};
+
 function jobHead(job) {
   const working = ['queued', 'working'].includes(job.status);
   const making = job.clips.filter((c) => ['pending', 'rendering'].includes(c.status)).length;
-  const status = job.status === 'failed' ? `<span class="pill bad">Didn't work</span>`
-    : working ? `<span class="pill">${job.status === 'queued' ? 'Waiting its turn' : 'Working'}</span>`
-    : making ? `<span class="pill">Making ${making} clip${making > 1 ? 's' : ''}</span>`
-    : `<span class="pill ok">${job.clips.length} clip${job.clips.length === 1 ? '' : 's'}</span>`;
-  return `<div class="row clip-job-title">
+  const ready = job.clips.filter((c) => c.status === 'ready').length;
+  const status = job.status === 'failed' ? `<span class="vchip bad">Didn't work</span>`
+    : working ? `<span class="vchip live">${job.status === 'queued' ? 'Waiting its turn' : 'Finding clips'}</span>`
+    : making ? `<span class="vchip live">Making clips · ${ready}/${job.clips.length}</span>`
+    : `<span class="vchip ok">${job.clips.length} clip${job.clips.length === 1 ? '' : 's'} ready</span>`;
+  const pct = working ? job.progress : Math.round((100 * ready) / Math.max(1, job.clips.length));
+  const date = new Date(job.created_at.replace(' ', 'T') + 'Z').toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return `<div class="clip-job-title">
       <div class="grow"><h2>${esc(job.name)}</h2>
-        <span class="muted small">${job.duration ? fmtLen(job.duration) + ' video · ' : ''}${esc(new Date(job.created_at.replace(' ', 'T') + 'Z').toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span></div>
+        <span class="muted">${job.duration ? fmtLen(job.duration) + ' video · ' : ''}${esc(date)}</span></div>
       ${status}
-      ${job.status === 'failed' ? `<button class="btn ghost" data-job-retry="${job.id}">Try again</button>` : ''}
-      <button class="btn ghost danger" data-job-del="${job.id}" title="Delete this video and its clips">Delete</button>
+      ${job.status === 'failed' ? `<button class="btn ghost" data-job-retry="${job.id}">${CI.retry}Try again</button>` : ''}
+      <button class="iconbtn danger" data-job-del="${job.id}" title="Delete this video and its clips" aria-label="Delete this video and its clips">${CI.trash}</button>
     </div>
-    ${working || making ? `<div class="bar"><i style="width:${working ? job.progress : Math.round(100 * (1 - making / Math.max(1, job.clips.length)))}%"></i></div><p class="muted small">${esc(job.step || 'Waiting…')}</p>` : ''}
+    ${working || making ? `<div class="clip-progress"><div class="bar"><i style="width:${Math.max(3, pct)}%"></i></div>
+      <span class="muted">${esc(job.step || 'Waiting…')}</span></div>` : ''}
     ${job.error ? `<p class="banner error">${esc(job.error)}</p>` : ''}
-    ${job.note ? `<p class="muted small">${esc(job.note)}</p>` : ''}`;
+    ${job.note ? `<p class="clip-note">${esc(job.note)}</p>` : ''}`;
 }
 
 function clipCard(c) {
   const ready = c.status === 'ready' && c.url;
+  const hot = c.score >= 90 ? ' hot' : '';
   const media = ready
-    ? `<video src="${c.url}" poster="${c.poster_url || ''}" preload="none" controls playsinline></video>`
-    : `<div class="clip-wait">${c.status === 'failed' ? `<b>Couldn't make this clip</b><small>${esc(c.error || '')}</small>` : `<span class="spinner"></span><small>${c.status === 'rendering' ? 'Making it now…' : 'Waiting its turn…'}</small>`}</div>`;
+    ? `<button type="button" class="clip-thumb" data-clip-view="${c.id}" aria-label="Play clip">
+        ${c.poster_url ? `<img src="${c.poster_url}" alt="" loading="lazy" decoding="async">` : ''}
+        <span class="clip-play">${CI.play}</span></button>`
+    : `<div class="clip-wait">${c.status === 'failed' ? `<b>Couldn't make this clip</b><small>${esc(c.error || '')}</small><button class="btn ghost" data-clip-remake="${c.id}">${CI.retry}Try again</button>` : `<span class="spinner"></span><small>${c.status === 'rendering' ? 'Making it now…' : 'Waiting its turn…'}</small>`}</div>`;
   return `<div class="clip-media">${media}
-      <span class="clip-score" title="How likely this part is to grab attention, from what is said and how">${c.score}</span>
+      <span class="clip-score${hot}" title="How likely this part is to grab attention, from what is said and how">${CI.flame}${c.score}</span>
       <span class="clip-len">${Math.round(c.length)}s</span></div>
     <div class="clip-body">
-      <b class="clip-title">${esc(c.title)}</b>
-      <span class="muted small">${esc(fmtSec(c.start))}–${esc(fmtSec(c.end))} · ${esc(c.reason || '')}</span>
-      ${ready && c.error ? `<span class="small warn-text">${esc(c.error)}</span>` : ''}
-      <div class="row clip-actions">
-        <a class="btn primary${ready ? '' : ' disabled'}" ${ready ? `href="#compose?clip=${c.id}"` : 'aria-disabled="true"'}>Schedule</a>
-        <button class="btn ghost" data-clip-edit="${c.id}">Edit</button>
-        ${ready ? `<a class="btn ghost" href="${c.url}?download=1" download title="Save to this device">Save</a>` : ''}
-        <button class="btn ghost icon-btn" data-clip-del="${c.id}" title="Delete clip" aria-label="Delete clip">✕</button>
+      <b class="clip-title" title="${esc(c.title)}">${esc(c.title)}</b>
+      <span class="clip-meta">${esc(fmtSec(c.start))}–${esc(fmtSec(c.end))}${c.reason ? ` · ${esc(c.reason.split(' · ')[0])}` : ''}</span>
+      ${ready && c.error ? `<span class="clip-warn">${esc(c.error)}</span>` : ''}
+      <div class="clip-actions">
+        <a class="btn primary${ready ? '' : ' disabled'}" ${ready ? `href="#compose?clip=${c.id}"` : 'aria-disabled="true" tabindex="-1"'}>Schedule</a>
+        <button type="button" class="iconbtn" data-clip-edit="${c.id}" title="Edit" aria-label="Edit clip">${CI.edit}</button>
+        ${ready ? `<a class="iconbtn" href="${c.url}?download=1" download title="Save to this device" aria-label="Save to this device">${CI.save}</a>` : ''}
+        <button type="button" class="iconbtn danger" data-clip-del="${c.id}" title="Delete clip" aria-label="Delete clip">${CI.trash}</button>
       </div>
     </div>`;
+}
+
+// Hovering a clip plays a silent preview (computers only). The video is only loaded then,
+// so a page full of clips stays light and quick.
+const canHover = matchMedia('(hover: hover) and (pointer: fine)').matches;
+$('#clip-jobs').addEventListener('mouseover', (e) => {
+  if (!canHover) return;
+  const thumb = e.target.closest('.clip-thumb');
+  if (!thumb || thumb.querySelector('video')) return;
+  const c = findClip(Number(thumb.dataset.clipView));
+  if (!c?.url) return;
+  const v = document.createElement('video');
+  Object.assign(v, { src: c.url, muted: true, loop: true, playsInline: true, preload: 'auto' });
+  v.addEventListener('playing', () => v.classList.add('on'), { once: true });
+  thumb.appendChild(v);
+  v.play().catch(() => {});
+  thumb.addEventListener('mouseleave', () => { v.pause(); v.removeAttribute('src'); v.load(); v.remove(); }, { once: true });
+});
+
+function findClip(id) {
+  for (const j of clipState.jobs) { const c = j.clips.find((x) => x.id === id); if (c) return c; }
+  return null;
+}
+
+// Clicking a clip opens it big, with sound, and the main buttons.
+function openClipViewer(id) {
+  const c = findClip(id);
+  if (!c?.url) return;
+  const dlg = $('#clip-dialog');
+  dlg.className = 'clip-viewer';
+  dlg.innerHTML = `<div class="cv-grid">
+      <video src="${c.url}" poster="${c.poster_url || ''}" controls autoplay playsinline></video>
+      <div class="cv-side">
+        <button type="button" class="iconbtn cv-close" data-close aria-label="Close">✕</button>
+        <span class="clip-score${c.score >= 90 ? ' hot' : ''} static">${CI.flame}${c.score}</span>
+        <h2>${esc(c.title)}</h2>
+        <p class="muted">${Math.round(c.length)} seconds · from ${esc(fmtSec(c.start))} to ${esc(fmtSec(c.end))}</p>
+        ${c.reason ? `<div class="cv-tags">${c.reason.split(' · ').map((r) => `<span>${esc(r)}</span>`).join('')}</div>` : ''}
+        ${c.text ? `<p class="cv-text">${esc(c.text)}</p>` : ''}
+        <div class="cv-actions">
+          <a class="btn primary" href="#compose?clip=${c.id}" data-close>Schedule this clip</a>
+          <button type="button" class="btn ghost" data-edit>${CI.edit}Edit</button>
+          <a class="btn ghost" href="${c.url}?download=1" download>${CI.save}Save</a>
+        </div>
+      </div>
+    </div>`;
+  dlg.onclick = (e) => { if (e.target === dlg) dlg.close(); }; // tap outside to close
+  dlg.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => dlg.close()));
+  dlg.querySelector('[data-edit]').onclick = () => { dlg.close(); openClipEditor(id); };
+  dlg.showModal();
 }
 
 // ---------- New video ----------
@@ -168,9 +234,11 @@ clipForm.onsubmit = (e) => {
 
 // ---------- Buttons on clips and videos ----------
 $('#clip-jobs').addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-job-del],[data-job-retry],[data-clip-edit],[data-clip-del]');
+  const t = e.target.closest('[data-job-del],[data-job-retry],[data-clip-edit],[data-clip-del],[data-clip-view],[data-clip-remake]');
   if (!t) return;
+  if (t.dataset.clipView) { openClipViewer(Number(t.dataset.clipView)); return; }
   try {
+    if (t.dataset.clipRemake) await api(`/clips/clip/${t.dataset.clipRemake}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     if (t.dataset.jobDel) {
       if (!confirm('Delete this video and all of its clips? Posts you already scheduled are not affected.')) return;
       await api(`/clips/${t.dataset.jobDel}`, { method: 'DELETE' });
@@ -186,9 +254,11 @@ $('#clip-jobs').addEventListener('click', async (e) => {
 });
 
 function openClipEditor(id) {
-  const job = clipState.jobs.find((j) => j.clips.some((c) => c.id === id));
-  const c = job.clips.find((x) => x.id === id);
+  const c = findClip(id);
+  if (!c) return;
   const dlg = $('#clip-dialog');
+  dlg.className = 'clip-editor';
+  dlg.onclick = null;
   dlg.innerHTML = `<form method="dialog" class="clip-edit">
     <h2>Edit clip</h2>
     ${c.url ? `<video src="${c.url}" poster="${c.poster_url || ''}" controls playsinline></video>` : ''}
@@ -238,7 +308,7 @@ function openClipEditor(id) {
   };
   dlg.showModal();
 }
-$('#clip-dialog').addEventListener('close', () => { $('#clip-dialog').innerHTML = ''; }); // stops a playing preview
+$('#clip-dialog').addEventListener('close', () => { const d = $('#clip-dialog'); if (!d.open) d.innerHTML = ''; }); // stops a playing preview
 
 // ---------- "Paste a link" helper ----------
 // Viral Post never downloads from YouTube, TikTok, Instagram or Facebook (their rules don't allow
