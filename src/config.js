@@ -18,6 +18,8 @@ module.exports = {
   // Overridable so tests can point at a fake Graph API.
   graphBase: process.env.GRAPH_BASE || 'https://graph.facebook.com',
   graphVideoBase: process.env.GRAPH_VIDEO_BASE || process.env.GRAPH_BASE || 'https://graph-video.facebook.com',
+  // Instagram's direct video upload address (used so Instagram never has to download from this Mac).
+  igUploadBase: process.env.IG_UPLOAD_BASE || process.env.GRAPH_BASE || 'https://rupload.facebook.com',
   dataDir,
   mediaDir: path.join(dataDir, 'media'),
   dbPath: path.join(dataDir, 'scheduler.db'),
