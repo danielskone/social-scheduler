@@ -48,7 +48,9 @@ const settings = () => ({
 });
 // Your own mailbox wins when both are set up.
 const provider = () => { const s = settings(); return s.smtpHost && s.smtpPass ? 'mailbox' : s.key ? 'brevo' : null; };
-const ready = () => { const s = settings(); return Boolean(provider() && s.from && s.address); };
+// CAN-SPAM needs a postal address (street or PO box), not an email or website.
+const postalAddress = (a) => a.length >= 10 && /\d/.test(a) && !/@|https?:|www\./i.test(a);
+const ready = () => { const s = settings(); return Boolean(provider() && s.from && postalAddress(s.address)); };
 
 function footer(reason) {
   const s = settings();
