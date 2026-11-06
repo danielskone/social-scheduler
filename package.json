@@ -17,7 +17,8 @@
     "password": "node scripts/set-password.js",
     "phone-app": "node scripts/phone-app.js",
     "mac-app": "node scripts/mac-app.js",
-    "website": "node scripts/website.js"
+    "website": "node scripts/website.js",
+    "calendar": "node scripts/calendar.js"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
