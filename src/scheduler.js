@@ -38,7 +38,8 @@ async function publishDue(now = new Date()) {
         console.log(`[publish] post ${row.id} -> ${row.platform} ${row.account_name}: ${res.id}`);
         results.push({ postId: row.id, caption: row.caption, platform: row.platform, account: row.account_name, ok: true, note: res.note || null });
       } catch (err) {
-        db.prepare(`UPDATE post_targets SET status='failed', error=? WHERE id=?`).run(String(err.message || err), row.target_id);
+        const why = err.cause ? `${err.message} (${[err.cause.code, err.cause.message].filter(Boolean).join(': ')})` : String(err.message || err);
+        db.prepare(`UPDATE post_targets SET status='failed', error=? WHERE id=?`).run(why, row.target_id);
         console.error(`[publish] post ${row.id} -> ${row.platform} failed: ${err.message}`);
         results.push({ postId: row.id, caption: row.caption, platform: row.platform, account: row.account_name, ok: false, error: String(err.message || err) });
       }

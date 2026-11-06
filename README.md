@@ -113,3 +113,14 @@ folder has the Terms and Privacy pages TikTok asks for. Keys: `npm run tiktok-ke
 `TIKTOK_MODE=draft` (default): at the scheduled time the video goes to your TikTok inbox and your
 phone alert includes the caption to paste; you tap Post in TikTok. `TIKTOK_MODE=direct` posts by
 itself, but TikTok keeps those posts private until the app passes TikTok's audit.
+
+## Use it on your iPhone (free home-screen app)
+1. On the Mac: `npm run password` (pick a password), then `npm run background:on`.
+2. `npm run phone-app` shows the address, for example `http://192.168.1.20:3000`.
+3. On the iPhone (same Wi-Fi), open that address in Safari, tap Share, then **Add to Home Screen**.
+Without a password, Viral Post only opens on the Mac itself.
+
+## Mac app and phone access from anywhere
+- `npm run mac-app` puts a **Viral Post** app on the Desktop. Double-click it to start Viral Post and open it in its own window.
+- To use Viral Post on your phone away from home, install the free **Tailscale** app on the Mac and the iPhone (same account), then run `npm run phone-app` for the "from anywhere" address.
+- The Cloudflare tunnel only serves `/media/` (for Instagram). The dashboard is never reachable through it.

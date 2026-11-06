@@ -158,6 +158,8 @@ async function publishFacebook(account, post) {
   let permalink = null;
   try {
     permalink = (await call('GET', id, { fields: 'permalink_url', access_token: token })).permalink_url || null;
+    // Reels come back as "/reel/123/" without the site; make it a full link.
+    if (permalink && permalink.startsWith('/')) permalink = `https://www.facebook.com${permalink}`;
   } catch { /* video posts may not expose this right away */ }
   return { id, permalink };
 }
@@ -198,16 +200,27 @@ async function publishInstagram(account, post, { pollMs = 5000, maxPolls = 60 } 
 // ---------- Stats ----------
 
 async function facebookPostStats(account, postId) {
-  const d = await call('GET', postId, {
-    fields: 'reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0),shares',
-    access_token: account.access_token,
-  });
-  return {
-    likes: d.reactions?.summary?.total_count ?? null,
-    comments: d.comments?.summary?.total_count ?? null,
-    shares: d.shares?.count ?? 0,
-    views: null,
-  };
+  // Regular posts have reactions; reels/videos only have likes. Comments need an extra
+  // permission on some Pages, so fall back to fewer fields instead of failing.
+  const attempts = [
+    'reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0),shares',
+    'reactions.summary(total_count).limit(0),shares',
+    'likes.summary(true).limit(0),comments.summary(true).limit(0)',
+    'likes.summary(true).limit(0)',
+  ];
+  let lastErr;
+  for (const fields of attempts) {
+    try {
+      const d = await call('GET', postId, { fields, access_token: account.access_token });
+      return {
+        likes: (d.reactions || d.likes)?.summary?.total_count ?? null,
+        comments: d.comments?.summary?.total_count ?? null,
+        shares: d.shares?.count ?? (fields.includes('shares') ? 0 : null),
+        views: null,
+      };
+    } catch (err) { lastErr = err; }
+  }
+  throw lastErr;
 }
 
 async function instagramPostStats(account, mediaId) {

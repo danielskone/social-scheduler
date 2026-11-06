@@ -164,3 +164,11 @@ test('public sign-up form: no password, opt-in only when ticked, bots ignored, n
   crm.saveForm({ active: false }, form.id);
   assert.strictEqual((await fetch(url)).status, 404);
 });
+
+test('through the public tunnel only sign-up forms are reachable, not the CRM data', async () => {
+  const form = crm.saveForm({ title: 'Tunnel form' });
+  const root = base.replace('/api/crm', '');
+  const tunnel = { headers: { 'cf-connecting-ip': '203.0.113.5' } };
+  assert.strictEqual((await fetch(`${root}/f/${form.slug}`, tunnel)).status, 200);
+  assert.strictEqual((await fetch(`${base}/contacts`, tunnel)).status, 404);
+});
