@@ -354,6 +354,25 @@ function saveForm(body, id) {
   return db.prepare('SELECT * FROM crm_forms WHERE id=?').get(id);
 }
 
+// Ready-made parade forms, added once. If you delete one later it stays deleted.
+db.exec('CREATE TABLE IF NOT EXISTS crm_flags (name TEXT PRIMARY KEY)');
+if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_forms'").get()) {
+  const site = 'fuquayvarinachristmasparade.org';
+  const box = 'Yes, email me Fuquay-Varina Christmas Parade news and updates. I can unsubscribe any time.';
+  db.transaction(() => {
+    saveForm({ title: 'Become a Fuquay-Varina Christmas Parade sponsor', group_name: 'Parade sponsor', ask_company: true, ask_phone: true, ask_message: true,
+      intro: 'Help light up downtown Fuquay-Varina! Sponsors are thanked on our social pages and at the parade. Leave your details and we will send you the sponsor levels and perks.',
+      email_checkbox: box, thank_you: `Thank you for your interest in sponsoring the parade! We will reach out soon. You can also see sponsor levels at ${site}.` });
+    saveForm({ title: 'Register a parade entry', group_name: 'Parade entry', ask_company: true, ask_phone: true, ask_message: true,
+      intro: 'Want to walk, ride or roll in the Fuquay-Varina Christmas Parade? Tell us about your group or float (type, size, number of people) and we will follow up with next steps.',
+      email_checkbox: box, thank_you: `Thanks! We got your entry interest and will be in touch. Full entry rules and registration are at ${site}.` });
+    saveForm({ title: 'Volunteer at the Christmas Parade', group_name: 'Volunteer', ask_company: false, ask_phone: true, ask_message: true,
+      intro: 'We need friendly helpers on parade day for line-up, route safety and more. Sign up and we will be in touch with times and details.',
+      email_checkbox: box, thank_you: `Thank you for volunteering! We will contact you with details. More info at ${site}.` });
+    db.prepare("INSERT INTO crm_flags (name) VALUES ('starter_forms')").run();
+  })();
+}
+
 const hits = new Map(); // ip -> [timestamps], simple spam brake for the public forms
 function tooMany(ip, now = Date.now()) {
   const list = (hits.get(ip) || []).filter((t) => now - t < 3600e3);
@@ -481,7 +500,7 @@ router.put('/templates/:id', wrap((req, res) => res.json(saveTemplate(req.body |
 router.delete('/templates/:id', wrap((req, res) => { db.prepare('DELETE FROM crm_templates WHERE id=?').run(req.params.id); res.json({ ok: true }); }));
 router.post('/contacts/:id/message', wrap((req, res) => res.json(prepareMessage(Number(req.params.id), Number((req.body || {}).template_id)))));
 router.get('/forms', wrap((req, res) => {
-  const forms = db.prepare('SELECT * FROM crm_forms ORDER BY id DESC').all();
+  const forms = db.prepare('SELECT * FROM crm_forms ORDER BY id').all();
   const counts = db.prepare("SELECT note, COUNT(*) AS n FROM contact_activities WHERE kind='Form' GROUP BY note").all();
   forms.forEach((f) => { f.url = `${config.publicBaseUrl}/f/${f.slug}`; f.submissions = counts.filter((c) => c.note.startsWith(`Filled out "${f.title}"`)).reduce((n, c) => n + c.n, 0); });
   res.json(forms);
