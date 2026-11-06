@@ -160,6 +160,8 @@ function start() {
   cron.schedule('* * * * *', () => { try { automations.runWaiting(); } catch (e) { console.error(e); } });
   // Email campaigns: read opens/clicks from Brevo and mark anyone who unsubscribed as "Do not contact".
   cron.schedule('41 * * * *', () => campaigns.hourly().catch((e) => console.error(e)));
+  // Campaigns sent from your own mailbox go out a few at a time (and pick up again after a restart).
+  cron.schedule('* * * * *', () => campaigns.runMailboxCampaigns().catch((e) => console.error(e)));
   // Google Calendar bookings (the website's "Book a free call" page) -> Contacts + Appointments.
   cron.schedule('*/5 * * * *', () => gcal.check().catch((e) => console.error(e)));
   gcal.check().catch(() => {});

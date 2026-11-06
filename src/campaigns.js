@@ -144,7 +144,10 @@ function saveCampaign(body, id) {
 function getCampaign(id) {
   const c = db.prepare(`SELECT c.*, t.name AS template_name, s.name AS segment_name FROM crm_campaigns c
     LEFT JOIN crm_templates t ON t.id=c.template_id LEFT JOIN crm_segments s ON s.id=c.segment_id WHERE c.id=?`).get(id);
-  if (c) { c.stats = c.stats_json ? JSON.parse(c.stats_json) : null; delete c.stats_json; delete c.html; }
+  if (c) {
+    c.stats = c.stats_json ? JSON.parse(c.stats_json) : null; delete c.stats_json; delete c.html;
+    if (!c.brevo_campaign_id && c.status !== 'draft') c.mailbox = mailboxStats(c);
+  }
   return c;
 }
 const listCampaigns = () => db.prepare('SELECT id FROM crm_campaigns ORDER BY COALESCE(sent_at, send_at, created_at) DESC, id DESC LIMIT 100').all().map((r) => getCampaign(r.id));
@@ -163,6 +166,14 @@ async function sendCampaign(id, opts = {}) {
   await syncUnsubscribes(opts).catch(() => {}); // never email someone who just unsubscribed
   const people = members(seg);
   if (!people.length) throw err400('Nobody in this segment has said yes to email yet.');
+  if (email.provider() === 'mailbox') {
+    // Your own mailbox: Viral Post sends them itself, one at a time (see runMailboxCampaigns).
+    const subject = t.subject || t.name;
+    db.prepare("UPDATE crm_campaigns SET status=?, subject=?, recipients=?, sent_at=?, error=NULL WHERE id=?")
+      .run(c.send_at ? 'scheduled' : 'sending', subject, people.length, c.send_at || new Date().toISOString(), id);
+    if (!c.send_at) runMailboxCampaigns().catch((e) => console.error(`[campaigns] ${e.message}`));
+    return getCampaign(id);
+  }
   const room = FREE_DAILY() - email.status().sentToday;
   if (people.length > room) throw err400(`Brevo's free plan sends up to ${FREE_DAILY()} emails a day, and this segment has ${people.length} people (room for ${Math.max(room, 0)} today). Pick a smaller segment or split it over two days.`);
 
@@ -198,6 +209,52 @@ function copyCampaign(id) {
   return saveCampaign({ name: `${c.name} (copy)`, template_id: c.template_id, segment_id: c.segment_id, send_at: null });
 }
 
+// ---------- Mailbox campaigns (every minute) ----------
+// Sends due campaigns from your own mailbox, a few seconds apart so your email provider stays
+// happy. If the daily limit is reached it simply carries on the next day. Safe to restart:
+// nobody gets the same campaign twice.
+let mailboxRunning = false;
+async function runMailboxCampaigns({ gapMs = Number(process.env.EMAIL_GAP_MS ?? 3000), now = new Date() } = {}) {
+  if (mailboxRunning || email.provider() !== 'mailbox') return 0;
+  mailboxRunning = true;
+  let sentNow = 0;
+  try {
+    db.prepare("UPDATE crm_campaigns SET status='sending' WHERE status='scheduled' AND brevo_campaign_id IS NULL AND send_at <= ?").run(now.toISOString());
+    for (const c of db.prepare("SELECT * FROM crm_campaigns WHERE status='sending' AND brevo_campaign_id IS NULL ORDER BY id").all()) {
+      const t = db.prepare('SELECT * FROM crm_templates WHERE id=?').get(c.template_id);
+      const seg = parseSeg(db.prepare('SELECT * FROM crm_segments WHERE id=?').get(c.segment_id));
+      if (!t || !seg) { db.prepare("UPDATE crm_campaigns SET status='failed', error='Its email design or segment was deleted.' WHERE id=?").run(c.id); continue; }
+      const already = new Set(db.prepare("SELECT contact_id FROM crm_emails_sent WHERE campaign_id=? AND status != 'failed'").all(c.id).map((r) => r.contact_id));
+      const todo = members(seg).filter((p) => !already.has(p.id));
+      let stopped = false, failures = 0;
+      for (const p of todo) {
+        const subject = crm.fillTemplate(t.subject || t.name, p);
+        let rowId;
+        try { rowId = email.claim({ contact: p, automationId: null, templateId: t.id, subject, campaignId: c.id }); }
+        catch (e) { if (/daily email limit/.test(e.message)) { stopped = true; break; } continue; }
+        const r = await email.deliver(rowId, { to: p.email, toName: p.name, subject, text: crm.fillTemplate(t.body, p), reason: 'you said yes to email from us',
+          design: { ...t, heading: crm.fillTemplate(t.heading, p), preheader: crm.fillTemplate(t.preheader, p) } });
+        if (r.ok) { sentNow++; crm.logActivity(p.id, { kind: 'Email', note: `Sent campaign "${c.name}"` }); }
+        else if (++failures >= 3 && !sentNow) {
+          db.prepare("UPDATE crm_campaigns SET status='failed', error=? WHERE id=?").run(`Stopped: ${r.error}`.slice(0, 300), c.id);
+          notify.send('Email campaign stopped', `"${c.name}": ${r.error}`, { tags: 'warning', priority: 'high' }).catch(() => {});
+          stopped = true; break;
+        }
+        if (gapMs) await new Promise((res) => setTimeout(res, gapMs));
+      }
+      if (stopped) break;
+      db.prepare("UPDATE crm_campaigns SET status='sent' WHERE id=? AND status='sending'").run(c.id);
+      notify.send('Email campaign sent', `"${c.name}" went out to ${db.prepare("SELECT COUNT(*) AS n FROM crm_emails_sent WHERE campaign_id=? AND status='sent'").get(c.id).n} people.`, { tags: 'envelope' }).catch(() => {});
+    }
+  } finally { mailboxRunning = false; }
+  return sentNow;
+}
+
+function mailboxStats(c) {
+  const row = db.prepare("SELECT SUM(status='sent') AS sent, SUM(status='failed') AS failed FROM crm_emails_sent WHERE campaign_id=?").get(c.id);
+  return { sent: row.sent || 0, failed: row.failed || 0 };
+}
+
 // ---------- Stats and unsubscribes (hourly) ----------
 async function refreshStats(opts = {}) {
   if (!email.ready()) return 0;
@@ -219,8 +276,25 @@ async function refreshStats(opts = {}) {
 }
 
 // People who unsubscribed (or marked spam) in Brevo become "Do not contact" here.
+function markUnsubscribed(addr, how) {
+  const c = db.prepare('SELECT * FROM contacts WHERE lower(email)=lower(?)').get(addr);
+  if (!c || c.do_not_contact) return false;
+  crm.updateContact(c.id, { do_not_contact: true });
+  crm.logActivity(c.id, { kind: 'Email', note: `Unsubscribed from emails (${how}). Marked "Do not contact".` });
+  return true;
+}
+
 async function syncUnsubscribes(opts = {}) {
   if (!email.ready()) return 0;
+  if (email.provider() === 'mailbox') {
+    const since = getState('unsub_imap_since') || new Date(Date.now() - 30 * 86400e3).toISOString();
+    const started = new Date(Date.now() - 86400e3).toISOString(); // IMAP searches by day, so look back a day each time
+    const addrs = await email.unsubscribeReplies(since, opts);
+    const marked = addrs.filter((a) => markUnsubscribed(a, 'replied "unsubscribe"')).length;
+    setState('unsub_imap_since', started);
+    if (marked) notify.send('Unsubscribed', `${marked} ${marked === 1 ? 'person' : 'people'} replied "unsubscribe". They're now "Do not contact".`, { tags: 'wave' }).catch(() => {});
+    return marked;
+  }
   const since = getState('unsub_synced_at') || new Date(Date.now() - 365 * 86400e3).toISOString();
   const started = new Date().toISOString();
   let offset = 0, marked = 0;
@@ -228,11 +302,7 @@ async function syncUnsubscribes(opts = {}) {
     const d = await brevo('GET', `/contacts?limit=500&offset=${offset}&modifiedSince=${encodeURIComponent(since)}`, null, opts);
     for (const bc of d.contacts || []) {
       if (!bc.emailBlacklisted) continue;
-      const c = db.prepare('SELECT * FROM contacts WHERE lower(email)=lower(?)').get(bc.email);
-      if (!c || c.do_not_contact) continue;
-      crm.updateContact(c.id, { do_not_contact: true });
-      crm.logActivity(c.id, { kind: 'Email', note: 'Unsubscribed from emails (through Brevo). Marked "Do not contact".' });
-      marked++;
+      if (markUnsubscribed(bc.email, 'through Brevo')) marked++;
     }
     if ((d.contacts || []).length < 500) break;
     offset += 500;
@@ -286,4 +356,4 @@ router.get('/preview/:templateId', wrap((req, res) => {
     email.footerHtml('you said yes to email from us')));
 }));
 
-module.exports = { router, members, saveSegment, listSegments, saveCampaign, sendCampaign, copyCampaign, getCampaign, refreshStats, syncUnsubscribes, hourly, overview, brevoFill };
+module.exports = { router, members, saveSegment, listSegments, saveCampaign, sendCampaign, copyCampaign, getCampaign, refreshStats, syncUnsubscribes, hourly, overview, brevoFill, runMailboxCampaigns };

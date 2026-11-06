@@ -281,8 +281,8 @@
         <div id="em-tiles" class="tiles"></div>
         <div id="em-setup"></div>
         <h2>Campaigns <button class="btn primary" id="em-camp-add" style="padding:4px 12px;font-size:.9rem">+ New campaign</button>
-          <button class="btn ghost" id="em-refresh" style="padding:4px 12px;font-size:.9rem" title="Get the latest opens, clicks and unsubscribes from Brevo">Refresh stats</button></h2>
-        <p class="muted small" style="margin-top:0">A campaign is one email to a group of subscribers, sent now or at a time you pick. Brevo adds a one-click unsubscribe link and tracks opens and clicks.</p>
+          <button class="btn ghost" id="em-refresh" style="padding:4px 12px;font-size:.9rem" title="Check for the latest stats and unsubscribes">Refresh</button></h2>
+        <p class="muted small" style="margin-top:0">A campaign is one email to a group of subscribers, sent now or at a time you pick. Every email has your mailing address and a way to unsubscribe.</p>
         <div class="cards" id="em-campaigns"></div>
         <h2>Flows</h2>
         <p class="muted small" style="margin-top:0">Flows are emails that go out by themselves, like a welcome series when someone subscribes. They live in <a href="#contacts/automations">Automations</a> (look for "Send email now" steps).</p>
@@ -297,7 +297,7 @@
       <div class="crm-panel" data-panel="automations" hidden>
         <div class="row crm-filters">
           <button class="btn primary" id="auto-add">+ New automation</button>
-          <span class="muted">When something happens (a new lead, a form, a stage change, a booking), these steps run by themselves. Texts are never sent automatically. Emails go out only through "Send email now" steps, after you connect a free Brevo account.</span>
+          <span class="muted">When something happens (a new lead, a form, a stage change, a booking), these steps run by themselves. Texts are never sent automatically. Emails go out only through "Send email now" steps, after you connect your email (npm run email-setup).</span>
         </div>
         <div class="cards" id="auto-list"></div>
         <h2>Recent runs</h2>
