@@ -1,8 +1,12 @@
-// Automatic emails (used by CRM automations), sent through Brevo's free plan.
+// Sends the CRM's emails (automations and campaigns). Set up once with: npm run email-setup
 //
-// Why Brevo and not Gmail: sending automatic email from your own Gmail can get the account
-// flagged. Brevo is a proper email service (free up to 300 emails a day) that signs your
-// email so it lands in the inbox. Set it up once with: npm run email-setup
+// Two ways to send, both free:
+//  - "mailbox": straight from your own email account (for example daniel@viralattraction.com
+//    at Hostinger, or Gmail with an app password). No other account needed. Viral Post also
+//    checks that inbox every hour and turns "unsubscribe" replies into "Do not contact".
+//  - "brevo": through Brevo (adds open/click stats and one-click unsubscribe pages).
+// Email can't go straight from a home internet connection: Gmail, Outlook and others block it
+// as spam, so a real mailbox or email service always does the delivery.
 //
 // Every email follows the US CAN-SPAM rules:
 //  - it only goes to someone who just reached out to you (a form, website or booking) or
@@ -26,8 +30,15 @@ CREATE TABLE IF NOT EXISTS crm_emails_sent (
   sent_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_emails_sent') WHERE name='campaign_id'").get()) db.exec('ALTER TABLE crm_emails_sent ADD COLUMN campaign_id INTEGER');
 
 const settings = () => ({
+  smtpHost: (process.env.SMTP_HOST || '').trim(),
+  smtpPort: Number(process.env.SMTP_PORT || 465),
+  smtpUser: (process.env.SMTP_USER || process.env.EMAIL_FROM || '').trim(),
+  smtpPass: process.env.SMTP_PASS || '',
+  imapHost: (process.env.IMAP_HOST || '').trim(),
+  imapPort: Number(process.env.IMAP_PORT || 993),
   key: (process.env.BREVO_API_KEY || '').trim(),
   from: (process.env.EMAIL_FROM || '').trim(),
   fromName: (process.env.EMAIL_FROM_NAME || '').trim() || 'Daniel King',
@@ -35,7 +46,9 @@ const settings = () => ({
   limit: Number(process.env.EMAIL_DAILY_LIMIT || 100),
   api: (process.env.BREVO_API_BASE || 'https://api.brevo.com').replace(/\/$/, ''),
 });
-const ready = () => { const s = settings(); return Boolean(s.key && s.from && s.address); };
+// Your own mailbox wins when both are set up.
+const provider = () => { const s = settings(); return s.smtpHost && s.smtpPass ? 'mailbox' : s.key ? 'brevo' : null; };
+const ready = () => { const s = settings(); return Boolean(provider() && s.from && s.address); };
 
 function footer(reason) {
   const s = settings();
@@ -53,20 +66,50 @@ const sentToday = () => db.prepare("SELECT COUNT(*) AS n FROM crm_emails_sent WH
 
 // Throws (with a plain-English message) if this email must not go out. Otherwise records it
 // as "sending" and returns the row id. Kept synchronous so two runs can't both send.
-function claim({ contact, automationId, templateId, subject }) {
+function claim({ contact, automationId, templateId, subject, campaignId = null }) {
   if (!ready()) throw new Error('Email is not set up yet (run: npm run email-setup)');
   if (!contact.email) throw new Error(`${contact.name} has no email address`);
   if (contact.do_not_contact) throw new Error(`${contact.name} is marked "Do not contact"`);
-  if (db.prepare("SELECT 1 FROM crm_emails_sent WHERE contact_id=? AND automation_id=? AND template_id=? AND status != 'failed'").get(contact.id, automationId, templateId)) {
-    throw new Error(`already emailed ${contact.name} by this automation`);
-  }
+  const dup = campaignId
+    ? db.prepare("SELECT 1 FROM crm_emails_sent WHERE contact_id=? AND campaign_id=? AND status != 'failed'").get(contact.id, campaignId)
+    : db.prepare("SELECT 1 FROM crm_emails_sent WHERE contact_id=? AND automation_id=? AND template_id=? AND status != 'failed'").get(contact.id, automationId, templateId);
+  if (dup) throw new Error(`already emailed ${contact.name} by this ${campaignId ? 'campaign' : 'automation'}`);
   if (sentToday() >= settings().limit) throw new Error(`daily email limit reached (${settings().limit})`);
-  return db.prepare('INSERT INTO crm_emails_sent (contact_id, automation_id, template_id, to_email, subject) VALUES (?,?,?,?,?)')
-    .run(contact.id, automationId, templateId, contact.email, subject).lastInsertRowid;
+  return db.prepare('INSERT INTO crm_emails_sent (contact_id, automation_id, template_id, campaign_id, to_email, subject) VALUES (?,?,?,?,?,?)')
+    .run(contact.id, automationId, templateId, campaignId, contact.email, subject).lastInsertRowid;
 }
+
+let transport = null, transportKey = '';
+function mailbox() {
+  const s = settings(), k = [s.smtpHost, s.smtpPort, s.smtpUser, s.smtpPass].join('|');
+  if (!transport || transportKey !== k) {
+    transport = require('nodemailer').createTransport({ host: s.smtpHost, port: s.smtpPort, secure: s.smtpPort === 465,
+      auth: { user: s.smtpUser, pass: s.smtpPass }, connectionTimeout: 20000, greetingTimeout: 20000, socketTimeout: 30000,
+      tls: { rejectUnauthorized: !process.env.SMTP_INSECURE_TEST } });
+    transportKey = k;
+  }
+  return transport;
+}
+const friendlySmtp = (e) => (/auth|535|534|Invalid login|credentials/i.test(e.message)
+  ? 'Your email provider said the email or password is wrong (for Gmail use an app password). Run: npm run email-setup'
+  : /ENOTFOUND|ECONNREFUSED|ETIMEDOUT|timeout/i.test(e.message) ? `Could not reach your email server (${e.message}). Check the internet connection.` : e.message);
 
 async function deliver(rowId, { to, toName, subject, text, reason, design: d }, { fetchImpl = fetch } = {}) {
   const s = settings();
+  const textContent = [d?.heading, text, d?.button_text && d?.button_url ? `${d.button_text}: ${d.button_url}` : ''].filter(Boolean).join('\n\n') + footer(reason);
+  const htmlContent = design.render({ ...(d || {}), body: text }, footerHtml(reason));
+  if (provider() === 'mailbox') {
+    try {
+      await mailbox().sendMail({ from: { name: s.fromName, address: s.from }, to: toName ? { name: toName, address: to } : to, subject,
+        text: textContent, html: htmlContent, headers: { 'List-Unsubscribe': `<mailto:${s.from}?subject=unsubscribe>` } });
+      db.prepare("UPDATE crm_emails_sent SET status='sent' WHERE id=?").run(rowId);
+      return { ok: true };
+    } catch (e) {
+      const msg = friendlySmtp(e);
+      db.prepare("UPDATE crm_emails_sent SET status='failed', error=? WHERE id=?").run(String(msg).slice(0, 300), rowId);
+      return { ok: false, error: msg };
+    }
+  }
   try {
     const res = await fetchImpl(`${s.api}/v3/smtp/email`, {
       method: 'POST',
@@ -76,8 +119,8 @@ async function deliver(rowId, { to, toName, subject, text, reason, design: d }, 
         to: [{ email: to, ...(toName ? { name: toName } : {}) }],
         replyTo: { email: s.from, name: s.fromName },
         subject,
-        textContent: [d?.heading, text, d?.button_text && d?.button_url ? `${d.button_text}: ${d.button_url}` : ''].filter(Boolean).join('\n\n') + footer(reason),
-        htmlContent: design.render({ ...(d || {}), body: text }, footerHtml(reason)),
+        textContent,
+        htmlContent,
         headers: { 'List-Unsubscribe': `<mailto:${s.from}?subject=unsubscribe>` },
       }),
       signal: AbortSignal.timeout(30000),
@@ -102,10 +145,43 @@ async function sendTest(opts) {
     text: 'It works! Your CRM automations can now send welcome emails.', reason: 'you set up email in Viral Touch CRM' }, opts);
 }
 
+// ---------- "unsubscribe" replies (mailbox mode) ----------
+// Reads new messages in your inbox whose subject (or first line) says unsubscribe / stop /
+// remove me, and returns the sender addresses. Marks nothing as read.
+const UNSUB = /^\s*(re:\s*)?(unsubscribe|stop|remove me|opt out|take me off)\b/i;
+async function unsubscribeReplies(since, { client } = {}) {
+  const s = settings();
+  if (provider() !== 'mailbox' || !s.imapHost) return [];
+  const { ImapFlow } = require('imapflow');
+  const imap = client || new ImapFlow({ host: s.imapHost, port: s.imapPort, secure: s.imapPort === 993, auth: { user: s.smtpUser, pass: s.smtpPass },
+    logger: false, tls: { rejectUnauthorized: !process.env.SMTP_INSECURE_TEST } });
+  const found = new Set();
+  await imap.connect();
+  const lock = await imap.getMailboxLock('INBOX');
+  try {
+    const uids = await imap.search({ since: new Date(since) }, { uid: true }) || [];
+    for await (const m of imap.fetch(uids.slice(-500), { envelope: true, source: true }, { uid: true })) {
+      const from = m.envelope?.from?.[0]?.address;
+      if (!from || from.toLowerCase() === s.from.toLowerCase()) continue;
+      const subj = m.envelope?.subject || '';
+      const src = m.source ? m.source.toString('utf8') : '';
+      const bodyStart = src.split(/\r?\n\r?\n/).slice(1).join('\n').split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith('>') && !/^content-|^--/i.test(l)) || '';
+      if (UNSUB.test(subj) || UNSUB.test(bodyStart)) found.add(from.toLowerCase());
+    }
+  } finally { lock.release(); await imap.logout().catch(() => {}); }
+  return [...found];
+}
+
+// Checks that the mailbox password works, for npm run email-setup.
+async function verify() {
+  if (provider() !== 'mailbox') return { ok: true };
+  try { await mailbox().verify(); return { ok: true }; } catch (e) { return { ok: false, error: friendlySmtp(e) }; }
+}
+
 function status() {
   const s = settings();
-  return { ready: ready(), from: s.from, sentToday: sentToday(), limit: s.limit,
+  return { ready: ready(), provider: provider(), stats: provider() === 'brevo', from: s.from, sentToday: sentToday(), limit: s.limit,
     recent: db.prepare('SELECT e.*, c.name AS contact_name FROM crm_emails_sent e LEFT JOIN contacts c ON c.id=e.contact_id ORDER BY e.id DESC LIMIT 10').all() };
 }
 
-module.exports = { ready, claim, deliver, sendTest, status, footer, footerHtml, settings };
+module.exports = { ready, provider, unsubscribeReplies, verify, claim, deliver, sendTest, status, footer, footerHtml, settings };

@@ -365,9 +365,10 @@
     q$('#em-tiles').innerHTML = [['Subscribers', o.subscribers], ['New in 30 days', o.newSubs], ['Campaigns sent', o.campaignsSent], ['Flow emails (30 days)', o.flowEmails],
       ['Open rate', pct(o.openRate)], ['Click rate', pct(o.clickRate)], ['Unsubscribes', o.unsubscribed]]
       .map(([l, v]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v ?? 0}</div></div>`).join('');
-    q$('#em-setup').innerHTML = em.ready ? '' : `<div class="note" style="max-width:none">Email is not connected yet, so nothing can be sent. It's free: make a Brevo account, then in Terminal run <b>cd ~/social-scheduler && npm run email-setup</b>. You can still build designs, segments and campaigns now.</div>`;
+    q$('#em-setup').innerHTML = !em.ready ? `<div class="note" style="max-width:none">Email is not connected yet, so nothing can be sent. To send from your own email (like your viralattraction.com address), run this in Terminal: <b>cd ~/social-scheduler && npm run email-setup</b>. You can still build designs, segments and campaigns now.</div>`
+      : `<p class="muted small">Sending from <b>${h(em.from)}</b>${em.provider === 'mailbox' ? ` (your own mailbox). Up to ${em.limit} emails a day; bigger campaigns carry on the next day by themselves. Your Mac needs to be on while a campaign goes out. "Unsubscribe" replies are turned into "Do not contact" every hour.` : ' through Brevo.'} ${em.sentToday} sent in the last day.</p>`;
     const emailTpls = tpls.filter((t) => t.channel === 'email');
-    const statBar = (c) => (c.stats ? `<div class="muted small">Delivered ${c.stats.delivered} · Opened ${c.stats.opened} (${pct(c.stats.delivered ? c.stats.opened / c.stats.delivered : null)}) · Clicked ${c.stats.clicked} (${pct(c.stats.delivered ? c.stats.clicked / c.stats.delivered : null)}) · Unsubscribed ${c.stats.unsubscribed}${c.stats.bounced ? ` · Bounced ${c.stats.bounced}` : ''}</div>` : '');
+    const statBar = (c) => (c.mailbox ? `<div class="muted small">Sent ${c.mailbox.sent} of ${c.recipients}${c.mailbox.failed ? ` · ${c.mailbox.failed} failed` : ''}${c.status === 'sending' ? ' · still going out' : ''}</div>` : c.stats ? `<div class="muted small">Delivered ${c.stats.delivered} · Opened ${c.stats.opened} (${pct(c.stats.delivered ? c.stats.opened / c.stats.delivered : null)}) · Clicked ${c.stats.clicked} (${pct(c.stats.delivered ? c.stats.clicked / c.stats.delivered : null)}) · Unsubscribed ${c.stats.unsubscribed}${c.stats.bounced ? ` · Bounced ${c.stats.bounced}` : ''}</div>` : '');
     q$('#em-campaigns').innerHTML = d.campaigns.map((c) => `<div class="item" data-camp="${c.id}">
       <b>${h(c.name)}</b> <span class="pill"${c.status === 'failed' ? ' style="color:var(--bad)"' : ''}>${STATUS[c.status] || h(c.status)}</span>
       <div class="muted">${h(c.template_name || 'No design yet')} → ${h(c.segment_name || 'nobody picked yet')}</div>
@@ -399,7 +400,7 @@
           const seg = d.segments.find((s) => s.id === c.segment_id);
           if (!confirm(`${c.send_at ? `Schedule "${c.name}" for ${when(c.send_at)}` : `Send "${c.name}" now`} to ${seg ? `${seg.count} people in "${seg.name}"` : 'this segment'}? This can't be undone.`)) return;
           e.target.disabled = true; e.target.textContent = 'Sending…';
-          await call(`/email/campaigns/${c.id}/send`, { method: 'POST' }); say(c.send_at ? 'Scheduled. Brevo will send it at that time, even if your Mac is off.' : 'Sent! Stats show up within an hour (or press Refresh stats).'); refresh();
+          await call(`/email/campaigns/${c.id}/send`, { method: 'POST' }); say(em.provider === 'mailbox' ? (c.send_at ? 'Scheduled. It goes out at that time (keep your Mac on).' : 'Sending now, a few seconds apart. Refresh to see progress.') : c.send_at ? 'Scheduled. Brevo will send it at that time, even if your Mac is off.' : 'Sent! Stats show up within an hour (or press Refresh stats).'); refresh();
         }
       } catch (err) { say(err.message, true); refresh(); }
     };
@@ -429,7 +430,7 @@
       <label class="field"><span>Email design</span><select name="template_id">${emailTpls.map((t) => `<option value="${t.id}"${t.id === c.template_id ? ' selected' : ''}>${h(t.name)}</option>`).join('')}</select></label>
       <label class="field"><span>Send to</span><select name="segment_id">${d.segments.map((s) => `<option value="${s.id}"${s.id === c.segment_id ? ' selected' : ''}>${h(s.name)} (${s.count})</option>`).join('')}</select></label>
       <label class="field"><span>When <small>(leave empty to send when you press Send)</small></span><input type="datetime-local" name="send_at" value="${local(c.send_at)}"></label>
-      <p class="muted small">Only people who said yes to email get it. Brevo adds a one-click unsubscribe link and your mailing address is at the bottom.</p>
+      <p class="muted small">Only people who said yes to email get it. Your mailing address and a way to unsubscribe are at the bottom of every email.</p>
       <div class="row"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="camp-msg"></span></div></form>`;
     q$('[data-close]', dlg).onclick = () => dlg.close();
     q$('#camp-form', dlg).onsubmit = async (e) => {
@@ -482,8 +483,8 @@
     const em = data.email;
     const emailCard = `<div class="item" style="grid-column:1/-1"><b>Automatic emails</b> ${em.ready ? '<span class="pill">Connected</span>' : '<span class="pill">Not set up</span>'}
       <div class="muted">${em.ready
-        ? `"Send email now" steps go out from <b>${h(em.from)}</b> through Brevo (free). ${em.sentToday} sent in the last day (limit ${em.limit}). Emails only go to people who just contacted you or said yes to email, never to "Do not contact", and each one has your address and an unsubscribe line. If someone replies "unsubscribe", open them and tick "Do not contact".`
-        : 'Welcome emails are switched off until you connect a free Brevo account. In Terminal run: <b>cd ~/social-scheduler && npm run email-setup</b>. Until then those steps are skipped and everything else still runs.'}</div>
+        ? `"Send email now" steps go out from <b>${h(em.from)}</b> ${em.provider === 'mailbox' ? '(your own mailbox)' : 'through Brevo'}. ${em.sentToday} sent in the last day (limit ${em.limit}). Emails only go to people who just contacted you or said yes to email, never to "Do not contact", and each one has your address and an unsubscribe line. ${em.provider === 'mailbox' ? '"Unsubscribe" replies are turned into "Do not contact" every hour.' : 'If someone replies "unsubscribe", open them and tick "Do not contact".'}`
+        : 'Emails are switched off until you connect your email (like your viralattraction.com address). In Terminal run: <b>cd ~/social-scheduler && npm run email-setup</b>. Until then those steps are skipped and everything else still runs.'}</div>
       ${em.recent.length ? `<details style="margin-top:6px"><summary>Recent emails</summary><ul class="history">${em.recent.map((e) => `<li><b>${h(e.status === 'sent' ? 'Sent' : e.status === 'failed' ? 'Failed' : 'Sending')}</b> · ${h(e.contact_name || e.to_email)} · ${h(e.subject || '')}${e.error ? `<br><span style="color:var(--bad)">${h(e.error)}</span>` : ''}</li>`).join('')}</ul></details>` : ''}</div>`;
     q$('#auto-list').innerHTML = emailCard + data.automations.map((a) => `<div class="item" data-auto="${a.id}">
       <b>${h(a.name)}</b> ${a.active ? '<span class="pill">On</span>' : '<span class="pill" style="color:var(--bad)">Off</span>'}
