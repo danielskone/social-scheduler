@@ -573,6 +573,7 @@ adsBody.addEventListener('click', async (e) => {
 // None of the AI video makers has a free API, so this writes the prompt for a scene, copies it
 // and opens the free website. The downloaded clip is then dropped onto the scene.
 const AI_SITES = [
+  { name: 'VideoExpress', url: 'https://app.videoexpress.ai/', note: 'Your account · no watermark · text or photo to video' },
   { name: 'Google Flow', url: 'https://labs.google/fx/tools/flow', note: 'Veo 3.1 · about 50 free credits a day · 8-second clips' },
   { name: 'Dreamina', url: 'https://dreamina.capcut.com/ai-tool/video/generate', note: 'Seedance · free credits every day' },
   { name: 'Meta AI', url: 'https://www.meta.ai/', note: 'Free · ask it to "make a video of…"' },
