@@ -15,7 +15,7 @@ const express = require('express');
 const multer = require('multer');
 const config = require('./config');
 const db = require('./db');
-const { ffmpegPath, groupWords } = require('./clipper');
+const { ffmpegPath, groupWords, ensureModels, transcribe } = require('./clipper');
 
 const adsDir = path.join(config.dataDir, 'ads');
 const libDir = path.join(adsDir, 'library');
@@ -333,7 +333,7 @@ function wrap(text, maxChars) {
 
 // One scene's on-screen words as an .ass subtitle file: a big headline (in the brand colour) and
 // captions that follow the voice.
-function buildSceneAss({ W, H, look = 'bold', color = '#FFD60A', headline = '', say = '', voiceStart = 0, voiceEnd = 0, len, endCard = false, website = '', captions = true }) {
+function buildSceneAss({ W, H, look = 'bold', color = '#FFD60A', headline = '', say = '', voiceStart = 0, voiceEnd = 0, len, endCard = false, website = '', captions = true, timed = null, low = false }) {
   const u = Math.min(W, H) / 1080;
   const vertical = H / W > 1.3;
   const wide = W / H > 1.3;
@@ -363,16 +363,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   const maxChars = vertical ? 13 : wide ? 26 : 16;
   if (headline) {
     const text = wrap(bold || endCard ? headline.toUpperCase() : headline, maxChars).map(assText).join('\\N');
-    const y = endCard ? H * 0.5 : cine ? H * 0.5 : H * (vertical ? 0.17 : 0.15);
+    const y = endCard ? H * (low ? (vertical ? 0.68 : 0.62) : 0.5) : cine ? H * 0.5 : H * (vertical ? 0.17 : 0.15);
     const until = endCard || !say || cine ? len : Math.min(len, Math.max(2.2, voiceStart + (voiceEnd - voiceStart) * 0.6));
     const pop = cine ? '\\fad(350,250)' : '\\fad(120,150)\\fscx70\\fscy70\\t(0,180,\\fscx106\\fscy106)\\t(180,260,\\fscx100\\fscy100)';
     ev.push(`Dialogue: 1,${assTime(0.05)},${assTime(until)},Box,,0,0,0,,{\\pos(${Math.round(W / 2)},${Math.round(y)})${pop}}${text}`);
     if (endCard && website) {
-      ev.push(`Dialogue: 1,${assTime(0.25)},${assTime(len)},Sub,,0,0,0,,{\\pos(${Math.round(W / 2)},${Math.round(H * 0.5 + headSize * (text.split('\\N').length * 0.7 + 0.9))})\\fad(200,0)}${assText(site(website))}`);
+      ev.push(`Dialogue: 1,${assTime(0.25)},${assTime(len)},Sub,,0,0,0,,{\\pos(${Math.round(W / 2)},${Math.round(y + headSize * (text.split('\\N').length * 0.7 + 0.9))})\\fad(200,0)}${assText(site(website))}`);
     }
   }
-  if (captions && say && !endCard && voiceEnd > voiceStart) {
-    const ws = timeWords(say, voiceStart, voiceEnd);
+  if (captions && !endCard && ((timed && timed.length) || (say && voiceEnd > voiceStart))) {
+    // Timed words come from listening to a presenter video, so each word shows as it is said.
+    const ws = timed && timed.length ? timed.filter((w) => w.end > 0 && w.start < len) : timeWords(say, voiceStart, voiceEnd);
     const groups = groupWords(ws);
     groups.forEach((g, gi) => {
       const groupEnd = Math.min(len, gi + 1 < groups.length ? groups[gi + 1][0].start : g[g.length - 1].end + 0.4);
@@ -434,8 +435,15 @@ async function renderScene({ ad, brand, scene, n, total, fmt, work, voiceFile, v
     : voiceFile ? voiceStart + voiceLen + 0.35
     : useVideoSound ? Math.min(media.duration || 6, 10)
     : Math.max(2.4, words(scene.say).length / 2.6 + 0.8);
-  if (scene.endCard && !voiceFile) len = Math.max(len, 3);
+  if (scene.endCard && !voiceFile && !useVideoSound) len = Math.max(len, 3);
   len = Math.max(1.5, Math.min(60, len));
+  // A whole number of frames, so scenes join without the sound slowly slipping away from the picture.
+  len = Math.round(len * 30) / 30;
+  // Don't run a hair past the end of a video (it would start again for a moment).
+  if (media?.kind === 'video' && media.duration) {
+    const left = media.duration - Math.max(0, Number(scene.start) || 0);
+    if (len > left && len - left < 0.15 && left >= 1.5) len = Math.floor(left * 30) / 30;
+  }
   // With the video's own sound (like an AI presenter), the scene's words are shown over the whole scene.
   const voiceEnd = voiceFile ? voiceStart + voiceLen : useVideoSound ? Math.max(0.5, len - 0.2) : len - 0.3;
 
@@ -458,12 +466,13 @@ async function renderScene({ ad, brand, scene, n, total, fmt, work, voiceFile, v
   if (logo) inputs.push('-i', logo);
 
   let filter = visualFilter({ W, H, media, framing: scene.framing, look, n, len, color });
-  // On the end card the background is darkened so the call to action stands out.
-  if (scene.endCard && media) filter += ',boxblur=18:2,eq=brightness=-0.18';
+  // On the end card the background is darkened so the call to action stands out. A talking
+  // presenter stays sharp (the words go lower down instead, below the face).
+  if (scene.endCard && media) filter += useVideoSound ? ',eq=brightness=-0.06' : ',boxblur=18:2,eq=brightness=-0.18';
   filter += '[v0]';
   let last = 'v0';
   if (logo) {
-    const big = scene.endCard;
+    const big = scene.endCard && !useVideoSound;
     const lw = even(Math.min(W, H) * (big ? 0.34 : 0.15));
     const m = Math.round(Math.min(W, H) * 0.045);
     filter += `;[${logoIdx}:v]scale=${lw}:-1,format=rgba,colorchannelmixer=aa=${big ? 1 : 0.9}[lg];[${last}][lg]overlay=${big ? '(W-w)/2' : `W-w-${m}`}:${big ? `H*0.5-h-${Math.round(H * 0.1)}` : m}[v1]`;
@@ -472,16 +481,18 @@ async function renderScene({ ad, brand, scene, n, total, fmt, work, voiceFile, v
   const ass = buildSceneAss({
     W, H, look, color, headline: scene.headline, say: scene.say, voiceStart, voiceEnd, len,
     endCard: scene.endCard, website: brand?.website || ad.detailsObj.website, captions: ad.captions !== false,
+    timed: useVideoSound && Array.isArray(scene.words) ? scene.words : null, low: useVideoSound,
   });
   const assFile = `s${n}-${fmt}.ass`;
   fs.writeFileSync(path.join(work, assFile), ass);
   const escFonts = fontsDir.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
   const withAss = `${filter};[${last}]ass=filename=${assFile}:fontsdir='${escFonts}'[v]`;
   const audio = `;[${ai}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo${voiceFile ? `,adelay=${Math.round(voiceStart * 1000)}|${Math.round(voiceStart * 1000)}` : ''},apad,atrim=0:${len.toFixed(2)}[a]`;
-  const out = `s${n}-${fmt}.mp4`;
+  // Scenes keep exact (uncompressed) sound until the final file, so joining them adds no gaps.
+  const out = `s${n}-${fmt}.mov`;
   const args = (f) => ['-hide_banner', '-y', ...inputs, '-filter_complex', f + audio, '-map', '[v]', '-map', '[a]',
     '-t', len.toFixed(2), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-r', '30',
-    '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-ac', '2',
+    '-c:a', 'pcm_s16le', '-ar', '44100', '-ac', '2',
     '-threads', String(RENDER_THREADS), '-filter_complex_threads', String(RENDER_THREADS), out];
   let note = null;
   try {
@@ -539,7 +550,7 @@ async function renderAd(ad, step) {
       }
       step(`Finishing the ${FORMATS[fmt].label.toLowerCase()} version…`, 15 + Math.round((done / totalSteps) * 83));
       fs.writeFileSync(path.join(work, `list-${fmt}.txt`), parts.map((p) => `file '${p.file}'`).join('\n'));
-      await run(ffmpegPath(), ['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', `list-${fmt}.txt`, '-c', 'copy', `joined-${fmt}.mp4`], { cwd: work });
+      await run(ffmpegPath(), ['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', `list-${fmt}.txt`, '-c', 'copy', `joined-${fmt}.mov`], { cwd: work });
       const total = parts.reduce((t, p) => t + p.len, 0);
       const tag = crypto.randomBytes(3).toString('hex');
       const file = `ad-${fmt}-${tag}.mp4`;
@@ -551,7 +562,7 @@ async function renderAd(ad, step) {
           `[1:a]aresample=44100,aformat=channel_layouts=stereo,volume=0.13,afade=t=in:d=0.6,afade=t=out:st=${fadeAt}:d=1.5[m];[0:a][m]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[a]`,
           '-map', '0:v', '-map', '[a]']
         : ['-filter_complex', '[0:a]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[a]', '-map', '0:v', '-map', '[a]'];
-      await run(ffmpegPath(), ['-hide_banner', '-y', '-i', path.join(work, `joined-${fmt}.mp4`), ...mixArgs, '-t', total.toFixed(2),
+      await run(ffmpegPath(), ['-hide_banner', '-y', '-i', path.join(work, `joined-${fmt}.mov`), ...mixArgs, '-t', total.toFixed(2),
         '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', path.join(dir, file)]);
       await run(ffmpegPath(), ['-hide_banner', '-y', '-ss', String(Math.min(1.2, total / 3)), '-i', path.join(dir, file), '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '4', path.join(dir, poster)]).catch(() => {});
       outputs[fmt] = { file, poster: fs.existsSync(path.join(dir, poster)) ? poster : null, duration: +total.toFixed(1) };
@@ -667,6 +678,46 @@ function placePresenter(scenes, presenter, hasMedia) {
   const use = hasMedia ? [...new Set([talking[0], talking[talking.length - 1]])] : talking;
   use.filter((i) => i !== undefined).forEach((i) => Object.assign(scenes[i], { media: presenter, sound: 'voice', framing: 'auto' }));
   return scenes;
+}
+
+// A talking presenter video, cut into the scenes where the voice really moves on, with each
+// caption word shown when it is actually said. "heard" is the list of words (with times) found by
+// listening to the video. The script's own words are kept (spelled right) and given the heard times.
+function alignPresenter(scenes, heard, duration, file) {
+  const N = heard.length;
+  const counts = scenes.map((s) => Math.max(1, words(s.say).length));
+  const total = counts.reduce((a, b) => a + b, 0);
+  if (N < scenes.length || !duration) return null;
+  const gapBefore = (j) => heard[j].start - heard[j - 1].end + (/[.!?,]$/.test(heard[j - 1].text) ? 0.25 : 0);
+  const cutsAt = [0];
+  let used = 0;
+  for (let k = 0; k < scenes.length - 1; k++) {
+    used += counts[k];
+    const want = Math.round((used / total) * N);
+    let best = null;
+    for (let j = Math.max(cutsAt[k] + 1, want - 3); j <= Math.min(N - (scenes.length - 1 - k), want + 3); j++) {
+      const score = (x) => gapBefore(x) - 0.03 * Math.abs(x - want); // a clear pause, near where the script says
+      if (best === null || score(j) > score(best)) best = j;
+    }
+    if (best === null) return null;
+    cutsAt.push(best);
+  }
+  const times = cutsAt.map((j, k) => (k === 0 ? 0 : (heard[j - 1].end + heard[j].start) / 2));
+  times.push(duration);
+  if (times.some((t, k) => k > 0 && t - times[k - 1] < 1.5)) return null;
+  return scenes.map((s, k) => {
+    const from = times[k], to = times[k + 1];
+    const said = heard.slice(cutsAt[k], k + 1 < cutsAt.length ? cutsAt[k + 1] : N);
+    const script = words(s.say);
+    const use = script.length ? script : said.map((w) => w.text);
+    const timed = use.map((text, i) => {
+      const a = said[Math.min(said.length - 1, Math.floor((i * said.length) / use.length))];
+      const b = said[Math.min(said.length - 1, Math.floor(((i + 1) * said.length - 1) / use.length))];
+      return { text, start: +(a.start - from).toFixed(2), end: +(b.end - from).toFixed(2) };
+    });
+    return { ...s, say: s.say || said.map((w) => w.text).join(' '), media: file, sound: 'video', framing: 'auto',
+      start: +from.toFixed(2), seconds: +(to - from).toFixed(2), words: said.length ? timed : [] };
+  });
 }
 
 // ---------- API (/api/ads) ----------
@@ -883,6 +934,7 @@ function cleanScenes(list) {
     seconds: Number(s.seconds) > 0 ? Math.min(60, Math.max(1.5, Number(s.seconds))) : null,
     start: Number(s.start) > 0 ? Number(s.start) : 0,
     endCard: Boolean(s.endCard),
+    ...(Array.isArray(s.words) && s.words.length ? { words: s.words.slice(0, 300).map((w) => ({ text: clean(w.text, 40), start: +Number(w.start).toFixed(2) || 0, end: +Number(w.end).toFixed(2) || 0 })).filter((w) => w.text && w.end > w.start) } : {}),
   }));
 }
 
@@ -916,6 +968,28 @@ router.get('/:id/voiceover', async (req, res) => {
     res.attachment(`${clean(a.name, 60).replace(/[^\w -]/g, '') || 'ad'} voiceover.m4a`).type('audio/mp4').send(fs.readFileSync(m4a));
     [file, m4a].forEach((f) => fs.rmSync(f, { force: true }));
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// A talking presenter video for the whole ad: listened to on this computer (free), then cut into
+// the scenes so each part and each caption word lines up with what is said.
+router.post('/:id/presenter-video', async (req, res) => {
+  const a = getAd(req.params.id);
+  const m = getMedia(req.body?.file);
+  if (!a || !m || m.kind !== 'video') return res.status(404).json({ error: 'Not found' });
+  if (!m.has_audio) return res.status(400).json({ error: 'That video has no sound.' });
+  const out = path.join(os.tmpdir(), `pv-${crypto.randomBytes(4).toString('hex')}.json`);
+  try {
+    await ensureModels(() => {});
+    const t = await transcribe(libPath(m.file), () => {}, out);
+    const heard = (t.segments || []).flatMap((s) => s.words || []).filter((w) => w.end > w.start);
+    const scenes = alignPresenter(JSON.parse(a.scenes || '[]'), heard, m.duration, m.file);
+    if (!scenes) return res.status(422).json({ error: 'Could not match the words to the scenes.' });
+    const media = [...new Set([...JSON.parse(a.media || '[]'), m.file])];
+    setAd(a.id, { scenes: JSON.stringify(cleanScenes(scenes)), media: JSON.stringify(media), updated_at: new Date().toISOString() });
+    res.json(adOut(getAd(a.id)));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally { fs.rmSync(out, { force: true }); }
 });
 
 // Write the script again (a different version each time).
@@ -994,4 +1068,4 @@ function copyAdToMedia(ref) {
   return name;
 }
 
-module.exports = { router, serveAdFile, serveLibFile, copyAdToMedia, start, work, writeScript, splitScript, writeCaption, buildSceneAss, timeWords, FORMATS };
+module.exports = { router, serveAdFile, serveLibFile, copyAdToMedia, start, work, writeScript, splitScript, writeCaption, buildSceneAss, timeWords, alignPresenter, FORMATS };
