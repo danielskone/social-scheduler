@@ -107,6 +107,8 @@ app.get('/clipfile/:job/:file', clipper.serveFile);
 app.get('/adfile/:id/:file', ads.serveAdFile);
 app.get('/adlib/:file', ads.serveLibFile);
 
+// The free face finder (Google's MediaPipe) that runs in the browser for talking photos.
+app.use('/vendor/face', express.static(path.join(__dirname, '..', 'node_modules', '@mediapipe', 'tasks-vision'), { maxAge: '7d' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // ---------- Connecting Facebook / Instagram ----------
