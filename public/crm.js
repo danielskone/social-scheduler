@@ -16,6 +16,132 @@
   const say = (msg, err) => { const b = q$('#banner'); b.textContent = msg; b.className = `banner${err ? ' error' : ''}`; b.hidden = !msg; };
   const opt = (list, cur) => list.map((x) => `<option${x === cur ? ' selected' : ''}>${h(x)}</option>`).join('');
 
+  // ---------- Look helpers: icons, avatars, colors ----------
+  const ICON = {
+    people: '<circle cx="9" cy="8.5" r="3.3"/><path d="M3 19.5c.9-3.1 3.2-4.8 6-4.8s5.1 1.7 6 4.8"/><circle cx="17" cy="9.5" r="2.6"/><path d="M16.5 14.8c2.3.2 3.9 1.7 4.5 4.2"/>',
+    pipeline: '<rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="16.5" y="4" width="4" height="7" rx="1.5"/>',
+    tasks: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8.5 12 2.5 2.5 5-5"/>',
+    appointments: '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+    forms: '<rect x="5" y="4.5" width="14" height="16" rx="2.5"/><path d="M9 3.5h6v3H9zM8.5 11h7M8.5 15h5"/>',
+    templates: '<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 3.5V17H6.5A2.5 2.5 0 0 1 4 14.5z"/>',
+    email: '<rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="m4 7 8 6 8-6"/>',
+    automations: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>',
+    phone: '<path d="M6.5 3.5h3l1.5 4.2-2 1.3a11 11 0 0 0 6 6l1.3-2 4.2 1.5v3a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.5 5.7a2 2 0 0 1 2-2.2z"/>',
+    bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0"/>',
+    money: '<circle cx="12" cy="12" r="9"/><path d="M14.8 9.2c-.5-.9-1.6-1.4-2.8-1.4-1.6 0-2.8.8-2.8 2.1 0 3 5.8 1.5 5.8 4.3 0 1.3-1.3 2.1-3 2.1-1.3 0-2.5-.6-3-1.6M12 6v1.8M12 16.3V18"/>',
+    check: '<circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8 5.2-5.6"/>',
+    wave: '<path d="M7.5 12.5 5 10a1.6 1.6 0 0 1 2.3-2.3l4.2 4.2M9.5 8.5 7.6 6.6a1.6 1.6 0 0 1 2.3-2.3l5.2 5.2M12.3 6.5a1.6 1.6 0 0 1 2.3-2.3l4.1 4.1a6.5 6.5 0 0 1-9.2 9.2L5.8 13.8"/>',
+    party: '<path d="M4 20 8.5 7.5l8 8zM14 4.5c.4 1.4 0 2.4-1 3M19.5 10c-1.4-.4-2.4 0-3 1M17 3.5v1.5M20.5 6.5H19"/>',
+  };
+  const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name] || ''}</svg>`;
+  const STAGE_C = { New: 'var(--st-new)', Contacted: 'var(--st-contacted)', Interested: 'var(--st-interested)', Committed: 'var(--st-committed)', 'Paid / Done': 'var(--st-paid)', 'Not this year': 'var(--st-no)' };
+  const stageC = (st) => STAGE_C[st] || 'var(--accent)';
+  const stageBadge = (st) => `<span class="stage" style="--c:${stageC(st)}">${h(st)}</span>`;
+  const PALETTE = ['#4f46e5', '#db2777', '#0891b2', '#d97706', '#16a34a', '#9333ea', '#dc2626', '#0d9488', '#2563eb', '#c2410c'];
+  const colorFor = (str) => { let n = 0; for (const ch of String(str || '')) n = (n * 31 + ch.charCodeAt(0)) >>> 0; return PALETTE[n % PALETTE.length]; };
+  const groupPill = (g) => `<span class="gpill" style="--c:${colorFor(g)}">${h(g)}</span>`;
+  const initials = (name) => String(name || '?').trim().split(/\s+/).filter((w) => /\w/.test(w)).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
+  const avatar = (name, cls = '') => `<span class="avatar ${cls}" style="--c:${colorFor(name)}">${h(initials(name))}</span>`;
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(`vtcrm-${k}`); return v == null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(`vtcrm-${k}`, JSON.stringify(v)); } catch { /* private mode: fine */ } },
+  };
+
+  // ---------- Friendly tips (one per tab) ----------
+  const TIPS = {
+    list: ['people', 'Your address book', 'Everyone you work with lives here: sponsors, parade entries, volunteers and Viral Attraction leads. <b>Click a name</b> to see their notes, history and next follow-up. Use the search box and the group and stage menus to find people fast.',
+      'This app never bulk-sends texts, so your accounts can\'t get flagged for spam. Tick "OK to email" only when someone said yes.'],
+    pipeline: ['pipeline', 'Where every deal stands', 'Each column is a step, from <b>New</b> to <b>Paid / Done</b>. <b>Drag a card</b> to the next column as things move along. The total under each column adds up the money at that step.',
+      'Moving a card can start an automation, like a thank-you task when a sponsor reaches "Paid / Done".'],
+    tasks: ['tasks', 'Your to-do list', 'Start each day here. <b>Tick the circle</b> when something is done. Red dates are late, orange ones are due today. When a task has a <b>Write</b> button, it opens a ready-made message in your Mail or Messages app, and you just press Send.'],
+    appointments: ['appointments', 'Calls and meetings people booked', 'When someone books a time with you (from your Google booking page or a booking page made here), it shows up here, they\'re added to People, and <b>your iPhone buzzes</b>. Share a booking link below in a post, your bio or a text.'],
+    forms: ['forms', 'Sign-up forms', 'A form is a little web page people fill in, like "Become a parade sponsor". <b>Copy its link</b> and put it on a post, your website or a QR code. Every sign-up becomes a contact here and pings your iPhone.'],
+    templates: ['templates', 'Messages you send a lot', 'Write a message once, use it again and again. Put <b>{first_name}</b>, <b>{name}</b> or <b>{company}</b> in it and the right details fill in for each person. They open in your own Mail or Messages, one person at a time.'],
+    email: ['email', 'Newsletters and email blasts', 'Send one email to many people at once. A <b>campaign</b> is the email, a <b>segment</b> is who gets it, and a <b>design</b> is how it looks. Only people who said yes to email ever get one, and your mailing address and an unsubscribe line are added for you.'],
+    automations: ['automations', 'Your helper that works while you\'re busy', 'Each card says <b>When</b> something happens (a new lead, a form, a stage change, a booking) and the <b>steps</b> that follow, like making a task, buzzing your phone or sending a welcome email. They\'re already set up and switched on. Use <b>Turn off</b> to pause one.',
+      'Texts are never sent automatically. Emails go out only through "Send email now" steps.'],
+  };
+  function renderTip(t) {
+    const panel = q$(`.crm-panel[data-panel="${t}"]`);
+    let el = q$(':scope > .crm-tip', panel);
+    const hidden = store.get('tips-hidden', []);
+    if (hidden.includes(t)) { if (el) el.remove(); return; }
+    if (el) return;
+    const [ico, title, text, extra] = TIPS[t];
+    el = document.createElement('div');
+    el.className = 'crm-tip';
+    el.innerHTML = `<div class="crm-tip-ico">${svg(ico)}</div><div class="crm-tip-body"><b class="t">${title}</b>${text}${extra ? `<div class="muted small" style="margin-top:4px">${extra}</div>` : ''}</div>
+      <button class="x" title="Hide this tip (bring it back with How it works)" aria-label="Hide tip">×</button>`;
+    q$('.x', el).onclick = () => { store.set('tips-hidden', [...new Set([...store.get('tips-hidden', []), t])]); el.remove(); };
+    panel.prepend(el);
+  }
+
+  // ---------- Guided tour ----------
+  const TOUR = [
+    { tab: 'list', ico: 'wave', title: 'Welcome to Viral Touch CRM', text: 'This is where you keep track of everyone you work with and what to do next with each of them. This quick tour shows you each part. It takes about a minute.', tryIt: 'Use <b>Next</b> to move along. You can stop any time.' },
+    { tab: 'list', ico: 'people', title: 'People', text: 'Your address book. Click anyone to open their card with notes, history and their next follow-up date.', tryIt: 'Try it: press <b>+ Add contact</b> at the top right to add someone new.' },
+    { tab: 'pipeline', ico: 'pipeline', title: 'Pipeline', text: 'See where every deal stands, from New to Paid / Done. Drag a card to the next column when things move along.', tryIt: 'Try it: drag a sponsor from "Committed" to "Paid / Done" once they pay.' },
+    { tab: 'tasks', ico: 'tasks', title: 'Tasks', text: 'Your to-do list. Many tasks are made for you by automations. Tick the circle when one is done.', tryIt: 'Good habit: check this tab first thing every morning.' },
+    { tab: 'appointments', ico: 'appointments', title: 'Appointments', text: 'Calls people booked with you show up here, and your iPhone buzzes when a new one comes in.' },
+    { tab: 'forms', ico: 'forms', title: 'Sign-up forms', text: 'Forms people fill in from your posts, website or a QR code. Each sign-up becomes a contact by itself.', tryIt: 'Try it: press <b>Copy link</b> on a form and paste it into your next post.' },
+    { tab: 'templates', ico: 'templates', title: 'Message templates', text: 'Messages you send often, written once. {first_name} fills in each person\'s name for you.' },
+    { tab: 'email', ico: 'email', title: 'Email marketing', text: 'Send a newsletter to everyone who said yes to email. Pick a design, pick who gets it, then press Send or pick a time.' },
+    { tab: 'automations', ico: 'automations', title: 'Automations', text: 'Your helper. When a new lead comes in, it can make a task, buzz your phone or send a welcome email, all by itself. These are already switched on for you.' },
+    { tab: 'list', ico: 'party', title: 'You\'re all set!', text: 'Each tab has a short tip at the top if you forget what it\'s for. You can replay this tour any time with <b>How it works</b> at the top.' },
+  ];
+  const TAB_ROUTE = (t) => (t === 'list' ? '#contacts' : `#contacts/${t}`);
+  let tourAt = -1;
+  function showTour(i) {
+    tourAt = i;
+    const box = q$('#crm-coach');
+    document.querySelectorAll('#crm-tabs a').forEach((a) => a.classList.remove('tour-glow'));
+    if (i < 0 || i >= TOUR.length) { box.hidden = true; tourAt = -1; store.set('tour-done', true); return; }
+    const st = TOUR[i];
+    if (location.hash !== TAB_ROUTE(st.tab) && !(st.tab === 'list' && location.hash === '#contacts/list')) location.hash = TAB_ROUTE(st.tab);
+    const link = q$(`#crm-tabs a[data-tab="${st.tab}"]`);
+    if (i > 0 && i < TOUR.length - 1 && link) { link.classList.add('tour-glow'); link.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); }
+    const last = i === TOUR.length - 1;
+    box.innerHTML = `<button class="skip" data-skip>${last ? 'Close' : 'Skip tour'}</button>
+      <div class="crm-coach-head"><div class="crm-coach-ico">${svg(st.ico)}</div><div><div class="step">${i === 0 ? 'Quick tour' : last ? 'Done' : `Step ${i} of ${TOUR.length - 2}`}</div><h3>${st.title}</h3></div></div>
+      <p>${st.text}</p>${st.tryIt ? `<div class="try">${st.tryIt}</div>` : ''}
+      <div class="nav"><div class="dots">${TOUR.map((_, n) => `<i class="${n === i ? 'on' : ''}"></i>`).join('')}</div>
+        ${i > 0 ? '<button class="btn ghost" data-back>Back</button>' : ''}<button class="btn primary" data-next>${i === 0 ? 'Show me' : last ? 'Got it' : 'Next'}</button></div>`;
+    box.hidden = false;
+    q$('[data-next]', box).onclick = () => showTour(last ? -1 : i + 1);
+    q$('[data-skip]', box).onclick = () => showTour(-1);
+    const back = q$('[data-back]', box); if (back) back.onclick = () => showTour(i - 1);
+    q$('[data-next]', box).focus({ preventScroll: true });
+  }
+  const startTour = () => { store.set('tips-hidden', []); document.querySelectorAll('.crm-panel').forEach((p) => p.dataset.panel in TIPS && renderTip(p.dataset.panel)); showTour(0); };
+  q$('#crm-tour').onclick = startTour;
+  document.addEventListener('keydown', (e) => { if (tourAt >= 0 && e.key === 'Escape') showTour(-1); });
+  window.addEventListener('hashchange', () => { if (tourAt >= 0 && !location.hash.startsWith('#contacts')) { q$('#crm-coach').hidden = true; tourAt = -1; } });
+
+  // ---------- Getting started checklist (People tab) ----------
+  async function renderStart() {
+    const box = q$('#crm-start');
+    if (store.get('start-hidden', false)) { box.innerHTML = ''; return; }
+    const [tasks, email] = await Promise.all([call('/tasks').catch(() => []), call('/email').catch(() => null)]);
+    const people = meta.summary.total || 0;
+    const moved = people && (await call('/contacts').catch(() => [])).some((c) => c.stage !== 'New');
+    const steps = [
+      ['Take the 1-minute tour', store.get('tour-done', false), startTour],
+      ['Add your first contact', people > 0, () => openContact(null)],
+      ['Make a task for yourself', tasks.length > 0, () => editTask({})],
+      ['Move someone along the pipeline', !!moved, () => { location.hash = '#contacts/pipeline'; }],
+      ['Connect your email', !!(email && email.email && email.email.ready), () => { location.hash = '#contacts/email'; }],
+    ];
+    const done = steps.filter((x) => x[1]).length;
+    if (done === steps.length) { box.innerHTML = ''; return; }
+    box.innerHTML = `<div class="crm-start"><header><b>Get started</b><div class="bar"><i style="width:${Math.round((done / steps.length) * 100)}%"></i></div>
+      <span class="muted small">${done} of ${steps.length} done</span><button class="x" data-hide>Hide</button></header>
+      <ul>${steps.map(([label, ok], n) => `<li class="${ok ? 'done' : ''}"><button data-step="${n}"><span class="dot">${ok ? '✓' : ''}</span><span class="lbl">${label}</span></button></li>`).join('')}</ul></div>`;
+    box.onclick = (e) => {
+      if (e.target.closest('[data-hide]')) { store.set('start-hidden', true); box.innerHTML = ''; return; }
+      const b = e.target.closest('[data-step]'); if (b) steps[Number(b.dataset.step)][2]();
+    };
+  }
+
   let meta = { groups: [], stages: [] };
   let tab = 'list';
   let timer;
@@ -34,8 +160,11 @@
     fill('#crm-stage', meta.stages, 'All stages');
     const s = meta.summary;
     q$('#crm-tiles').innerHTML = [
-      ['Contacts', s.total], ['To-dos due', s.due + s.tasksDue], ['Committed (not paid yet)', money(s.pledged)], ['Paid', money(s.paid)], ['OK to email', s.emailable],
-    ].map(([l, v]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v ?? 0}</div></div>`).join('');
+      ['Contacts', s.total, 'people', '#4f46e5'], ['To-dos due', s.due + s.tasksDue, 'bell', '#d97706'], ['Committed (not paid yet)', money(s.pledged), 'pipeline', '#9333ea'],
+      ['Paid', money(s.paid), 'money', '#16a34a'], ['OK to email', s.emailable, 'email', '#db2777'],
+    ].map(([l, v, ico, c]) => `<div class="tile"><div class="tile-ico" style="--c:${c}">${svg(ico)}</div><div><div class="label">${l}</div><div class="value">${v ?? 0}</div></div></div>`).join('');
+    renderTip(tab);
+    if (!store.get('tour-done', false) && tourAt < 0) setTimeout(() => showTour(0), 400);
     await ({ list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
   }
   window.renderContacts = renderContacts;
@@ -50,13 +179,14 @@
     if (q$('#crm-due').checked) p.set('due', '1');
     const rows = await call(`/contacts?${p}`);
     q$('#crm-table tbody').innerHTML = rows.map((c) => `<tr data-id="${c.id}">
-      <td><b>${h(c.name)}</b>${c.company && c.company !== c.name ? `<div class="muted">${h(c.company)}</div>` : ''}${c.do_not_contact ? ' <span class="pill" style="color:var(--bad)">Do not contact</span>' : ''}</td>
-      <td><span class="pill">${h(c.group_name)}</span></td>
-      <td>${h(c.stage)}</td>
-      <td>${money(c.amount)}</td>
-      <td>${c.phone ? `<a href="tel:${h(c.phone)}">${h(c.phone)}</a><br>` : ''}${c.email ? `<a href="mailto:${h(c.email)}">${h(c.email)}</a>${c.email_ok ? ' ✓' : ''}` : ''}</td>
-      <td class="${dueClass(c.next_follow_up)}">${niceDate(c.next_follow_up)}</td>
-    </tr>`).join('') || `<tr><td colspan="6" class="muted">${meta.summary.total ? 'No contacts match.' : 'No contacts yet. Click "+ Add contact", import a spreadsheet saved as CSV, or share a sign-up form.'}</td></tr>`;
+      <td><div class="crm-person">${avatar(c.name)}<div class="who"><b>${h(c.name)}</b>${c.company && c.company !== c.name ? `<div class="muted">${h(c.company)}</div>` : ''}${c.do_not_contact ? '<div><span class="pill off">Do not contact</span></div>' : ''}</div></div></td>
+      <td>${groupPill(c.group_name)}</td>
+      <td>${stageBadge(c.stage)}</td>
+      <td><b>${money(c.amount)}</b></td>
+      <td><div class="crm-acts">${c.phone ? `<a class="crm-act" href="tel:${h(c.phone)}" title="Call ${h(c.phone)}">${svg('phone')}<span>${h(c.phone)}</span></a>` : ''}${c.email ? `<a class="crm-act" href="mailto:${h(c.email)}" title="${c.email_ok ? 'Said yes to email' : 'Email'}">${svg('email')}<span>${h(c.email)}</span>${c.email_ok ? '<span class="ok">✓</span>' : ''}</a>` : ''}</div></td>
+      <td><span class="due ${dueClass(c.next_follow_up)}">${c.next_follow_up ? (dueClass(c.next_follow_up) === 'overdue' ? 'Late · ' : dueClass(c.next_follow_up) === 'due-today' ? 'Today · ' : '') + niceDate(c.next_follow_up) : '<span class="muted">—</span>'}</span></td>
+    </tr>`).join('') || `<tr><td colspan="6" class="crm-empty muted">${meta.summary.total ? '<span class="big">🔍</span>Nobody matches that search. Try fewer words or pick "All groups".' : '<span class="big">👋</span><b>No contacts yet.</b><br>Press "+ Add contact", bring in a spreadsheet with "Import CSV", or share a sign-up form.'}</td></tr>`;
+    renderStart();
   }
   q$('#crm-q').oninput = () => { clearTimeout(timer); timer = setTimeout(renderList, 200); };
   ['#crm-group', '#crm-stage', '#crm-due'].forEach((s) => (q$(s).onchange = renderList));
@@ -83,11 +213,11 @@
     q$('#pipe-board').innerHTML = meta.stages.map((st) => {
       const cards = rows.filter((c) => c.stage === st);
       const total = cards.reduce((n, c) => n + (c.amount || 0), 0);
-      return `<div class="col" data-stage="${h(st)}"><h3>${h(st)}</h3><div class="muted">${cards.length} · ${money(total)}</div>
-        ${cards.map((c) => `<div class="card" draggable="true" data-id="${c.id}"><b>${h(c.company || c.name)}</b>
-          ${c.company && c.company !== c.name ? `<div>${h(c.name)}</div>` : ''}
+      return `<div class="col" data-stage="${h(st)}" style="--c:${stageC(st)}"><h3>${h(st)}</h3><div class="muted">${cards.length} ${cards.length === 1 ? 'person' : 'people'} · ${money(total)}</div>
+        ${cards.map((c) => `<div class="card" draggable="true" data-id="${c.id}"><div class="top">${avatar(c.company || c.name, 'sm')}<div><b>${h(c.company || c.name)}</b>
+          ${c.company && c.company !== c.name ? `<div class="muted small">${h(c.name)}</div>` : ''}</div></div>
           ${c.amount ? `<div class="amt">${money(c.amount)}</div>` : ''}
-          <div class="meta"><span class="pill">${h(c.group_name)}</span>${c.next_follow_up ? ` <span class="${dueClass(c.next_follow_up)}">${niceDate(c.next_follow_up)}</span>` : ''}</div></div>`).join('')}
+          <div class="meta">${groupPill(c.group_name)}${c.next_follow_up ? ` <span class="${dueClass(c.next_follow_up)}">${niceDate(c.next_follow_up)}</span>` : ''}</div></div>`).join('') || '<div class="empty-col">Drag a card here</div>'}
       </div>`;
     }).join('');
   }
@@ -111,11 +241,11 @@
     <input type="checkbox" data-done ${t.done_at ? 'checked' : ''} title="Mark done">
     <span class="title">${h(t.title)}${showWho && t.contact_name ? ` <a href="#" data-open="${t.contact_id}" class="muted">· ${h(t.contact_name)}</a>` : ''}</span>
     ${t.template_id && t.contact_id && !t.done_at ? `<button class="btn ghost" data-write title="Opens a filled-in message for just this person in your Mail or Messages app. You press Send." style="padding:3px 10px;font-size:.85rem">Write "${h(t.template_name)}"</button>` : ''}
-    <span class="${t.done_at ? 'muted' : dueClass(t.due_on)}">${niceDate(t.due_on)}</span>
+    <span class="when-chip ${t.done_at ? 'muted' : dueClass(t.due_on)}">${!t.done_at && dueClass(t.due_on) === 'overdue' ? `Late · ${niceDate(t.due_on)}` : !t.done_at && dueClass(t.due_on) === 'due-today' ? 'Today' : niceDate(t.due_on)}</span>
     <button class="x" data-edit title="Edit">✎</button><button class="x" data-del title="Delete">×</button></li>`;
   async function renderTasks() {
     const tasks = await call(`/tasks${q$('#task-show-done').checked ? '' : '?open=1'}`);
-    q$('#task-list').innerHTML = tasks.map((t) => taskRow(t)).join('') || '<li class="muted">No tasks. Click "+ Task" to add one.</li>';
+    q$('#task-list').innerHTML = tasks.map((t) => taskRow(t)).join('') || '<li class="muted crm-empty" style="display:block"><span class="big">🎉</span>All caught up! Nothing to do right now. Press "+ Task" at the top to add something.</li>';
   }
   q$('#task-show-done').onchange = renderTasks;
   async function taskClick(e, after) {
@@ -487,9 +617,9 @@
         : 'Emails are switched off until you connect your email (like your viralattraction.com address). In Terminal run: <b>cd ~/social-scheduler && npm run email-setup</b>. Until then those steps are skipped and everything else still runs.'}</div>
       ${em.recent.length ? `<details style="margin-top:6px"><summary>Recent emails</summary><ul class="history">${em.recent.map((e) => `<li><b>${h(e.status === 'sent' ? 'Sent' : e.status === 'failed' ? 'Failed' : 'Sending')}</b> · ${h(e.contact_name || e.to_email)} · ${h(e.subject || '')}${e.error ? `<br><span style="color:var(--bad)">${h(e.error)}</span>` : ''}</li>`).join('')}</ul></details>` : ''}</div>`;
     q$('#auto-list').innerHTML = emailCard + data.automations.map((a) => `<div class="item" data-auto="${a.id}">
-      <b>${h(a.name)}</b> ${a.active ? '<span class="pill">On</span>' : '<span class="pill" style="color:var(--bad)">Off</span>'}
-      <div class="muted"><b>When:</b> ${h(triggerText(a.trigger, data.triggers))}</div>
-      <ol style="margin:6px 0 6px 18px;padding:0">${a.steps.map((s) => `<li>${h(stepText(s, tpls))}</li>`).join('')}</ol>
+      <b>${h(a.name)}</b> <div>${a.active ? '<span class="pill on">● On</span>' : '<span class="pill off">Off</span>'}</div>
+      <div class="auto-when">${svg('automations')}<div><b>When</b> ${h(triggerText(a.trigger, data.triggers))}</div></div>
+      <ol class="auto-steps">${a.steps.map((s) => `<li>${h(stepText(s, tpls))}</li>`).join('')}</ol>
       <div class="muted small">Ran ${a.runs} time${a.runs === 1 ? '' : 's'}${a.waiting ? ` · ${a.waiting} waiting` : ''}${a.last_run_at ? ` · last ${h(new Date(a.last_run_at.replace(' ', 'T') + 'Z').toLocaleString())}` : ''}</div>
       <div class="row"><button class="btn ghost" data-toggle>${a.active ? 'Turn off' : 'Turn on'}</button><button class="btn ghost" data-edit>Edit</button><button class="btn danger" data-del>Delete</button></div>
     </div>`).join('') || '<p class="muted">No automations yet. Click "+ New automation".</p>';
