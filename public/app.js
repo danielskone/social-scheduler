@@ -47,6 +47,7 @@ function banner(msg, isError = false) {
 }
 
 // ---------- Routing ----------
+let lastView = '';
 async function route() {
   const [path, query] = (location.hash.slice(1) || 'calendar').split('?');
   const [view, sub] = path.split('/');
@@ -55,6 +56,8 @@ async function route() {
   document.querySelectorAll('.view').forEach((v) => (v.hidden = v.id !== `view-${view}`));
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === view));
   const acctLoad = api('/accounts').then((a) => (accounts = a));
+  if (view === 'calendar' && lastView && lastView !== 'calendar') goToToday(); // coming back to the Calendar tab
+  lastView = view;
   if (view === 'calendar') { renderCalendar(); return; } // the calendar doesn't need the account list
   await acctLoad;
   if (view === 'compose') renderCompose(params.get('date'), params.get('clip'), params.get('ad') && { id: params.get('ad'), format: params.get('f') || '9x16' });
@@ -86,7 +89,35 @@ const STATUS_WORD = { scheduled: 'Scheduled', published: 'Posted', failed: 'Need
 $('#cal-weekdays').innerHTML = WEEKDAYS.map((d) => `<div>${d}</div>`).join('');
 $('#cal-prev').onclick = () => { if (mode() === 'week') calWeek = addDays(calWeek, -7); else calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); renderCalendar(); };
 $('#cal-next').onclick = () => { if (mode() === 'week') calWeek = addDays(calWeek, 7); else calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); renderCalendar(); };
-$('#cal-today').onclick = () => { calMonth = startOfMonth(new Date()); calWeek = startOfWeek(new Date()); renderCalendar(); };
+$('#cal-today').onclick = () => { goToToday(); renderCalendar(); };
+// Opening the app (or tapping Today) always lands on today's posts, no scrolling needed.
+let jumpToToday = true;
+function goToToday() { calMonth = startOfMonth(new Date()); calWeek = startOfWeek(new Date()); jumpToToday = true; }
+// Coming back to the app later (e.g. reopening it on the iPhone the next morning) jumps to today again.
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (!hiddenAt || Date.now() - hiddenAt < 10 * 60 * 1000) return;
+  goToToday();
+  if (!$('#view-calendar').hidden) renderCalendar();
+});
+// Scrolls so today's day (or, if today has no posts, the next day that does) sits at the top.
+function scrollToToday(m) {
+  if (!jumpToToday) return;
+  jumpToToday = false;
+  const box = { list: '#cal-agenda', week: '#cal-week', month: '#cal-days' }[m];
+  let target = $(`${box} .today`);
+  if (m === 'list' && !target) {
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    target = [...document.querySelectorAll('#cal-agenda .ag-day')].find((el) => new Date(el.dataset.day) >= now);
+  }
+  if (!target) { window.scrollTo(0, 0); return; }
+  const bar = isPhone() ? ($('.appbar')?.offsetHeight || 0) : 0;
+  const r = target.getBoundingClientRect();
+  // On the Mac, leave the page alone if today and its first posts are already on screen.
+  if (!isPhone() && r.top >= 0 && r.top + Math.min(r.height, 320) <= innerHeight) return;
+  window.scrollTo({ top: Math.max(0, scrollY + r.top - bar - 10), behavior: 'auto' });
+}
 $('#cal-mode').onclick = (e) => {
   const b = e.target.closest('button[data-mode]');
   if (!b) return;
@@ -146,7 +177,9 @@ async function renderCalendar() {
   const m = mode();
   document.querySelectorAll('#cal-mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === (m === 'list' && isPhone() && calMode === 'month' ? 'month' : m)));
   $('#view-calendar').dataset.mode = m;
-  renderOverview().catch(() => {});
+  const overview = renderOverview().catch(() => {});
+  // Wait for the cards at the top so they don't push today down after we've scrolled to it.
+  const jump = async () => { if (jumpToToday) { await overview; requestAnimationFrame(() => scrollToToday(m)); } };
   const today = dayKey(new Date());
 
   if (m === 'week') {
@@ -166,6 +199,7 @@ async function renderCalendar() {
       </div>`;
     }).join('');
     $('#cal-week').onclick = (e) => { const c = e.target.closest('.pcard'); if (c) openPost(c.dataset.id); };
+    jump();
     return;
   }
 
@@ -203,6 +237,7 @@ async function renderCalendar() {
       if (day) location.hash = `compose?date=${encodeURIComponent(day.dataset.date)}`;
     };
     attachHoverPreview(posts);
+    jump();
     return;
   }
 
@@ -212,11 +247,12 @@ async function renderCalendar() {
   inMonth.forEach((p) => (groups[dayKey(new Date(p.scheduled_at))] ||= []).push(p));
   $('#cal-agenda').innerHTML = Object.values(groups).map((list) => {
     const d = new Date(list[0].scheduled_at);
-    return `<div class="ag-day${dayKey(d) === today ? ' today' : ''}">
+    return `<div class="ag-day${dayKey(d) === today ? ' today' : ''}" data-day="${new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString()}">
       <div class="ag-date"><span>${d.toLocaleDateString([], { weekday: 'short' })}</span><b>${d.getDate()}</b></div>
       <div class="ag-list">${list.map(postCard).join('')}</div></div>`;
   }).join('') || '<p class="empty">No posts this month yet.<br><a class="btn primary" href="#compose">+ New post</a></p>';
   $('#cal-agenda').onclick = (e) => { const it = e.target.closest('.pcard'); if (it) openPost(it.dataset.id); };
+  jump();
 }
 
 // Mac: hovering a post in the month view shows a bigger preview with the full caption.
