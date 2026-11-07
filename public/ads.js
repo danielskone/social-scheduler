@@ -102,7 +102,7 @@ function createPage() {
     <div class="ads-ideas">${AD_IDEAS.map((idea, i) => `<button type="button" class="ads-idea" data-idea="${i}">
         <span class="ads-idea-tag">${esc(idea.tag)}</span><b>${esc(idea.title)}</b><small>${esc(idea.details.about)}</small></button>`).join('')}</div>
     ${recent.length ? `<div class="ads-section-row"><h2 class="ads-section-title">Your latest ads</h2><a href="#ads/list" class="btn ghost">See all</a></div><div class="ads-grid">${recent.map(adCard).join('')}</div>` : ''}
-    <p class="muted clip-fine">Everything runs on your Mac for free. The voice is your Mac's own. For more natural voices, add a free “Premium” or “Enhanced” voice in System Settings → Accessibility → Spoken Content → System voice → Manage Voices.</p>`;
+    <p class="muted clip-fine">Everything runs on your Mac for free. The voice is your Mac's own. To use Siri, set Siri as the System voice in System Settings → Accessibility → Spoken Content, then pick “Siri” here. For more voices, add free “Premium” or “Enhanced” voices there with Manage Voices; they show up here on their own.</p>`;
 }
 
 function drawPicked() {
