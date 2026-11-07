@@ -45,6 +45,7 @@ async function renderAds(sub) {
   if (AS.sub === 'products') { body.innerHTML = productsPage(); return; }
   if (AS.sub === 'media') { body.innerHTML = mediaPage(); return; }
   if (AS.sub === 'presenters') { body.innerHTML = presentersPage(); return; }
+  if (AS.sub === 'voices') { body.innerHTML = voicesPage(); return; }
   AS.ads = await api('/ads');
   body.innerHTML = createPage();
   drawPicked();
@@ -375,6 +376,43 @@ function presentersPage() {
     : `<div class="empty-clips"><span>${AI.img}</span><b>No presenters yet</b><p class="muted">Add photos of the people you want in your ads. Use only photos you have the rights to.</p></div>`}`;
 }
 
+// Voices: hear every voice on this Mac with your own words, then use one for new ads.
+const VOICE_SAMPLE = 'Hi! This is how your next ad could sound. Book your free call today.';
+const voiceKind = (v) => (v.id === 'system' ? 'Siri' : /Premium/.test(v.name) ? 'Premium' : /Enhanced/.test(v.name) ? 'Enhanced' : '');
+function voicesPage() {
+  const vs = AS.opts.voices || [];
+  const pace = AS.voicePace || 'normal';
+  return `<div class="ads-lib-head"><p class="muted">Press play to hear each voice say your words. Pick one with <b>Use for new ads</b>. To add more (free), open System Settings → Accessibility → Spoken Content → System voice → <b>Manage Voices</b>; new voices show up here within a few minutes.</p></div>
+    <div class="panel ads-voice-try"><label class="field"><span>Words to say</span><textarea id="ads-voice-text" rows="2" maxlength="200">${esc(AS.voiceText || VOICE_SAMPLE)}</textarea></label>
+      <div class="field"><span>Pace</span><div class="seg">${(AS.opts.paces || ['calm', 'normal', 'fast']).map((p) => `<button type="button" data-voice-pace="${p}" class="${p === pace ? 'on' : ''}">${PACE_NAMES[p] || p}</button>`).join('')}</div></div></div>
+    ${vs.length ? `<div class="ads-voices">${vs.map((v) => `<div class="ads-voice${AS.draft?.voice === v.id ? ' on' : ''}">
+      <button type="button" class="iconbtn ads-voice-play" data-voice-play="${esc(v.id)}" aria-label="Play ${esc(v.name)}">${AI.play}</button>
+      <div class="grow"><b>${esc(v.name.replace(/\s*\((Premium|Enhanced)\)/, ''))}</b><small class="muted">${esc([voiceKind(v), v.lang.replace('en_', 'English · ')].filter(Boolean).join(' · '))}</small></div>
+      <button type="button" class="btn ghost sm" data-voice-use="${esc(v.id)}">${AS.draft?.voice === v.id ? 'Chosen' : 'Use for new ads'}</button></div>`).join('')}</div>`
+    : `<div class="empty-clips"><span>${AI.speaker}</span><b>No voices found</b><p class="muted">Voices come from your Mac. Open Viral Post on your Mac to hear them.</p></div>`}`;
+}
+const voiceAudio = {};
+async function playVoice(btn, voice) {
+  const text = ($('#ads-voice-text')?.value || VOICE_SAMPLE).trim();
+  const pace = AS.voicePace || 'normal';
+  const key = `${voice}|${pace}|${text}`;
+  Object.values(voiceAudio).forEach((a) => a.pause());
+  document.querySelectorAll('.ads-voice.playing').forEach((x) => x.classList.remove('playing'));
+  btn.disabled = true;
+  try {
+    if (!voiceAudio[key]) {
+      const res = await fetch('/api/ads/voices/preview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ voice, pace, text }) });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'That voice did not work.');
+      voiceAudio[key] = new Audio(URL.createObjectURL(await res.blob()));
+    }
+    const a = voiceAudio[key]; a.currentTime = 0;
+    const row = btn.closest('.ads-voice'); row.classList.add('playing');
+    a.onended = () => row.classList.remove('playing');
+    await a.play();
+  } catch (err) { banner(err.message, true); }
+  btn.disabled = false;
+}
+
 // ---------- Events ----------
 $('#ads-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-sub]');
@@ -534,6 +572,14 @@ adsBody.addEventListener('click', async (e) => {
     await api(`/ads/media/${t.dataset.mediaDel}`, { method: 'DELETE' });
     AS.media = AS.media.filter((m) => String(m.id) !== t.dataset.mediaDel);
     $('#ads-body').innerHTML = AS.sub === 'presenters' ? presentersPage() : mediaPage(); return;
+  }
+  if (t.dataset.voicePlay !== undefined) return playVoice(t, t.dataset.voicePlay);
+  if (t.dataset.voicePace) { AS.voicePace = t.dataset.voicePace; AS.voiceText = $('#ads-voice-text').value; $('#ads-body').innerHTML = voicesPage(); return; }
+  if (t.dataset.voiceUse !== undefined) {
+    AS.draft = { ...(AS.draft || {}), voice: t.dataset.voiceUse };
+    AS.voiceText = $('#ads-voice-text').value;
+    $('#ads-body').innerHTML = voicesPage();
+    banner('Chosen. New ads will use this voice (you can still change it in each ad).'); setTimeout(() => banner(''), 2500); return;
   }
   if (t.dataset.brandDel) { if (confirm('Delete this brand?')) { await api(`/ads/brands/${t.dataset.brandDel}`, { method: 'DELETE' }); renderAds('brands'); } return; }
   if (t.dataset.productDel) { if (confirm('Delete this product?')) { await api(`/ads/products/${t.dataset.productDel}`, { method: 'DELETE' }); renderAds('products'); } return; }

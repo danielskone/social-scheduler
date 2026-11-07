@@ -847,3 +847,17 @@ input[type=color] { width: 100%; height: 42px; padding: 4px; cursor: pointer; }
 .ad-presenter-hp { margin-bottom: 12px; }
 .ad-presenter-hp summary { cursor: pointer; padding: 6px 0; }
 .linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; }
+
+/* Voices */
+.ads-voice-try { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; margin-bottom: 14px; }
+.ads-voices { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.ads-voice { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+.ads-voice .grow { display: grid; gap: 1px; min-width: 0; }
+.ads-voice b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ads-voice small { font-size: .74rem; }
+.ads-voice .btn.sm { padding: 5px 10px; font-size: .8rem; white-space: nowrap; }
+.ads-voice-play { width: 38px; height: 38px; flex: none; border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
+.ads-voice-play svg { fill: currentColor; stroke: none; }
+.ads-voice.playing { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ads-voice.on { border-color: var(--accent); }
+@media (max-width: 600px) { .ads-voice-try { grid-template-columns: 1fr; } }
