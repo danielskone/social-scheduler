@@ -258,6 +258,9 @@ async function listVoices() {
     .filter((v) => v.lang.startsWith('en_') && !NOVELTY.test(v.name));
   const rank = (v) => (/Premium/.test(v.name) ? 0 : /Enhanced/.test(v.name) ? 1 : 2) * 10 + (v.lang === 'en_US' ? 0 : 1);
   list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  // Siri voices are not listed by "say", but "say" uses the Mac's System Voice when no voice is
+  // named, so picking Siri as the System Voice (Accessibility > Spoken Content) makes this one Siri.
+  list.unshift({ id: 'system', name: 'Siri (your Mac System Voice)', lang: 'en_US' });
   voiceCache = list;
   setTimeout(() => { voiceCache = null; }, 10 * 60e3).unref?.(); // notice newly added voices
   return list;
@@ -275,7 +278,7 @@ async function speak(text, { voice, pace = 'normal' } = {}, outBase) {
       const out = `${outBase}.aiff`;
       const voices = await listVoices();
       const v = voices.find((x) => x.id === voice) || voices[0];
-      await run('say', [...(v ? ['-v', v.id] : []), '-r', String(rate), '-o', out, '-f', txt]);
+      await run('say', [...(v && v.id !== 'system' ? ['-v', v.id] : []), '-r', String(rate), '-o', out, '-f', txt]);
       return out;
     }
     const out = `${outBase}.wav`;
