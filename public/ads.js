@@ -745,18 +745,20 @@ function openPresenter() {
     <h2>${AI.spark}AI presenter for this ad</h2>
     ${list.length ? `<div class="field"><span>Pick your presenter</span><div class="ad-presenter-pick">${list.map((m) => `<button type="button" class="${p?.file === m.file ? 'on' : ''}" data-presenter-pick="${esc(m.file)}" title="${esc(m.presenter)}"><img src="${esc(m.url)}" alt="" loading="lazy"><small>${esc(m.presenter)}</small></button>`).join('')}</div></div>`
       : `<p class="muted">Add photos of people in the <a href="#ads/presenters">Presenters</a> tab to pick one here, or use a HumanPal presenter.</p>`}
-    ${p ? `<div class="ad-presenter-how"><b>Make ${esc(p.presenter)} talk (free)</b>
+    ${p ? `<div class="ad-talk-here"><img src="${esc(p.url)}" alt=""><div class="grow"><b>Make ${esc(p.presenter)} talk, built in</b><small>Free, right here on your Mac. The mouth moves with your voiceover, with natural blinks and head movement. Takes a minute or two.</small></div><button type="button" class="btn primary" data-talk-here>${AI.spark}Make ${esc(p.presenter)} talk</button></div>` : ''}
+    ${p ? `<details class="ad-presenter-how"><summary><b>Or use a free AI website (more lifelike, takes longer)</b></summary>
       <ol class="ad-ai-steps"><li>Save ${esc(p.presenter)}'s photo and the voiceover: <a class="btn ghost sm" href="${esc(p.url)}" download="${esc(p.presenter)}.png">${AI.save}Photo</a> <a class="btn ghost sm" href="/api/ads/${AS.ad.id}/voiceover">${AI.save}Voiceover</a></li>
       <li>Open a site below, add the photo, and <b>upload the voiceover as the audio</b> (don't type the script or pick their voice). The mouth then moves to this exact voice, so it lines up with your captions.</li>
-      <li>Download it and press <b>Add the presenter video</b>. Each scene gets its part, with your captions, logo and end card on top.</li></ol>
+      <li>Download it and press <b>Add a presenter video</b>. Each scene gets its part, with your captions, logo and end card on top.</li></ol>
       <div class="ad-ai-sites">${TALK_SITES.map((x) => `<a class="btn ghost" href="${esc(x.url)}" target="_blank" rel="noopener"><b>Open ${esc(x.name)}</b><small>${esc(x.note)}</small></a>`).join('')}</div>
-      <p class="muted clip-fine">No AI? <button type="button" class="linkbtn" data-presenter-photo>Show ${esc(p.presenter)}'s photo</button> at the start and end of the ad, with your Mac voice.</p></div>` : ''}
+      </details>
+      <p class="muted clip-fine">Or just <button type="button" class="linkbtn" data-presenter-photo>show ${esc(p.presenter)}'s photo</button> at the start and end of the ad, with your Mac voice.</p>` : ''}
     <details class="ad-presenter-hp"${p ? '' : ' open'}><summary><b>Or use a HumanPal presenter</b></summary>
     <ol class="ad-ai-steps"><li>Click <b>Copy script & open HumanPal</b>.</li><li>In HumanPal pick a presenter and voice, paste the script, choose <b>vertical 9:16</b>, and make the video.</li><li>Download it and add it here.</li></ol>
     <div class="ad-ai-sites"><button type="button" class="btn ghost" data-presenter-open="https://app.humanpal.io/dashboard"><b>Copy script & open HumanPal</b><small>Your account · AI presenters · 1 minute per video on the Commercial plan</small></button></div></details>
     <label class="field"><span>Script <small>(one paragraph per scene)</small></span><textarea id="ad-presenter-script" rows="6">${esc(presenterScript())}</textarea></label>
     <p id="ad-ai-msg" class="clip-msg"></p>
-    <div class="row"><label class="btn primary">${AI.plus}Add the presenter video<input type="file" id="ad-presenter-file" accept="video/*" hidden></label><button class="btn ghost" value="close">Close</button></div>
+    <div class="row"><label class="btn ghost">${AI.plus}Add a presenter video<input type="file" id="ad-presenter-file" accept="video/*" hidden></label><button class="btn ghost" value="close">Close</button></div>
     <p class="muted clip-fine">Change the script here first if you like, before you copy it or save the voiceover. Keep the paragraphs in the same order as the scenes.</p>
   </form>`;
   if (!dlg.open) dlg.showModal();
@@ -785,6 +787,7 @@ $('#ads-dialog').addEventListener('click', async (e) => {
     $('#ad-presenter-script').value = script;
     return;
   }
+  if (e.target.closest('[data-talk-here]')) { const p = chosenPresenter(); if (p) talkHere(p); return; }
   if (e.target.closest('[data-presenter-photo]')) { const p = chosenPresenter(); if (p) presenterPhoto(p); return; }
   if (e.target.closest('a[href$="/voiceover"]')) {
     // Save script edits first so the voiceover says them.
@@ -815,13 +818,14 @@ $('#ads-dialog').addEventListener('change', async (e) => {
   msg.textContent = 'Adding the presenter video…';
   const [m] = (await uploadAdMedia([...e.target.files].slice(0, 1), null)).filter((x) => x.kind === 'video');
   if (!m || !m.duration) { msg.textContent = 'That file could not be added. Use an MP4 or MOV video.'; return; }
+  await usePresenterVideo(m, msg);
+});
+// Put a talking presenter video into the ad: listened to (free, on this Mac) so each scene and
+// caption word lines up with what is said.
+async function usePresenterVideo(m, msg) {
   // If the script was changed here, those words become the scenes' words.
-  const parts = $('#ad-presenter-script').value.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+  await saveScriptEdits();
   const a = AS.ad;
-  const spoken = a.scenes.filter((s) => (s.say || '').trim());
-  if (parts.length === spoken.length) spoken.forEach((s, k) => { s.say = parts[k]; });
-  await saveAdSoon({ scenes: a.scenes }, true);
-  // Listen to the video (free, on this Mac) so each scene and caption word lines up with what is said.
   msg.textContent = 'Listening to the video so every caption word matches the voice… (the first time also downloads the free speech model, about 200 MB)';
   let matched = false;
   try {
@@ -836,7 +840,74 @@ $('#ads-dialog').addEventListener('change', async (e) => {
   drawEditor();
   banner(matched ? 'Presenter added. Scenes and captions follow every spoken word. Press Make my video.' : 'Presenter added to every scene. Press Make my video.');
   setTimeout(() => banner(''), 3000);
-});
+}
+// Script edits made in the presenter box become the scenes' words.
+async function saveScriptEdits() {
+  const box = $('#ad-presenter-script');
+  if (!box) return;
+  const a = AS.ad;
+  const parts = box.value.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+  const spoken = a.scenes.filter((s) => (s.say || '').trim());
+  if (parts.length === spoken.length) { spoken.forEach((s, k) => { s.say = parts[k]; }); await saveAdSoon({ scenes: a.scenes }, true); }
+}
+
+// ---- Talking photo, built in (free, offline) ----
+// The face points are found right here in the browser by Google's free face finder (MediaPipe);
+// the Mac then draws the mouth, blinks and head movement to the ad's voiceover.
+let faceFinder = null;
+async function findFace(url) {
+  if (!faceFinder) {
+    const { FilesetResolver, FaceLandmarker } = await import('/vendor/face/vision_bundle.mjs');
+    const files = await FilesetResolver.forVisionTasks('/vendor/face/wasm');
+    faceFinder = await FaceLandmarker.createFromOptions(files, {
+      baseOptions: { modelAssetPath: '/api/ads/face-model', delegate: 'CPU' },
+      runningMode: 'IMAGE', numFaces: 1, minFaceDetectionConfidence: 0.15, minFacePresenceConfidence: 0.15,
+    });
+  }
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  // Draw the photo as it shows on screen (phone photos turned the right way up), at most 1080 wide.
+  const k = Math.min(1, 1080 / img.naturalWidth);
+  const c = document.createElement('canvas');
+  c.width = Math.round((img.naturalWidth * k) / 2) * 2;
+  c.height = Math.round((img.naturalHeight * k) / 2) * 2;
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  const lm = faceFinder.detect(c).faceLandmarks?.[0];
+  if (!lm) return null;
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.93));
+  return { face: lm.map((p) => [+p.x.toFixed(5), +p.y.toFixed(5)]), width: c.width, height: c.height, blob };
+}
+async function talkHere(p) {
+  const msg = $('#ad-ai-msg');
+  const btn = document.querySelector('[data-talk-here]');
+  if (btn) btn.disabled = true;
+  try {
+    await saveScriptEdits();
+    msg.textContent = `Finding ${p.presenter}'s face…`;
+    let f;
+    try { f = await findFace(p.url); } catch (err) { throw new Error(`The face finder could not start (${err.message}). Check the internet once so it can download, then try again.`); }
+    if (!f) throw new Error(`No face found in ${p.presenter}'s photo. Use a clear photo of one person looking at the camera.`);
+    const fd = new FormData();
+    fd.append('face', JSON.stringify(f.face));
+    fd.append('width', f.width);
+    fd.append('height', f.height);
+    fd.append('photo', f.blob, 'presenter.jpg');
+    const { job } = await api(`/ads/${AS.ad.id}/talking-photo`, { method: 'POST', body: fd });
+    let j;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1500));
+      j = await api(`/ads/talking-photo/${job}`);
+      if (j.error) throw new Error(j.error);
+      if (j.done) break;
+      msg.textContent = `${j.step || 'Working…'} ${j.at ? `${Math.round(j.at * 100)}%` : ''}`;
+    }
+    await usePresenterVideo(j.media, msg);
+  } catch (err) {
+    msg.textContent = err.message;
+  } finally { if (btn) btn.disabled = false; }
+}
+
 // Each scene gets a stretch of the presenter video sized by how many words it has.
 function splitPresenter(scenes, m) {
   const weight = (s) => Math.max(1, (s.say || '').split(/\s+/).filter(Boolean).length);

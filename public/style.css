@@ -868,3 +868,12 @@ input[type=color] { width: 100%; height: 42px; padding: 4px; cursor: pointer; }
 .ad-presenter-now { align-items: center; gap: 10px; }
 .ad-presenter-now img { width: 40px; height: 50px; object-fit: cover; border-radius: 8px; }
 .ad-presenter-now .btn.sm { padding: 5px 10px; font-size: .8rem; }
+/* Talking photo, built in */
+.ad-talk-here { display: flex; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin: 6px 0 10px; background: linear-gradient(135deg, rgba(124, 92, 255, .08), rgba(255, 92, 168, .06)); }
+.ad-talk-here img { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: none; }
+.ad-talk-here .grow { display: grid; gap: 2px; }
+.ad-talk-here small { color: var(--muted); font-size: .8rem; line-height: 1.4; }
+.ad-talk-here .btn { white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+.ad-talk-here .btn svg { width: 16px; height: 16px; }
+.ad-presenter-how summary { cursor: pointer; }
+@media (max-width: 560px) { .ad-talk-here { flex-wrap: wrap; } .ad-talk-here .btn { width: 100%; justify-content: center; } }

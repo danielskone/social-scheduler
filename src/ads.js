@@ -884,6 +884,10 @@ router.delete('/products/:id', (req, res) => {
 
 // Ads
 router.get('/', (req, res) => res.json(db.prepare('SELECT * FROM ads ORDER BY id DESC').all().map(adOut)));
+// (the face finder's model; see ensureFaceModel below)
+router.get('/face-model', async (req, res) => {
+  try { res.sendFile(await ensureFaceModel(), { maxAge: '30d' }); } catch (err) { res.status(502).json({ error: err.message }); }
+});
 router.get('/:id', (req, res) => { const a = getAd(req.params.id); a ? res.json(adOut(a)) : res.status(404).json({ error: 'Not found' }); });
 
 function settingsFrom(b, old = {}) {
@@ -953,21 +957,101 @@ router.patch('/:id', (req, res) => {
   res.json(adOut(getAd(a.id)));
 });
 
+// The ad's whole voiceover as one sound file (m4a), or null when there are no words or no voice.
+async function voiceoverFile(a) {
+  const text = JSON.parse(a.scenes || '[]').map((s) => String(s.say || '').trim()).filter(Boolean).join(' ');
+  if (!text) { const e = new Error('This ad has no words to say yet.'); e.status = 400; throw e; }
+  const base = path.join(os.tmpdir(), `vo-${crypto.randomBytes(4).toString('hex')}`);
+  const file = await speak(text, { voice: a.voice, pace: a.pace }, base);
+  if (!file) { const e = new Error('There is no voice on this computer.'); e.status = 400; throw e; }
+  const m4a = `${base}.m4a`;
+  try { await run(ffmpegPath(), ['-hide_banner', '-y', '-i', file, '-af', 'loudnorm=I=-16:TP=-1.5', '-c:a', 'aac', '-b:a', '128k', m4a]); }
+  finally { fs.rmSync(file, { force: true }); }
+  return m4a;
+}
+
 // The ad's whole voiceover as one sound file, for AI sites that make a photo talk.
 router.get('/:id/voiceover', async (req, res) => {
   const a = getAd(req.params.id);
   if (!a) return res.status(404).json({ error: 'Not found' });
-  const text = JSON.parse(a.scenes || '[]').map((s) => String(s.say || '').trim()).filter(Boolean).join(' ');
-  if (!text) return res.status(400).json({ error: 'This ad has no words to say yet.' });
-  const base = path.join(os.tmpdir(), `vo-${crypto.randomBytes(4).toString('hex')}`);
   try {
-    const file = await speak(text, { voice: a.voice, pace: a.pace }, base);
-    if (!file) return res.status(400).json({ error: 'There is no voice on this computer.' });
-    const m4a = `${base}.m4a`;
-    await run(ffmpegPath(), ['-hide_banner', '-y', '-i', file, '-af', 'loudnorm=I=-16:TP=-1.5', '-c:a', 'aac', '-b:a', '128k', m4a]);
+    const m4a = await voiceoverFile(a);
     res.attachment(`${clean(a.name, 60).replace(/[^\w -]/g, '') || 'ad'} voiceover.m4a`).type('audio/mp4').send(fs.readFileSync(m4a));
-    [file, m4a].forEach((f) => fs.rmSync(f, { force: true }));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    fs.rmSync(m4a, { force: true });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// The free face finder's model file (Google's MediaPipe), downloaded once to this computer.
+// The browser uses it to find the face points in a presenter photo.
+const FACE_MODEL_URL = process.env.FACE_MODEL_URL || 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const faceModel = path.join(config.dataDir, 'models', 'face_landmarker.task');
+let faceModelDl = null;
+async function ensureFaceModel() {
+  if (fs.existsSync(faceModel)) return faceModel;
+  faceModelDl ||= (async () => {
+    fs.mkdirSync(path.dirname(faceModel), { recursive: true });
+    const r = await fetch(FACE_MODEL_URL);
+    if (!r.ok) throw new Error(`Couldn't download the face finder (${r.status}).`);
+    fs.writeFileSync(`${faceModel}.part`, Buffer.from(await r.arrayBuffer()));
+    fs.renameSync(`${faceModel}.part`, faceModel);
+  })().finally(() => { faceModelDl = null; });
+  await faceModelDl;
+  return faceModel;
+}
+
+// Make the presenter's photo talk with the ad's voiceover, built here (free, offline): the browser
+// sends the photo as shown and its face points; a separate process draws the video.
+const talkJobs = new Map();
+router.post('/:id/talking-photo', upload.single('photo'), async (req, res) => {
+  const a = getAd(req.params.id);
+  const photo = req.file?.path;
+  const drop = () => photo && fs.rmSync(photo, { force: true });
+  if (!a) { drop(); return res.status(404).json({ error: 'Not found' }); }
+  let face;
+  try { face = JSON.parse(req.body?.face || 'null'); } catch {}
+  const width = Number(req.body?.width), height = Number(req.body?.height);
+  if (!photo || !Array.isArray(face) || face.length < 468 || !(width > 0) || !(height > 0)) { drop(); return res.status(400).json({ error: 'No face was found in that photo.' }); }
+  const job = crypto.randomBytes(6).toString('hex');
+  const pres = getMedia(a.presenter);
+  const who = pres?.presenter || 'Presenter';
+  talkJobs.set(job, { at: 0, step: 'Recording the voiceover…' });
+  res.status(202).json({ job });
+  const set = (x) => talkJobs.set(job, { ...talkJobs.get(job), ...x });
+  const jobFile = path.join(os.tmpdir(), `talk-${job}.json`);
+  let audio = null;
+  try {
+    audio = await voiceoverFile(a);
+    set({ step: `Making ${who} talk…` });
+    const file = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}.mp4`;
+    fs.writeFileSync(jobFile, JSON.stringify({ ffmpeg: ffmpegPath(), photo, audio, out: path.join(libDir, file), face, width, height }));
+    await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [path.join(__dirname, 'talking-photo.js'), jobFile], { stdio: ['ignore', 'pipe', 'pipe'] });
+      try { os.setPriority(child.pid, 10); } catch {}
+      let err = '';
+      child.stderr.on('data', (d) => { err = (err + d).slice(-2000); });
+      child.stdout.on('data', (d) => String(d).split('\n').forEach((l) => { try { const m = JSON.parse(l); if (m.at != null) set({ at: m.at }); } catch {} }));
+      child.on('error', reject);
+      child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(err.trim().split('\n').pop() || 'The talking video could not be made.'))));
+    });
+    const out = path.join(libDir, file);
+    const info = await probeAny(out);
+    await run(ffmpegPath(), ['-hide_banner', '-y', '-ss', '0.5', '-i', out, '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '5', path.join(libDir, `${file.replace(/\.[^.]+$/, '')}.thumb.jpg`)]).catch(() => {});
+    const { lastInsertRowid } = db.prepare('INSERT INTO ad_media (file, kind, name, width, height, duration, has_audio) VALUES (?,?,?,?,?,?,?)')
+      .run(file, 'video', `${who} talking.mp4`, info.width, info.height, info.duration, 1);
+    set({ at: 1, done: true, media: mediaOut(db.prepare('SELECT * FROM ad_media WHERE id=?').get(lastInsertRowid)) });
+  } catch (err) {
+    set({ error: err.message });
+  } finally {
+    drop();
+    fs.rmSync(jobFile, { force: true });
+    if (audio) fs.rmSync(audio, { force: true });
+    setTimeout(() => talkJobs.delete(job), 30 * 60 * 1000).unref?.();
+  }
+});
+router.get('/talking-photo/:job', (req, res) => {
+  const j = talkJobs.get(req.params.job);
+  if (!j) return res.status(404).json({ error: 'That job is gone. Try again.' });
+  res.json(j);
 });
 
 // A talking presenter video for the whole ad: listened to on this computer (free), then cut into
