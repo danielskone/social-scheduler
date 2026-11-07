@@ -167,3 +167,43 @@ test('details -> ad video in two shapes -> scheduled post', { timeout: 240000 },
   assert.ok(fs.existsSync(path.join(dir, 'media', saved.media_file)));
   assert.ok(!fs.existsSync(path.join(dir, 'ads', String(ad.id))));
 });
+
+test('a talking presenter video stays in sync with its voice after it is cut into scenes', { timeout: 240000 }, async () => {
+  // A flash on screen and a beep at the same moment, every second.
+  const vid = fixture('talk.mp4', ['-f', 'lavfi', '-i', 'color=c=black:s=360x640:r=25:d=8', '-f', 'lavfi', '-i', 'sine=f=1000:d=8:sample_rate=48000',
+    '-filter_complex', "[0:v]drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='lt(mod(t\\,1)\\,0.12)'[v];[1:a]volume='if(lt(mod(t,1),0.12),1,0)':eval=frame[a]",
+    '-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac']);
+  const fd = new FormData();
+  fd.append('files', new Blob([fs.readFileSync(vid)], { type: 'video/mp4' }), 'talk.mp4');
+  const [m] = await (await fetch(`${root}/api/ads/media`, { method: 'POST', body: fd })).json();
+  // Cut the way the page does: one stretch per scene, back to back.
+  const cuts = [[0, 2.37], [2.37, 3.11], [5.48, 2.52]];
+  const scenes = cuts.map(([start, seconds], i) => ({ say: `Part ${i + 1}`, headline: '', media: m.file, sound: 'video', start, seconds, endCard: i === 2 }));
+  let ad = await (await fetch(`${root}/api/ads`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ details, length: 15, formats: ['9x16'] }) })).json();
+  await fetch(`${root}/api/ads/${ad.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scenes }) });
+  await fetch(`${root}/api/ads/${ad.id}/render`, { method: 'POST' });
+  for (let i = 0; i < 200 && !['ready', 'failed'].includes(ad.status); i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    ad = await (await fetch(`${root}/api/ads/${ad.id}`)).json();
+  }
+  assert.equal(ad.status, 'ready', ad.error);
+  const out = path.join(dir, 'ads', String(ad.id), ad.outputs['9x16'].file);
+  const { spawnSync } = require('node:child_process');
+  // Picture: when the top-left corner (no words drawn there) turns white.
+  const v = spawnSync(ffmpeg, ['-hide_banner', '-i', out, '-vf', 'crop=40:40:10:400,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-', '-an', '-f', 'null', '-']).stdout.toString();
+  const flashes = []; let t = 0, on = false;
+  for (const line of v.split('\n')) {
+    const tm = line.match(/pts_time:([\d.]+)/); if (tm) t = +tm[1];
+    const y = line.match(/YAVG=([\d.]+)/); if (y) { const now = +y[1] > 128; if (now && !on) flashes.push(t); on = now; }
+  }
+  // Sound: when each beep starts.
+  const a = spawnSync(ffmpeg, ['-hide_banner', '-i', out, '-af', 'silencedetect=n=-30dB:d=0.05', '-vn', '-f', 'null', '-']).stderr.toString();
+  const beeps = [...a.matchAll(/silence_end: ([\d.]+)/g)].map((x) => +x[1]);
+  // The talking scenes (the last one is the darkened end card).
+  const later = flashes.filter((f) => f > 0.5 && f < 5.4);
+  assert.ok(later.length >= 4, `flashes: ${flashes}`);
+  for (const f of later) {
+    const b = beeps.reduce((best, x) => (Math.abs(x - f) < Math.abs(best - f) ? x : best), Infinity);
+    assert.ok(Math.abs(b - f) < 0.045, `sound is ${Math.round((b - f) * 1000)} ms off the picture at ${f.toFixed(2)}s`);
+  }
+});

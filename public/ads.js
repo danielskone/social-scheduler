@@ -745,7 +745,7 @@ function openPresenter() {
       : `<p class="muted">Add photos of people in the <a href="#ads/presenters">Presenters</a> tab to pick one here, or use a HumanPal presenter.</p>`}
     ${p ? `<div class="ad-presenter-how"><b>Make ${esc(p.presenter)} talk (free)</b>
       <ol class="ad-ai-steps"><li>Save ${esc(p.presenter)}'s photo and the voiceover: <a class="btn ghost sm" href="${esc(p.url)}" download="${esc(p.presenter)}.png">${AI.save}Photo</a> <a class="btn ghost sm" href="/api/ads/${AS.ad.id}/voiceover">${AI.save}Voiceover</a></li>
-      <li>Open a site below, add the photo and the voiceover, and make the video (vertical if it asks).</li>
+      <li>Open a site below, add the photo, and <b>upload the voiceover as the audio</b> (don't type the script or pick their voice). The mouth then moves to this exact voice, so it lines up with your captions.</li>
       <li>Download it and press <b>Add the presenter video</b>. Each scene gets its part, with your captions, logo and end card on top.</li></ol>
       <div class="ad-ai-sites">${TALK_SITES.map((x) => `<a class="btn ghost" href="${esc(x.url)}" target="_blank" rel="noopener"><b>Open ${esc(x.name)}</b><small>${esc(x.note)}</small></a>`).join('')}</div>
       <p class="muted clip-fine">No AI? <button type="button" class="linkbtn" data-presenter-photo>Show ${esc(p.presenter)}'s photo</button> at the start and end of the ad, with your Mac voice.</p></div>` : ''}
