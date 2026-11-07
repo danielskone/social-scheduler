@@ -78,7 +78,7 @@ const FORMATS = {
   '1x1': { w: 1080, h: 1080, label: 'Square 1:1', for: 'Facebook and Instagram feed' },
   '16x9': { w: 1920, h: 1080, label: 'Wide 16:9', for: 'YouTube and Facebook video' },
 };
-const LOOKS = ['bold', 'clean', 'cinematic'];
+const LOOKS = ['bold', 'clean', 'cinematic', 'creator'];
 const RECIPES = {
   hook: 'Stop the scroll',
   reasons: '3 reasons why',
@@ -331,9 +331,131 @@ function wrap(text, maxChars) {
   return out.slice(0, 3);
 }
 
+// ---------- Creator look ----------
+// Like a creator's explainer video: big lowercase words beside the presenter, step numbers that
+// pop in, white step cards that zoom into the close-up, and one spoken word at a time.
+const ORDINALS = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, one: 1, two: 2, three: 3, four: 4, five: 5 };
+function stepOf(scene) {
+  if (!scene || scene.endCard) return null;
+  const h = String(scene.headline || '').match(/^(\d{1,2})[.)]\s*(.*)$/);
+  if (h) return { n: Number(h[1]), title: h[2] || '' };
+  const m = String(scene.say || '').match(/^(?:step\s+|tip\s+#?|number\s+)?(first|second|third|fourth|fifth|one|two|three|four|five|\d{1,2})\b[:.,)]?\s*/i);
+  if (!m || !/^(step|tip|number|first|second|third|fourth|fifth)|^\w+[:.)]/i.test(scene.say)) return null;
+  const n = ORDINALS[m[1].toLowerCase()] || Number(m[1]);
+  if (!n) return null;
+  return { n, title: scene.headline || words(String(scene.say).slice(m[0].length)).slice(0, 4).join(' ').replace(/[.,!?;:]+$/, '') };
+}
+const two = (n) => String(n).padStart(2, '0');
+const creatorWord = (w) => assText(String(w).toLowerCase().replace(/^[^\w$#@%&]+|[^\w%!?]+$/g, '').replace(/[!?]+$/, ''));
+
+function buildCreatorAss({ W, H, headline = '', say = '', voiceStart = 0, voiceEnd = 0, len, endCard = false, website = '', captions = true, timed = null, low = false,
+  step = null, steps = 0, card = 0, cardBox = null, label = '', presenterScene = false }) {
+  const u = Math.min(W, H) / 1080;
+  const vertical = H / W > 1.3;
+  const wide = W / H > 1.3;
+  const bigBase = vertical ? W * 0.115 : wide ? H * 0.1 : W * 0.1;
+  const wordSize = Math.round((vertical ? 62 : wide ? 46 : 54) * u);
+  const glow = `${Math.max(1, Math.round(2 * u))}`;
+  const head = `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${W}
+PlayResY: ${H}
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Word,Inter SemiBold,${wordSize},&H00FFFFFF,&H00FFFFFF,&H90000000,&H00000000,0,0,0,0,100,100,${(-0.5 * u).toFixed(1)},0,1,${glow},0,5,0,0,0,1
+Style: Big,Inter,${Math.round(bigBase)},&H00FFFFFF,&H00FFFFFF,&H8C000000,&H00000000,-1,0,0,0,100,100,${(-3 * u).toFixed(1)},0,1,${glow},0,5,0,0,0,1
+Style: Small,Inter Medium,${Math.round((vertical ? 30 : 24) * u)},&H30FFFFFF,&H00FFFFFF,&HB0000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,7,0,0,0,1
+Style: CardTitle,Inter,${Math.round((vertical ? 44 : 32) * u)},&H00161616,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: CardSub,Inter Medium,${Math.round((vertical ? 30 : 22) * u)},&H00808080,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: Badge,Inter,${Math.round((vertical ? 26 : 20) * u)},&H00FFFFFF,&H00FFFFFF,&H64000000,&H64000000,-1,0,0,0,100,100,0,0,3,${Math.round(5 * u)},0,3,0,0,0,1
+Style: Bar,Inter,10,&H003C3CFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+  const ev = [];
+  const blur = `\\blur${Math.round(7 * u)}`;
+  const pop = `\\fad(90,140)\\fscx114\\fscy114\\t(0,170,\\fscx100\\fscy100)${blur}`;
+  // The words as heard (from a presenter video) or spread over the voice.
+  const ws = timed && timed.length ? timed.filter((w) => w.end > 0 && w.start < len) : say && voiceEnd > voiceStart ? timeWords(say, voiceStart, voiceEnd) : [];
+  const sizeFor = (text, room) => Math.round(Math.min(bigBase, room / Math.max(1, text.length * 0.55)));
+
+  if (endCard) {
+    if (headline) {
+      const y = H * (low ? (vertical ? 0.7 : 0.66) : 0.48);
+      const text = headline.toLowerCase();
+      ev.push(`Dialogue: 1,${assTime(0.05)},${assTime(len)},Big,,0,0,0,,{\\pos(${Math.round(W / 2)},${Math.round(y)})\\fs${sizeFor(text, W * 0.86)}${pop}}${assText(text)}`);
+      if (website) ev.push(`Dialogue: 1,${assTime(0.3)},${assTime(len)},Word,,0,0,0,,{\\pos(${Math.round(W / 2)},${Math.round(y + bigBase * 0.95)})\\fad(200,0)${blur}}${assText(site(website))}`);
+    }
+    return head + ev.join('\n') + '\n';
+  }
+
+  // The white step card (first `card` seconds): title, "Step 1 of 3" and a red progress bar.
+  if (card && cardBox && step) {
+    const { x, y, w, h } = cardBox;
+    const t1 = assTime(card - 0.05);
+    ev.push(`Dialogue: 2,${assTime(0)},${t1},CardTitle,,0,0,0,,{\\pos(${Math.round(x)},${Math.round(y + h + 22 * u)})}${assText((step.title || headline || '').toUpperCase())}`);
+    ev.push(`Dialogue: 2,${assTime(0)},${t1},CardSub,,0,0,0,,{\\pos(${Math.round(x)},${Math.round(y + h + 22 * u + (vertical ? 56 : 42) * u)})}${assText(`Step ${step.n}${steps > 1 ? ` of ${steps}` : ''}${label ? ` · ${label}` : ''}`)}`);
+    ev.push(`Dialogue: 2,${assTime(0)},${t1},Badge,,0,0,0,,{\\pos(${Math.round(x + w - 12 * u)},${Math.round(y + h - 12 * u)})}${two(step.n)}`);
+    const bh = Math.max(4, Math.round(7 * u));
+    ev.push(`Dialogue: 3,${assTime(0)},${t1},Bar,,0,0,0,,{\\pos(${Math.round(x)},${Math.round(y + h - bh)})\\fscx0\\t(0,${Math.round(card * 1000)},\\fscx38)\\p1}m 0 0 l ${Math.round(w)} 0 ${Math.round(w)} ${bh} 0 ${bh}{\\p0}`);
+  }
+  const from = card || 0;
+  // A small label in the corner of a step's close-up.
+  if (step && !presenterScene && (label || step.title)) {
+    ev.push(`Dialogue: 1,${assTime(from + 0.1)},${assTime(len)},Small,,0,0,0,,{\\pos(${Math.round(W * 0.04)},${Math.round(H * 0.035)})\\fad(200,0)}${assText(`${(step.title || headline).toLowerCase()} · step ${two(step.n)}`)}`);
+  }
+  // On the presenter, a step number pops in first ("01"), then the big words.
+  let bigFrom = from + 0.08;
+  if (step && presenterScene) {
+    ev.push(`Dialogue: 2,${assTime(from + 0.05)},${assTime(from + 1.25)},Big,,0,0,0,,{\\pos(${Math.round(W / 2)},${Math.round(H * (vertical ? 0.47 : 0.5))})\\fs${Math.round(bigBase * 1.5)}\\fad(80,160)\\fscx150\\fscy150\\t(0,200,\\fscx100\\fscy100)${blur}}${two(step.n)}`);
+    bigFrom = from + 1.25;
+  }
+  // Big words beside the presenter: the headline split in two, each half appearing as it is said.
+  const phrase = words(String((step && step.title) || headline || '').toLowerCase().replace(/^\d+[.)]\s*/, '').replace(/[….,!?;:]+$/, '')).slice(0, 4);
+  while (phrase.length > 1 && /^(a|an|the|to|at|of|and|or|for|in|on|with|is|are|your|our)$/.test(phrase[phrase.length - 1])) phrase.pop();
+  if (phrase.length && (presenterScene || !step)) {
+    const until = Math.min(len, Math.max(bigFrom + 1.8, voiceStart + (voiceEnd - voiceStart) * 0.65));
+    const k = phrase.length === 1 ? 1 : Math.max(1, Math.floor(phrase.length / 2));
+    const left = phrase.slice(0, k).join(' '), right = phrase.slice(k).join(' ');
+    const heardAt = (w) => { const f = ws.find((x) => x.start >= bigFrom - 0.2 && creatorWord(x.text) === creatorWord(w)); return f ? f.start : null; };
+    const t2 = right ? Math.max(bigFrom + 0.35, Math.min(until - 0.6, heardAt(phrase[k]) ?? bigFrom + 0.5)) : null;
+    if (wide) {
+      ev.push(`Dialogue: 1,${assTime(bigFrom)},${assTime(until)},Big,,0,0,0,,{\\an5\\pos(${Math.round(W * 0.18)},${Math.round(H * 0.25)})\\fs${sizeFor(left, W * 0.34)}${pop}}${assText(left)}`);
+      if (right) ev.push(`Dialogue: 1,${assTime(t2)},${assTime(until)},Big,,0,0,0,,{\\an5\\pos(${Math.round(W * 0.8)},${Math.round(H * 0.25)})\\fs${sizeFor(right, W * 0.34)}${pop}}${assText(right)}`);
+    } else if (!right) {
+      ev.push(`Dialogue: 1,${assTime(bigFrom)},${assTime(until)},Big,,0,0,0,,{\\an5\\pos(${Math.round(W / 2)},${Math.round(H * 0.45)})\\fs${sizeFor(left, W * 0.86)}${pop}}${assText(left)}`);
+    } else {
+      const sl = sizeFor(left, W * 0.62), sr = sizeFor(right, W * 0.62);
+      const y = H * (vertical ? 0.43 : 0.42);
+      ev.push(`Dialogue: 1,${assTime(bigFrom)},${assTime(until)},Big,,0,0,0,,{\\an4\\pos(${Math.round(W * 0.06)},${Math.round(y)})\\fs${sl}${pop}}${assText(left)}`);
+      ev.push(`Dialogue: 1,${assTime(t2)},${assTime(until)},Big,,0,0,0,,{\\an6\\pos(${Math.round(W * 0.94)},${Math.round(y + Math.max(sl, sr) * 1.05)})\\fs${sr}${pop}}${assText(right)}`);
+    }
+  }
+  // One spoken word at a time, small and lowercase, near the bottom.
+  if (captions) {
+    const y = Math.round(H * (vertical ? 0.8 : 0.88));
+    ws.forEach((w, i) => {
+      const a = Math.max(from, w.start);
+      const b = Math.min(len, i + 1 < ws.length ? Math.min(ws[i + 1].start, w.end + 0.5) : w.end + 0.4);
+      const text = creatorWord(w.text);
+      if (!text || b - a < 0.04) return;
+      ev.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Word,,0,0,0,,{\\pos(${Math.round(W / 2)},${y})${blur}}${text}`);
+    });
+  }
+  return head + ev.join('\n') + '\n';
+}
+
 // One scene's on-screen words as an .ass subtitle file: a big headline (in the brand colour) and
 // captions that follow the voice.
-function buildSceneAss({ W, H, look = 'bold', color = '#FFD60A', headline = '', say = '', voiceStart = 0, voiceEnd = 0, len, endCard = false, website = '', captions = true, timed = null, low = false }) {
+function buildSceneAss(o) {
+  if (o.look === 'creator') return buildCreatorAss(o);
+  return buildClassicAss(o);
+}
+function buildClassicAss({ W, H, look = 'bold', color = '#FFD60A', headline = '', say = '', voiceStart = 0, voiceEnd = 0, len, endCard = false, website = '', captions = true, timed = null, low = false }) {
   const u = Math.min(W, H) / 1080;
   const vertical = H / W > 1.3;
   const wide = W / H > 1.3;
@@ -420,11 +542,15 @@ function visualFilter({ W, H, media, framing, look, n, len, color }) {
     }
     f += ',';
   }
-  const grade = look === 'cinematic' ? 'eq=contrast=1.08:saturation=0.88,vignette=PI/4.5,' : look === 'bold' && media ? 'eq=saturation=1.12:contrast=1.04,' : '';
+  // Creator look: every other video scene is a closer "punch-in", like a jump cut.
+  if (look === 'creator' && media?.kind === 'video' && n % 2 === 1) f += `scale=${even(W * 1.12)}:${even(H * 1.12)},crop=${W}:${H}:(iw-ow)/2:(ih-oh)*0.3,`;
+  const grade = look === 'cinematic' ? 'eq=contrast=1.08:saturation=0.88,vignette=PI/4.5,'
+    : look === 'creator' ? (media ? 'eq=contrast=1.05:saturation=1.04,colorbalance=rs=0.03:gs=0.01:bs=-0.03:rm=0.02:bm=-0.02,vignette=PI/5,' : '')
+    : look === 'bold' && media ? 'eq=saturation=1.12:contrast=1.04,' : '';
   return `${f}${grade}setsar=1,fps=30,format=yuv420p`;
 }
 
-async function renderScene({ ad, brand, scene, n, total, fmt, work, voiceFile, voiceLen }) {
+async function renderScene({ ad, brand, scene, n, total, fmt, work, voiceFile, voiceLen, step = null, steps = 0 }) {
   const { w: W, h: H } = FORMATS[fmt];
   const look = ad.look;
   const color = brand?.color || '#FFD60A';
@@ -466,6 +592,19 @@ async function renderScene({ ad, brand, scene, n, total, fmt, work, voiceFile, v
   if (logo) inputs.push('-i', logo);
 
   let filter = visualFilter({ W, H, media, framing: scene.framing, look, n, len, color });
+  // Creator look: a step's close-up opens on a white card that zooms into it.
+  const presenterScene = Boolean(media && (media.presenter || useVideoSound));
+  const card = look === 'creator' && step && media && !presenterScene && len >= 2.6 ? 1.1 : 0;
+  let cardBox = null;
+  if (card) {
+    const vertical = H / W > 1.3;
+    const cw = even(W * (vertical ? 0.84 : 0.56)), ch = even(cw * 9 / 16);
+    cardBox = { x: Math.round((W - cw) / 2), y: Math.round(H * (vertical ? 0.36 : 0.3)), w: cw, h: ch };
+    const x0 = (card - 0.3).toFixed(2);
+    filter += `[vm];[vm]split=2[vA][vB];[vB]trim=0:${card},setpts=PTS-STARTPTS,scale=${cw}:${ch}:force_original_aspect_ratio=increase,crop=${cw}:${ch}[ci];`
+      + `color=c=0xF7F7F5:s=${W}x${H}:r=30:d=${card},format=yuv420p,setsar=1[cb];[cb][ci]overlay=${cardBox.x}:${cardBox.y}:shortest=1,fps=30,settb=1/30,format=yuv420p,setsar=1[cd];`
+      + `[vA]trim=start=${x0},setpts=PTS-STARTPTS,fps=30,settb=1/30[vr];[cd][vr]xfade=transition=zoomin:duration=0.3:offset=${x0},format=yuv420p`;
+  }
   // On the end card the background is darkened so the call to action stands out. A talking
   // presenter stays sharp (the words go lower down instead, below the face).
   if (scene.endCard && media) filter += useVideoSound ? ',eq=brightness=-0.06' : ',boxblur=18:2,eq=brightness=-0.18';
@@ -482,6 +621,7 @@ async function renderScene({ ad, brand, scene, n, total, fmt, work, voiceFile, v
     W, H, look, color, headline: scene.headline, say: scene.say, voiceStart, voiceEnd, len,
     endCard: scene.endCard, website: brand?.website || ad.detailsObj.website, captions: ad.captions !== false,
     timed: useVideoSound && Array.isArray(scene.words) ? scene.words : null, low: useVideoSound,
+    step, steps, card, cardBox, presenterScene, label: brand?.name || ad.detailsObj.name || '',
   });
   const assFile = `s${n}-${fmt}.ass`;
   fs.writeFileSync(path.join(work, assFile), ass);
@@ -537,13 +677,17 @@ async function renderAd(ad, step) {
     // 2. Each shape: every scene, then joined, then the sound is evened out (and music added).
     const outputs = {};
     const old = JSON.parse(ad.outputs || '{}');
+    // Creator look: which scenes are numbered steps (01, 02, 03…).
+    const stepInfo = ad.look === 'creator' ? scenes.map(stepOf) : scenes.map(() => null);
+    const steps = stepInfo.filter(Boolean).length;
+    if (steps < 2) stepInfo.fill(null);
     const totalSteps = formats.length * (scenes.length + 1);
     let done = 0;
     for (const fmt of formats) {
       const parts = [];
       for (let i = 0; i < scenes.length; i++) {
         step(`Making the ${FORMATS[fmt].label.toLowerCase()} version · scene ${i + 1} of ${scenes.length}…`, 15 + Math.round((done / totalSteps) * 83));
-        const r = await renderScene({ ad, brand, scene: scenes[i], n: i, total: scenes.length, fmt, work, voiceFile: voices[i].file, voiceLen: voices[i].len });
+        const r = await renderScene({ ad, brand, scene: scenes[i], n: i, total: scenes.length, fmt, work, voiceFile: voices[i].file, voiceLen: voices[i].len, step: stepInfo[i], steps });
         if (r.note) notes.add(r.note);
         parts.push(r);
         done++;
@@ -1152,4 +1296,4 @@ function copyAdToMedia(ref) {
   return name;
 }
 
-module.exports = { router, serveAdFile, serveLibFile, copyAdToMedia, start, work, writeScript, splitScript, writeCaption, buildSceneAss, timeWords, alignPresenter, FORMATS };
+module.exports = { router, serveAdFile, serveLibFile, copyAdToMedia, start, work, writeScript, splitScript, writeCaption, buildSceneAss, timeWords, alignPresenter, stepOf, FORMATS };

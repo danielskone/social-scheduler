@@ -235,3 +235,41 @@ test('timed caption words are used when given', () => {
   const caps = ass.split('\n').filter((l) => l.includes(',Cap,'));
   assert.match(caps[0], /^Dialogue: 0,0:00:01\.20/);
 });
+
+test('creator look: numbered steps, big words beside the presenter, one word at a time', () => {
+  assert.deepEqual(ads.stepOf({ headline: '2. Free for the family', say: 'Two: Free for the whole family.' }), { n: 2, title: 'Free for the family' });
+  assert.equal(ads.stepOf({ say: 'First, clean the lens.' }).n, 1);
+  assert.equal(ads.stepOf({ say: 'One day you will see it.' }), null);
+  assert.equal(ads.stepOf({ say: '3 reasons to come.' }), null);
+  const ass = ads.buildSceneAss({ W: 1080, H: 1920, look: 'creator', headline: 'Blame your phone', say: 'Stop blaming your phone today.', voiceStart: 0.15, voiceEnd: 2.5, len: 3, presenterScene: true });
+  assert.match(ass, /Style: Big,Inter,/);
+  assert.match(ass, /\\an4[^}]*}blame/);
+  assert.match(ass, /\\an6[^}]*}your phone/);
+  const caps = ass.split('\n').filter((l) => l.includes(',Word,'));
+  assert.equal(caps.length, 5);
+  assert.ok(caps.every((l) => /}[a-z]+$/.test(l)), 'one lowercase word each');
+  // A step's close-up opens on a white card with its title and a progress bar.
+  const card = ads.buildSceneAss({ W: 1080, H: 1920, look: 'creator', headline: '1. Clean the lens', say: 'One: clean the lens.', voiceStart: 0.15, voiceEnd: 2, len: 3,
+    step: { n: 1, title: 'Clean the lens' }, steps: 3, card: 1.1, cardBox: { x: 86, y: 690, w: 908, h: 510 }, label: 'Parade' });
+  assert.match(card, /CardTitle,,0,0,0,,{[^}]*}CLEAN THE LENS/);
+  assert.match(card, /Step 1 of 3 · Parade/);
+  assert.match(card, /\\p1}m 0 0 l 908 0/);
+  assert.match(card, /clean the lens · step 01/);
+});
+
+test('a creator-look ad renders with step cards', { timeout: 240000 }, async () => {
+  const mk = (c) => { const f = path.join(dir, `c-${c}.png`); execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', `color=c=${c}:s=800x1000`, '-frames:v', '1', f]); return f; };
+  const fd = new FormData();
+  for (const c of ['red', 'green', 'blue']) fd.append('files', new Blob([fs.readFileSync(mk(c))], { type: 'image/png' }), `${c}.png`);
+  const media = await (await fetch(`${root}/api/ads/media`, { method: 'POST', body: fd })).json();
+  let ad = await (await fetch(`${root}/api/ads`, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ details, recipe: 'reasons', length: 30, look: 'creator', formats: ['9x16'], media: media.map((m) => m.file) }) })).json();
+  assert.equal(ad.look, 'creator');
+  await fetch(`${root}/api/ads/${ad.id}/render`, { method: 'POST' });
+  for (let i = 0; i < 200 && !['ready', 'failed'].includes(ad.status); i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    ad = await (await fetch(`${root}/api/ads/${ad.id}`)).json();
+  }
+  assert.equal(ad.status, 'ready', ad.error || '');
+  assert.ok(ad.outputs['9x16'].duration > 5);
+});

@@ -15,8 +15,8 @@ const AI = {
   img: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="m4 17 5-4.5 4 3.5 3-2.5 4 3.5"/></svg>',
   speaker: '<svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
 };
-const LOOK_NAMES = { bold: 'Bold', clean: 'Clean', cinematic: 'Cinematic' };
-const LOOK_INFO = { bold: 'Big words, brand colour, punchy', clean: 'Simple white captions', cinematic: 'Moody, soft, story feel' };
+const LOOK_NAMES = { bold: 'Bold', clean: 'Clean', cinematic: 'Cinematic', creator: 'Creator' };
+const LOOK_INFO = { bold: 'Big words, brand colour, punchy', clean: 'Simple white captions', cinematic: 'Moody, soft, story feel', creator: 'Big words beside you, step cards, one word at a time' };
 const PACE_NAMES = { calm: 'Calm', normal: 'Normal', fast: 'Fast' };
 const FORMAT_SHORT = { '9x16': '9:16', '4x5': '4:5', '1x1': '1:1', '16x9': '16:9' };
 
@@ -673,10 +673,16 @@ const AI_SITES = [
   { name: 'Dreamina', url: 'https://dreamina.capcut.com/ai-tool/video/generate', note: 'Seedance · free credits every day' },
   { name: 'Meta AI', url: 'https://www.meta.ai/', note: 'Free · ask it to "make a video of…"' },
 ];
+// What to ask an AI site for so the presenter moves like a real creator, not just the mouth.
+const GESTURE_PROMPT = 'Talks straight to the camera like a friendly content creator. Natural hand gestures that match the words: '
+  + 'open palms, counting on fingers for each point, pointing at the camera on the call to action, holding up and showing the product. '
+  + 'Expressive face: raises eyebrows on surprising parts, warm smiles, small nods, leans in a little on key points, relaxed shoulders, slight body sway. '
+  + 'Face stays clearly visible and in focus the whole time. Steady camera, warm indoor light.';
 const LOOK_PROMPT = {
   bold: 'bright, colorful and energetic, punchy commercial style',
   clean: 'clean, bright and natural, simple modern commercial style',
   cinematic: 'cinematic, warm moody lighting, shallow depth of field, film look',
+  creator: 'natural content-creator style, warm indoor light, real hands in close-up using the product, shallow depth of field, handheld feel',
 };
 function aiPrompt(scene) {
   const a = AS.ad;
@@ -751,6 +757,7 @@ function openPresenter() {
       <li>Open a site below, add the photo, and <b>upload the voiceover as the audio</b> (don't type the script or pick their voice). The mouth then moves to this exact voice, so it lines up with your captions.</li>
       <li>Download it and press <b>Add a presenter video</b>. Each scene gets its part, with your captions, logo and end card on top.</li></ol>
       <div class="ad-ai-sites">${TALK_SITES.map((x) => `<a class="btn ghost" href="${esc(x.url)}" target="_blank" rel="noopener"><b>Open ${esc(x.name)}</b><small>${esc(x.note)}</small></a>`).join('')}</div>
+      <p class="muted clip-fine">For hand gestures and facial expressions like a real creator: if the site has a box for a prompt, movement or actions, <button type="button" class="linkbtn" data-gesture-copy>copy the gestures prompt</button> and paste it there.</p>
       </details>
       <p class="muted clip-fine">Or just <button type="button" class="linkbtn" data-presenter-photo>show ${esc(p.presenter)}'s photo</button> at the start and end of the ad, with your Mac voice.</p>` : ''}
     <details class="ad-presenter-hp"${p ? '' : ' open'}><summary><b>Or use a HumanPal presenter</b></summary>
@@ -785,6 +792,12 @@ $('#ads-dialog').addEventListener('click', async (e) => {
     const script = $('#ad-presenter-script').value;
     openPresenter();
     $('#ad-presenter-script').value = script;
+    return;
+  }
+  if (e.target.closest('[data-gesture-copy]')) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(GESTURE_PROMPT); ok = true; } catch {}
+    $('#ad-ai-msg').textContent = ok ? 'Gestures prompt copied. Paste it into the site.' : GESTURE_PROMPT;
     return;
   }
   if (e.target.closest('[data-talk-here]')) { const p = chosenPresenter(); if (p) talkHere(p); return; }
