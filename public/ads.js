@@ -44,6 +44,7 @@ async function renderAds(sub) {
   if (AS.sub === 'brands') { body.innerHTML = brandsPage(); return; }
   if (AS.sub === 'products') { body.innerHTML = productsPage(); return; }
   if (AS.sub === 'media') { body.innerHTML = mediaPage(); return; }
+  if (AS.sub === 'presenters') { body.innerHTML = presentersPage(); return; }
   AS.ads = await api('/ads');
   body.innerHTML = createPage();
   drawPicked();
@@ -205,7 +206,8 @@ function drawEditor() {
         <div class="panel">
           <div class="panel-head"><h2>Script</h2>
             <div class="row"><select id="ad-recipe" aria-label="Style">${Object.entries(AS.opts.recipes).filter(([k]) => k !== 'script').map(([k, v]) => opt(k, v, a.recipe)).join('')}</select>
-            <button type="button" class="btn ghost" data-ad-rewrite>${AI.redo}Write it again</button></div></div>
+            <button type="button" class="btn ghost" data-ad-rewrite>${AI.redo}Write it again</button>
+            <button type="button" class="ad-ai-btn" data-ad-presenter>${AI.spark}AI presenter</button></div></div>
           <p class="muted ad-help">Each scene is one picture or video with a few big words on screen, while the voice says the line. Change anything you like.</p>
           <div id="ad-scenes"></div>
           <button type="button" class="btn ghost" data-scene-add>${AI.plus}Add a scene</button>
@@ -353,10 +355,24 @@ function mediaPage() {
   return `<div class="ads-lib-head row"><p class="muted grow">Everything you've added to the studio: photos, videos, logos and music.</p>
     <label class="btn primary">${AI.plus}Add files<input type="file" id="ads-lib-file" accept="image/*,video/*,audio/*" multiple hidden></label></div>
     <p id="ads-lib-msg" class="clip-msg"></p>
-    ${AS.media.length ? `<div class="ads-media-grid">${AS.media.map((m) => `<div class="ads-media-item">${m.kind === 'audio' ? `<span class="ad-thumb">${AI.speaker}</span>` : adThumb(m)}
+    ${AS.media.some((m) => !m.presenter) ? `<div class="ads-media-grid">${AS.media.filter((m) => !m.presenter).map((m) => `<div class="ads-media-item">${m.kind === 'audio' ? `<span class="ad-thumb">${AI.speaker}</span>` : adThumb(m)}
       <small title="${esc(m.name || '')}">${esc(m.name || m.file)}</small>
       <button type="button" class="iconbtn danger" data-media-del="${m.id}" aria-label="Delete">${AI.trash}</button></div>`).join('')}</div>`
     : `<div class="empty-clips"><span>${AI.img}</span><b>Nothing here yet</b><p class="muted">Add photos and videos of your business, products or events.</p></div>`}`;
+}
+
+// Presenters: photos of people for talking-head ads (made to talk with a free AI site, or shown as a photo).
+const presenters = () => AS.media.filter((m) => m.presenter).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
+function presentersPage() {
+  const list = presenters();
+  return `<div class="ads-lib-head row"><p class="muted grow">People to put in your ads. Pick one in an ad with <b>AI presenter</b>. Add several photos at once; a photo called <i>17_Malik.png</i> is named Malik.</p>
+    <label class="btn primary">${AI.plus}Add presenters<input type="file" id="ads-presenter-file" accept="image/*" multiple hidden></label></div>
+    <p id="ads-lib-msg" class="clip-msg"></p>
+    ${list.length ? `<div class="ads-presenters">${list.map((m) => `<div class="ads-presenter">
+      <img src="${esc(m.url)}" alt="" loading="lazy">
+      <input value="${esc(m.presenter)}" data-presenter-name="${m.id}" aria-label="Name" maxlength="40">
+      <button type="button" class="iconbtn danger" data-media-del="${m.id}" aria-label="Delete">${AI.trash}</button></div>`).join('')}</div>`
+    : `<div class="empty-clips"><span>${AI.img}</span><b>No presenters yet</b><p class="muted">Add photos of the people you want in your ads. Use only photos you have the rights to.</p></div>`}`;
 }
 
 // ---------- Events ----------
@@ -419,6 +435,22 @@ adsBody.addEventListener('change', async (e) => {
       p.photos.forEach((ph) => { if (!AS.picked.includes(ph)) AS.picked.push(ph); });
       drawPicked();
     }
+    return;
+  }
+  if (t.id === 'ads-presenter-file') {
+    const msg = $('#ads-lib-msg');
+    const fd = new FormData(); [...t.files].forEach((f) => fd.append('files', f));
+    msg.textContent = `Adding ${t.files.length} presenter${t.files.length === 1 ? '' : 's'}…`;
+    try { const added = await api('/ads/presenters', { method: 'POST', body: fd }); AS.media = [...added, ...AS.media]; $('#ads-body').innerHTML = presentersPage(); }
+    catch (err) { msg.textContent = err.message; }
+    return;
+  }
+  if (t.dataset.presenterName) {
+    try {
+      const m = await api(`/ads/presenters/${t.dataset.presenterName}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: t.value }) });
+      const x = AS.media.find((y) => y.id === m.id); if (x) x.presenter = m.presenter;
+      t.value = m.presenter;
+    } catch (err) { banner(err.message, true); }
     return;
   }
   if (t.id === 'ads-lib-file') { await uploadAdMedia(t.files, $('#ads-lib-msg')); $('#ads-body').innerHTML = mediaPage(); return; }
@@ -501,7 +533,7 @@ adsBody.addEventListener('click', async (e) => {
     if (!confirm('Delete this file from the studio? Ads already made keep their copy.')) return;
     await api(`/ads/media/${t.dataset.mediaDel}`, { method: 'DELETE' });
     AS.media = AS.media.filter((m) => String(m.id) !== t.dataset.mediaDel);
-    $('#ads-body').innerHTML = mediaPage(); return;
+    $('#ads-body').innerHTML = AS.sub === 'presenters' ? presentersPage() : mediaPage(); return;
   }
   if (t.dataset.brandDel) { if (confirm('Delete this brand?')) { await api(`/ads/brands/${t.dataset.brandDel}`, { method: 'DELETE' }); renderAds('brands'); } return; }
   if (t.dataset.productDel) { if (confirm('Delete this product?')) { await api(`/ads/products/${t.dataset.productDel}`, { method: 'DELETE' }); renderAds('products'); } return; }
@@ -553,6 +585,7 @@ adsBody.addEventListener('click', async (e) => {
   if (t.dataset.sceneUp) return move(Number(t.dataset.sceneUp), Number(t.dataset.sceneUp) - 1);
   if (t.dataset.sceneDown) return move(Number(t.dataset.sceneDown), Number(t.dataset.sceneDown) + 1);
   if (t.dataset.sceneAi) return openAiScene(Number(t.dataset.sceneAi));
+  if (t.hasAttribute('data-ad-presenter')) { await saveAdSoon({}, true); return openPresenter(); }
   if (t.dataset.sceneDel) { a.scenes.splice(Number(t.dataset.sceneDel), 1); drawScenes(); saveScenes(); return; }
   if (t.dataset.adUnmedia) {
     const files = a.media.map((m) => m.file).filter((f) => f !== t.dataset.adUnmedia);
@@ -626,6 +659,119 @@ $('#ads-dialog').addEventListener('change', async (e) => {
   if (await putClipInScene(i, e.target.files)) $('#ads-dialog').close();
   else $('#ad-ai-msg').textContent = 'That file could not be added. Use an MP4 or MOV video.';
 });
+
+// ---------- AI presenter (HumanPal) ----------
+// HumanPal has no API: the whole script is copied, HumanPal opens, and the finished presenter
+// video comes back here. It is then cut into the scenes (by how many words each scene has), using
+// the presenter's own voice, with the headlines, captions, logo and end card on top.
+const presenterScript = () => AS.ad.scenes.map((s) => (s.say || '').trim()).filter(Boolean).join('\n\n');
+const TALK_SITES = [
+  { name: 'Dreamina AI Avatar', url: 'https://dreamina.capcut.com/ai-tool/home', note: 'Free daily credits · photo + voice → talking video' },
+  { name: 'Hedra', url: 'https://www.hedra.com/app/characters', note: 'Free plan · photo + voice → talking video' },
+];
+const presenterKey = () => `adPresenter:${AS.ad?.id}`;
+function chosenPresenter() {
+  let f = null; try { f = localStorage.getItem(presenterKey()); } catch {}
+  return presenters().find((m) => m.file === f) || null;
+}
+function openPresenter() {
+  const dlg = $('#ads-dialog');
+  const list = presenters();
+  const p = chosenPresenter();
+  dlg.innerHTML = `<form method="dialog" class="ad-ai">
+    <h2>${AI.spark}AI presenter for this ad</h2>
+    ${list.length ? `<div class="field"><span>Pick your presenter</span><div class="ad-presenter-pick">${list.map((m) => `<button type="button" class="${p?.file === m.file ? 'on' : ''}" data-presenter-pick="${esc(m.file)}" title="${esc(m.presenter)}"><img src="${esc(m.url)}" alt="" loading="lazy"><small>${esc(m.presenter)}</small></button>`).join('')}</div></div>`
+      : `<p class="muted">Add photos of people in the <a href="#ads/presenters">Presenters</a> tab to pick one here, or use a HumanPal presenter.</p>`}
+    ${p ? `<div class="ad-presenter-how"><b>Make ${esc(p.presenter)} talk (free)</b>
+      <ol class="ad-ai-steps"><li>Save ${esc(p.presenter)}'s photo and the voiceover: <a class="btn ghost sm" href="${esc(p.url)}" download="${esc(p.presenter)}.png">${AI.save}Photo</a> <a class="btn ghost sm" href="/api/ads/${AS.ad.id}/voiceover">${AI.save}Voiceover</a></li>
+      <li>Open a site below, add the photo and the voiceover, and make the video (vertical if it asks).</li>
+      <li>Download it and press <b>Add the presenter video</b>. Each scene gets its part, with your captions, logo and end card on top.</li></ol>
+      <div class="ad-ai-sites">${TALK_SITES.map((x) => `<a class="btn ghost" href="${esc(x.url)}" target="_blank" rel="noopener"><b>Open ${esc(x.name)}</b><small>${esc(x.note)}</small></a>`).join('')}</div>
+      <p class="muted clip-fine">No AI? <button type="button" class="linkbtn" data-presenter-photo>Show ${esc(p.presenter)}'s photo</button> at the start and end of the ad, with your Mac voice.</p></div>` : ''}
+    <details class="ad-presenter-hp"${p ? '' : ' open'}><summary><b>Or use a HumanPal presenter</b></summary>
+    <ol class="ad-ai-steps"><li>Click <b>Copy script & open HumanPal</b>.</li><li>In HumanPal pick a presenter and voice, paste the script, choose <b>vertical 9:16</b>, and make the video.</li><li>Download it and add it here.</li></ol>
+    <div class="ad-ai-sites"><button type="button" class="btn ghost" data-presenter-open="https://app.humanpal.io/dashboard"><b>Copy script & open HumanPal</b><small>Your account · AI presenters · 1 minute per video on the Commercial plan</small></button></div></details>
+    <label class="field"><span>Script <small>(one paragraph per scene)</small></span><textarea id="ad-presenter-script" rows="6">${esc(presenterScript())}</textarea></label>
+    <p id="ad-ai-msg" class="clip-msg"></p>
+    <div class="row"><label class="btn primary">${AI.plus}Add the presenter video<input type="file" id="ad-presenter-file" accept="video/*" hidden></label><button class="btn ghost" value="close">Close</button></div>
+    <p class="muted clip-fine">Change the script here first if you like, before you copy it or save the voiceover. Keep the paragraphs in the same order as the scenes.</p>
+  </form>`;
+  if (!dlg.open) dlg.showModal();
+}
+// The photo, with the Mac voice, in the first scene and the last talking scene (no AI needed).
+async function presenterPhoto(p) {
+  const a = AS.ad;
+  const talking = a.scenes.map((s, i) => (!s.endCard && (s.say || '').trim() ? i : -1)).filter((i) => i >= 0);
+  [...new Set([talking[0], talking[talking.length - 1]])].filter((i) => i !== undefined).forEach((i) => Object.assign(a.scenes[i], { media: p.file, sound: 'voice', framing: 'auto', start: 0 }));
+  await saveAdSoon({ media: [...new Set([...a.media.map((x) => x.file), p.file])], scenes: a.scenes }, true);
+  $('#ads-dialog').close();
+  drawEditor();
+  banner(`${p.presenter} added. Press Make my video.`);
+  setTimeout(() => banner(''), 3000);
+}
+$('#ads-dialog').addEventListener('click', async (e) => {
+  const pick = e.target.closest('[data-presenter-pick]');
+  if (pick) {
+    try { localStorage.setItem(presenterKey(), pick.dataset.presenterPick); } catch {}
+    const script = $('#ad-presenter-script').value;
+    openPresenter();
+    $('#ad-presenter-script').value = script;
+    return;
+  }
+  if (e.target.closest('[data-presenter-photo]')) { const p = chosenPresenter(); if (p) presenterPhoto(p); return; }
+  if (e.target.closest('a[href$="/voiceover"]')) {
+    // Save script edits first so the voiceover says them.
+    e.preventDefault();
+    const a = AS.ad;
+    const parts = $('#ad-presenter-script').value.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+    const spoken = a.scenes.filter((s) => (s.say || '').trim());
+    if (parts.length === spoken.length) { spoken.forEach((s, k) => { s.say = parts[k]; }); await saveAdSoon({ scenes: a.scenes }, true); }
+    $('#ad-ai-msg').textContent = 'Making the voiceover…';
+    location.href = `/api/ads/${a.id}/voiceover`;
+    setTimeout(() => { $('#ad-ai-msg').textContent = 'Voiceover saved to your Downloads.'; }, 2500);
+  }
+});
+$('#ads-dialog').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-presenter-open]');
+  if (!b) return;
+  const text = $('#ad-presenter-script').value;
+  let copied = false;
+  try { await navigator.clipboard.writeText(text); copied = true; } catch {
+    const t = $('#ad-presenter-script'); t.select(); try { copied = document.execCommand('copy'); } catch {}
+  }
+  window.open(b.dataset.presenterOpen, '_blank', 'noopener');
+  $('#ad-ai-msg').textContent = copied ? 'Script copied. Paste it into HumanPal.' : 'Copy the script above, then paste it into HumanPal.';
+});
+$('#ads-dialog').addEventListener('change', async (e) => {
+  if (e.target.id !== 'ad-presenter-file') return;
+  const msg = $('#ad-ai-msg');
+  msg.textContent = 'Adding the presenter video…';
+  const [m] = (await uploadAdMedia([...e.target.files].slice(0, 1), null)).filter((x) => x.kind === 'video');
+  if (!m || !m.duration) { msg.textContent = 'That file could not be added. Use an MP4 or MOV video.'; return; }
+  // If the script was changed here, those words become the scenes' words.
+  const parts = $('#ad-presenter-script').value.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+  const a = AS.ad;
+  const spoken = a.scenes.filter((s) => (s.say || '').trim());
+  if (parts.length === spoken.length) spoken.forEach((s, k) => { s.say = parts[k]; });
+  splitPresenter(a.scenes, m);
+  await saveAdSoon({ media: [...a.media.map((x) => x.file), m.file], scenes: a.scenes }, true);
+  $('#ads-dialog').close();
+  drawEditor();
+  banner('Presenter added to every scene. Press Make my video.');
+  setTimeout(() => banner(''), 3000);
+});
+// Each scene gets a stretch of the presenter video sized by how many words it has.
+function splitPresenter(scenes, m) {
+  const weight = (s) => Math.max(1, (s.say || '').split(/\s+/).filter(Boolean).length);
+  const total = scenes.reduce((t, s) => t + weight(s), 0);
+  let at = 0;
+  scenes.forEach((s, k) => {
+    const len = k === scenes.length - 1 ? Math.max(1.5, m.duration - at) : (m.duration * weight(s)) / total;
+    Object.assign(s, { media: m.file, sound: 'video', framing: 'auto', start: +at.toFixed(2), seconds: +Math.max(1.5, len).toFixed(2) });
+    at += len;
+  });
+  return scenes;
+}
 
 // A photo or video dropped on a scene (or picked for it) becomes that scene's picture.
 async function putClipInScene(i, files) {
