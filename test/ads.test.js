@@ -207,3 +207,31 @@ test('a talking presenter video stays in sync with its voice after it is cut int
     assert.ok(Math.abs(b - f) < 0.045, `sound is ${Math.round((b - f) * 1000)} ms off the picture at ${f.toFixed(2)}s`);
   }
 });
+
+test('a presenter video is cut where the voice pauses, and captions follow each heard word', () => {
+  // Heard: "Ho ho ho. Santa is here. Wave at me on Main Street. Link in bio." with pauses between sentences.
+  const said = 'Ho ho ho. | Santa is here. | Wave at me on Main Street. | Link in bio.'.split(' | ');
+  const heard = []; let t = 0.3;
+  for (const part of said) { for (const w of part.split(' ')) { heard.push({ text: w, start: +t.toFixed(2), end: +(t + 0.3).toFixed(2) }); t += 0.35; } t += 0.6; }
+  const scenes = [{ say: 'Ho ho ho! Santa is here.' }, { say: 'Wave at me on Main Street.' }, { say: 'Link in bio.', endCard: true }];
+  const out = ads.alignPresenter(scenes, heard, t + 0.4, 'p.mp4');
+  assert.equal(out.length, 3);
+  // Cuts land in the pauses before "Wave" and "Link".
+  const wave = heard.find((w) => w.text === 'Wave'), link = heard.find((w) => w.text === 'Link');
+  assert.ok(out[1].start > heard[heard.indexOf(wave) - 1].end && out[1].start < wave.start, `cut ${out[1].start}`);
+  assert.ok(out[2].start > heard[heard.indexOf(link) - 1].end && out[2].start < link.start);
+  assert.equal(+(out[0].seconds + out[1].seconds + out[2].seconds).toFixed(2), +(t + 0.4).toFixed(2));
+  // Script words (spelled as written) get the heard times, measured from the scene start.
+  assert.equal(out[0].words[0].text, 'Ho');
+  assert.equal(out[1].words[0].text, 'Wave');
+  assert.ok(Math.abs(out[1].words[0].start - (wave.start - out[1].start)) < 0.01);
+  assert.ok(out.every((s) => s.sound === 'video' && s.media === 'p.mp4'));
+  // Too few words to split: give up (the page then splits by word count).
+  assert.equal(ads.alignPresenter(scenes, heard.slice(0, 2), 3, 'p.mp4'), null);
+});
+
+test('timed caption words are used when given', () => {
+  const ass = ads.buildSceneAss({ W: 1080, H: 1920, look: 'clean', say: 'Hello there friend', len: 3, timed: [{ text: 'Hello', start: 1.2, end: 1.5 }, { text: 'there', start: 1.5, end: 1.8 }, { text: 'friend', start: 2.1, end: 2.5 }] });
+  const caps = ass.split('\n').filter((l) => l.includes(',Cap,'));
+  assert.match(caps[0], /^Dialogue: 0,0:00:01\.20/);
+});

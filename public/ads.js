@@ -520,6 +520,8 @@ adsBody.addEventListener('change', async (e) => {
     const s = a.scenes[Number(scene.dataset.i)];
     const k = t.dataset.k;
     s[k] = k === 'endCard' ? t.checked : k === 'seconds' ? (Number(t.value) || null) : t.value;
+    // Changed words or timing: the captions go back to following the scene evenly.
+    if (['say', 'seconds', 'media', 'sound'].includes(k)) delete s.words;
     if (k === 'media') { s.media = t.value || null; const m = AS.media.find((x) => x.file === t.value); if (m?.kind !== 'video') s.sound = 'voice'; drawScenes(); }
     if (k === 'sound') drawScenes();
     saveScenes(); return;
@@ -818,11 +820,21 @@ $('#ads-dialog').addEventListener('change', async (e) => {
   const a = AS.ad;
   const spoken = a.scenes.filter((s) => (s.say || '').trim());
   if (parts.length === spoken.length) spoken.forEach((s, k) => { s.say = parts[k]; });
-  splitPresenter(a.scenes, m);
-  await saveAdSoon({ media: [...a.media.map((x) => x.file), m.file], scenes: a.scenes }, true);
+  await saveAdSoon({ scenes: a.scenes }, true);
+  // Listen to the video (free, on this Mac) so each scene and caption word lines up with what is said.
+  msg.textContent = 'Listening to the video so every caption word matches the voice… (the first time also downloads the free speech model, about 200 MB)';
+  let matched = false;
+  try {
+    const r = await api(`/ads/${a.id}/presenter-video`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: m.file }) });
+    a.scenes = r.scenes; a.media = r.media; matched = true;
+  } catch {
+    splitPresenter(a.scenes, m);
+    a.scenes.forEach((s) => delete s.words);
+    await saveAdSoon({ media: [...a.media.map((x) => x.file), m.file], scenes: a.scenes }, true);
+  }
   $('#ads-dialog').close();
   drawEditor();
-  banner('Presenter added to every scene. Press Make my video.');
+  banner(matched ? 'Presenter added. Scenes and captions follow every spoken word. Press Make my video.' : 'Presenter added to every scene. Press Make my video.');
   setTimeout(() => banner(''), 3000);
 });
 // Each scene gets a stretch of the presenter video sized by how many words it has.

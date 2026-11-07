@@ -117,9 +117,8 @@ async function ensureModels(setStep) {
   }
 }
 
-function transcribe(video, onAt) {
+function transcribe(video, onAt = () => {}, out = path.join(path.dirname(video), 'speech.json')) {
   return new Promise((resolve, reject) => {
-    const out = path.join(path.dirname(video), 'speech.json');
     const child = spawn(process.execPath, [path.join(__dirname, 'speech-worker.js'), ffmpegPath(), video, modelDir, out], { stdio: ['ignore', 'pipe', 'pipe'] });
     try { os.setPriority(child.pid, 10); } catch {}
     let err = '';
@@ -605,4 +604,4 @@ function start() {
   work();
 }
 
-module.exports = { router, serveFile, copyClipToMedia, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath };
+module.exports = { router, serveFile, copyClipToMedia, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };
