@@ -138,6 +138,14 @@ test('details -> ad video in two shapes -> scheduled post', { timeout: 240000 },
   assert.match(vo.headers.get('content-disposition'), /voiceover\.m4a/);
   assert.ok((await vo.arrayBuffer()).byteLength > 5000);
 
+  // Presenter first: a new ad with a presenter and no photos shows them in every talking scene.
+  const withP = await (await fetch(`${root}/api/ads`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ details, recipe: 'hook', length: 15, presenter: pr.file }) })).json();
+  assert.equal(withP.presenter.presenter, 'Malik j');
+  assert.ok(withP.scenes.filter((x) => !x.endCard).every((x) => x.media === pr.file));
+  assert.notEqual(withP.scenes[withP.scenes.length - 1].media, pr.file);
+  const cleared = await (await fetch(`${root}/api/ads/${withP.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ presenter: '' }) })).json();
+  assert.equal(cleared.presenter, null);
+
   // Schedule it.
   const out = await (await fetch(`${root}/api/ads/${ad.id}/out/16x9`)).json();
   assert.equal(out.ref, `${ad.id}:16x9`);

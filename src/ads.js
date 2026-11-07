@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS ads (
 `);
 // Presenters are photos of people (in the library) with a name, for talking-head ads.
 try { db.exec('ALTER TABLE ad_media ADD COLUMN presenter TEXT'); } catch {}
+try { db.exec('ALTER TABLE ads ADD COLUMN presenter TEXT'); } catch {}
 
 // ---------- Choices ----------
 const FORMATS = {
@@ -621,6 +622,7 @@ function adOut(a) {
     length: a.length, formats: JSON.parse(a.formats || '[]'), brand_id: a.brand_id, product_id: a.product_id,
     media: JSON.parse(a.media || '[]').map(getMedia).filter(Boolean).map(mediaOut),
     music: a.music ? mediaOut(getMedia(a.music)) : null,
+    presenter: a.presenter ? mediaOut(getMedia(a.presenter)) : null,
     scenes: JSON.parse(a.scenes || '[]'), caption: a.caption,
     status: a.status, step: a.step, progress: a.progress, error: a.error, note: a.note,
     created_at: a.created_at, updated_at: a.updated_at,
@@ -655,6 +657,16 @@ function placeMedia(scenes, media) {
     const m = media.length ? media[isEnd ? 0 : k++ % media.length] : null;
     return { say: s.say, headline: s.headline, media: m?.file || null, sound: 'voice', framing: 'auto', seconds: null, endCard: isEnd };
   });
+}
+
+// The chosen presenter is the face of the ad: in every talking scene when there are no other
+// pictures, otherwise at the start and in the last talking scene (the end card keeps the logo).
+function placePresenter(scenes, presenter, hasMedia) {
+  if (!presenter) return scenes;
+  const talking = scenes.map((s, i) => (!s.endCard && String(s.say || '').trim() ? i : -1)).filter((i) => i >= 0);
+  const use = hasMedia ? [...new Set([talking[0], talking[talking.length - 1]])] : talking;
+  use.filter((i) => i !== undefined).forEach((i) => Object.assign(scenes[i], { media: presenter, sound: 'voice', framing: 'auto' }));
+  return scenes;
 }
 
 // ---------- API (/api/ads) ----------
@@ -835,6 +847,7 @@ function settingsFrom(b, old = {}) {
     brand_id: b.brand_id !== undefined ? (Number(b.brand_id) || null) : old.brand_id ?? null,
     product_id: b.product_id !== undefined ? (Number(b.product_id) || null) : old.product_id ?? null,
     music: b.music !== undefined ? (getMedia(b.music)?.kind === 'audio' ? getMedia(b.music).file : null) : old.music ?? null,
+    presenter: b.presenter !== undefined ? (getMedia(b.presenter)?.presenter ? getMedia(b.presenter).file : null) : old.presenter ?? null,
   };
 }
 
@@ -851,10 +864,10 @@ router.post('/', (req, res) => {
   let mediaFiles = (Array.isArray(b.media) ? b.media : []).map((f) => getMedia(f)).filter((m) => m && m.kind !== 'audio').map((m) => m.file);
   if (!mediaFiles.length && product) mediaFiles = JSON.parse(product.photos || '[]');
   const media = mediaFiles.map(getMedia).filter(Boolean);
-  const scenes = placeMedia(writeScript(details, { recipe, length: s.length, seed: Date.now() % 97 }), media);
+  const scenes = placePresenter(placeMedia(writeScript(details, { recipe, length: s.length, seed: Date.now() % 97 }), media), s.presenter, media.length > 0);
   const name = cap(clean(b.name, 80) || clean(details.name, 60) || short(details.about, 6)) || 'New ad';
-  const { lastInsertRowid } = db.prepare(`INSERT INTO ads (name, details, recipe, look, voice, pace, length, formats, brand_id, product_id, media, music, scenes, caption)
-    VALUES (@name,@details,@recipe,@look,@voice,@pace,@length,@formats,@brand_id,@product_id,@media,@music,@scenes,@caption)`).run({
+  const { lastInsertRowid } = db.prepare(`INSERT INTO ads (name, details, recipe, look, voice, pace, length, formats, brand_id, product_id, media, music, presenter, scenes, caption)
+    VALUES (@name,@details,@recipe,@look,@voice,@pace,@length,@formats,@brand_id,@product_id,@media,@music,@presenter,@scenes,@caption)`).run({
     ...s, recipe, name, details: JSON.stringify(details), media: JSON.stringify(mediaFiles), scenes: JSON.stringify(scenes), caption: writeCaption(details, scenes),
   });
   res.status(201).json(adOut(getAd(lastInsertRowid)));
@@ -912,7 +925,7 @@ router.post('/:id/rewrite', (req, res) => {
   const recipe = RECIPES[req.body?.recipe] ? req.body.recipe : a.recipe;
   const details = JSON.parse(a.details || '{}');
   const media = JSON.parse(a.media || '[]').map(getMedia).filter(Boolean);
-  const scenes = placeMedia(writeScript(details, { recipe, length: a.length, seed: Math.floor(Math.random() * 1000) }), media);
+  const scenes = placePresenter(placeMedia(writeScript(details, { recipe, length: a.length, seed: Math.floor(Math.random() * 1000) }), media), a.presenter, media.length > 0);
   setAd(a.id, { recipe, scenes: JSON.stringify(scenes), caption: writeCaption(details, scenes), updated_at: new Date().toISOString() });
   res.json(adOut(getAd(a.id)));
 });
@@ -929,8 +942,8 @@ router.post('/:id/render', (req, res) => {
 router.post('/:id/copy', (req, res) => {
   const a = getAd(req.params.id);
   if (!a) return res.status(404).json({ error: 'Not found' });
-  const { lastInsertRowid } = db.prepare(`INSERT INTO ads (name, details, recipe, look, voice, pace, length, formats, brand_id, product_id, media, music, scenes, caption)
-    SELECT name || ' (copy)', details, recipe, look, voice, pace, length, formats, brand_id, product_id, media, music, scenes, caption FROM ads WHERE id=?`).run(a.id);
+  const { lastInsertRowid } = db.prepare(`INSERT INTO ads (name, details, recipe, look, voice, pace, length, formats, brand_id, product_id, media, music, presenter, scenes, caption)
+    SELECT name || ' (copy)', details, recipe, look, voice, pace, length, formats, brand_id, product_id, media, music, presenter, scenes, caption FROM ads WHERE id=?`).run(a.id);
   res.status(201).json(adOut(getAd(lastInsertRowid)));
 });
 

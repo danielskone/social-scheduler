@@ -67,6 +67,12 @@ function createPage() {
         <span class="ads-badge">${AI.spark}Viral Ads Studio</span>
         <h2 class="ads-hero-title"><mark>Describe it, pick a style.</mark><br>We make the video ad.</h2>
       </div>
+      ${presenters().length ? `<div class="ads-step"><b>1. Pick your presenter</b> <small class="muted">The face of your ad. Make them talk with your chosen voice after you write the ad.</small>
+        <input type="hidden" name="presenter" value="${esc(d.presenter || '')}">
+        <div class="ad-presenter-pick">
+          <button type="button" class="${d.presenter ? '' : 'on'}" data-new-presenter=""><span class="ad-nobody">—</span><small>No one</small></button>
+          ${presenters().map((m) => `<button type="button" class="${d.presenter === m.file ? 'on' : ''}" data-new-presenter="${esc(m.file)}" title="${esc(m.presenter)}"><img src="${esc(m.url)}" alt="" loading="lazy"><small>${esc(m.presenter)}</small></button>`).join('')}
+        </div><b>2. Describe your ad</b></div>` : ''}
       <div class="ads-prompt">
         <label class="ads-add" title="Add photos or videos">
           <input type="file" id="ad-new-files" accept="image/*,video/*" multiple hidden>${AI.plus}<small>Photos <br>&amp; videos</small></label>
@@ -137,7 +143,7 @@ function formValues(form) {
   const v = (n) => form.elements[n]?.value ?? '';
   return {
     recipe: v('recipe'), look: v('look'), voice: v('voice'), length: Number(v('length')) || 30,
-    brand_id: v('brand_id') || null, product_id: v('product_id') || null,
+    brand_id: v('brand_id') || null, product_id: v('product_id') || null, presenter: v('presenter') || null,
     formats: [...form.querySelectorAll('[name=formats]:checked')].map((c) => c.value),
     details: { about: v('about'), name: v('name'), points: v('points'), offer: v('offer'), cta: v('cta'), website: v('website') },
   };
@@ -222,6 +228,7 @@ function drawEditor() {
         <div class="panel ad-settings">
           <h2>Style</h2>
           <div class="field"><span>Look</span><div class="ad-looks">${AS.opts.looks.map((l) => `<button type="button" data-look="${l}" class="ad-look l-${l}${a.look === l ? ' on' : ''}"><i></i><b>${LOOK_NAMES[l]}</b><small>${LOOK_INFO[l]}</small></button>`).join('')}</div></div>
+          <div class="field"><span>Presenter</span><div class="row ad-presenter-now">${a.presenter ? `<img src="${esc(a.presenter.url)}" alt=""><b class="grow">${esc(a.presenter.presenter)}</b>` : '<span class="muted grow">No presenter</span>'}<button type="button" class="btn ghost sm" data-ad-presenter>${a.presenter ? 'Change · make them talk' : 'Pick one'}</button></div></div>
           <div class="field"><span>Voice</span><div class="row"><select id="ad-voice" class="grow">${voiceOptions(a.voice)}</select><button type="button" class="iconbtn" data-voice-test title="Hear this voice" aria-label="Hear this voice">${AI.speaker}</button></div>
             <div class="seg ad-pace">${AS.opts.paces.map((p) => `<button type="button" data-pace="${p}"${a.pace === p ? ' class="on"' : ''}>${PACE_NAMES[p] || p}</button>`).join('')}</div></div>
           <div class="field"><span>Shapes to make</span><div class="ads-formats compact">${AS.opts.formats.map((f) => `<label class="ads-format" title="${esc(f.for)}"><input type="checkbox" data-format value="${f.id}"${a.formats.includes(f.id) ? ' checked' : ''}><i class="shape s${f.id}"></i><span><b>${FORMAT_SHORT[f.id]}</b><small>${esc(f.for)}</small></span></label>`).join('')}</div></div>
@@ -246,7 +253,7 @@ function drawEditor() {
 
 function sceneMediaOptions(sel) {
   const list = [...AS.ad.media, ...AS.media.filter((m) => m.kind !== 'audio' && !AS.ad.media.some((x) => x.file === m.file))];
-  return opt('', 'Colour background', sel) + list.map((m, i) => opt(m.file, `${m.kind === 'video' ? 'Video' : 'Photo'} ${i + 1}${m.name ? ` · ${m.name.slice(0, 26)}` : ''}`, sel)).join('');
+  return opt('', 'Colour background', sel) + list.map((m, i) => opt(m.file, m.presenter ? `Presenter · ${m.presenter}` : `${m.kind === 'video' ? 'Video' : 'Photo'} ${i + 1}${m.name ? ` · ${m.name.slice(0, 26)}` : ''}`, sel)).join('');
 }
 function drawScenes() {
   const scenes = AS.ad.scenes;
@@ -573,6 +580,13 @@ adsBody.addEventListener('click', async (e) => {
     AS.media = AS.media.filter((m) => String(m.id) !== t.dataset.mediaDel);
     $('#ads-body').innerHTML = AS.sub === 'presenters' ? presentersPage() : mediaPage(); return;
   }
+  if (t.dataset.newPresenter !== undefined) {
+    const f = t.closest('form');
+    f.elements.presenter.value = t.dataset.newPresenter;
+    AS.draft = { ...(AS.draft || {}), presenter: t.dataset.newPresenter };
+    f.querySelectorAll('[data-new-presenter]').forEach((b) => b.classList.toggle('on', b === t));
+    return;
+  }
   if (t.dataset.voicePlay !== undefined) return playVoice(t, t.dataset.voicePlay);
   if (t.dataset.voicePace) { AS.voicePace = t.dataset.voicePace; AS.voiceText = $('#ads-voice-text').value; $('#ads-body').innerHTML = voicesPage(); return; }
   if (t.dataset.voiceUse !== undefined) {
@@ -717,7 +731,8 @@ const TALK_SITES = [
 ];
 const presenterKey = () => `adPresenter:${AS.ad?.id}`;
 function chosenPresenter() {
-  let f = null; try { f = localStorage.getItem(presenterKey()); } catch {}
+  let f = AS.ad?.presenter?.file || null;
+  if (!f) try { f = localStorage.getItem(presenterKey()); } catch {}
   return presenters().find((m) => m.file === f) || null;
 }
 function openPresenter() {
@@ -759,6 +774,10 @@ $('#ads-dialog').addEventListener('click', async (e) => {
   const pick = e.target.closest('[data-presenter-pick]');
   if (pick) {
     try { localStorage.setItem(presenterKey(), pick.dataset.presenterPick); } catch {}
+    AS.ad.presenter = presenters().find((m) => m.file === pick.dataset.presenterPick) || null;
+    saveAdSoon({ presenter: pick.dataset.presenterPick }, true);
+    const box = document.querySelector('.ad-presenter-now');
+    if (box && AS.ad.presenter) box.innerHTML = `<img src="${esc(AS.ad.presenter.url)}" alt=""><b class="grow">${esc(AS.ad.presenter.presenter)}</b><button type="button" class="btn ghost sm" data-ad-presenter>Change · make them talk</button>`;
     const script = $('#ad-presenter-script').value;
     openPresenter();
     $('#ad-presenter-script').value = script;
