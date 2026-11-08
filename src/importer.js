@@ -21,6 +21,11 @@
 // at the top of the bundle, posts in that time window are removed first, so a day's posts
 // can be swapped for new ones in one import. Only posts that haven't gone out yet and only
 // go to accounts used in this bundle are removed; anything else on the calendar is kept.
+// "clear" can also be a list of windows (e.g. every Sunday for a month).
+//
+// A video used on many dates only needs to be in the bundle once: put it in a top-level
+// "media": { "santa": { "name": "santa.mp4", "data": "<base64>" } } and give each post
+// "media": { "use": "santa" }. It is saved once and shared on disk (hard links).
 //
 // Everything is checked first; if any post has a problem nothing is imported. Posts that
 // already exist (same caption, time and accounts) are skipped, so importing twice is safe.
@@ -62,6 +67,14 @@ function importBundle(json, { now = Date.now() } = {}) {
   const problems = [];
   const ready = [];
 
+  const shared = {};
+  for (const [key, m] of Object.entries(bundle.media && typeof bundle.media === 'object' ? bundle.media : {})) {
+    const buf = Buffer.from(String((m && m.data) || ''), 'base64');
+    const kind = sniff(buf);
+    if (!kind) problems.push(`Shared media "${key}" isn't a JPG, PNG, MP4 or MOV.`);
+    else shared[key] = { buf, ...kind, key };
+  }
+
   bundle.posts.forEach((p, i) => {
     const label = `Post ${i + 1}${p.caption ? ` ("${String(p.caption).slice(0, 30)}…")` : ''}`;
     const when = Date.parse(p.when);
@@ -76,7 +89,10 @@ function importBundle(json, { now = Date.now() } = {}) {
       if (!accts.includes(a)) accts.push(a);
     }
     let media = null;
-    if (p.media && p.media.url) {
+    if (p.media && p.media.use) {
+      media = shared[p.media.use];
+      if (!media) return problems.push(`${label}: no shared media called "${p.media.use}".`);
+    } else if (p.media && p.media.url) {
       let u;
       try { u = new URL(p.media.url); } catch { return problems.push(`${label}: the media link isn't valid.`); }
       if (u.protocol !== 'https:') return problems.push(`${label}: the media link must start with https://.`);
@@ -102,11 +118,11 @@ function importBundle(json, { now = Date.now() } = {}) {
     ready.push({ caption, title: String(p.title || '').trim() || null, when: new Date(when).toISOString(), accts, media });
   });
 
-  let clear = null;
-  if (bundle.clear) {
-    const from = Date.parse(bundle.clear.from), to = Date.parse(bundle.clear.to);
+  const clears = [];
+  for (const c of [].concat(bundle.clear || [])) {
+    const from = Date.parse(c && c.from), to = Date.parse(c && c.to);
     if (isNaN(from) || isNaN(to) || to <= from) problems.push('The "clear" dates are missing or invalid.');
-    else clear = { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
+    else clears.push({ from: new Date(from).toISOString(), to: new Date(to).toISOString() });
   }
 
   if (problems.length) return { error: `Nothing was imported. Please fix: ${problems.join(' ')}`, problems };
@@ -123,10 +139,11 @@ function importBundle(json, { now = Date.now() } = {}) {
   const insTarget = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
   const written = [];
   const removedFiles = [];
+  const savedShared = {};
   let imported = 0, skipped = 0, updated = 0, removed = 0;
   try {
     db.transaction(() => {
-      if (clear) {
+      for (const clear of clears) {
         const used = new Set(ready.flatMap((r) => r.accts.map((a) => a.id)));
         const inWindow = db.prepare(`
           SELECT p.id, p.media_file FROM posts p WHERE p.scheduled_at >= ? AND p.scheduled_at < ?
@@ -151,7 +168,14 @@ function importBundle(json, { now = Date.now() } = {}) {
         let file = null;
         if (r.media && r.media.buf) {
           file = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${r.media.ext}`;
-          fs.writeFileSync(path.join(config.mediaDir, file), r.media.buf);
+          const dest = path.join(config.mediaDir, file);
+          const first = r.media.key && savedShared[r.media.key];
+          if (first) {
+            try { fs.linkSync(first, dest); } catch { fs.copyFileSync(first, dest); }
+          } else {
+            fs.writeFileSync(dest, r.media.buf);
+            if (r.media.key) savedShared[r.media.key] = dest;
+          }
           written.push(file);
         }
         const { lastInsertRowid } = insPost.run(r.caption, file, r.media ? r.media.type : null, r.when, r.media && r.media.url ? r.media.url : null, r.title);

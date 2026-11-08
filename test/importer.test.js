@@ -59,3 +59,34 @@ test('nothing is removed when the bundle has a problem', () => {
   assert.ok(r.error);
   assert.ok(exists(keep));
 });
+
+test('one shared video is used on many dates and several days are cleared', () => {
+  const sun1 = addPost('2026-11-15T10:00:00-05:00', [fb]);
+  const sun2 = addPost('2026-11-22T10:00:00-05:00', [fb]);
+  const saturday = addPost('2026-11-21T10:00:00-05:00', [fb]);
+  const video = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(64)]);
+  const days = ['2026-11-15', '2026-11-22'];
+  const r = importBundle({
+    clear: days.map((d) => ({ from: `${d}T00:00:00-05:00`, to: `${d}T23:59:59-05:00` })),
+    media: { santa: { name: 'santa.mp4', data: video.toString('base64') } },
+    posts: days.map((d) => ({ caption: `Santa ${d}`, when: `${d}T20:00:00-05:00`, accounts: [{ platform: 'facebook', name: 'Parade Page' }], media: { use: 'santa' } })),
+  }, { now: Date.parse('2026-11-07T20:00:00-05:00') });
+  assert.strictEqual(r.error, undefined);
+  assert.deepStrictEqual([r.removed, r.imported], [2, 2]);
+  assert.ok(!exists(sun1) && !exists(sun2) && exists(saturday));
+  const files = db.prepare("SELECT media_file, media_type FROM posts WHERE caption LIKE 'Santa%'").all();
+  assert.strictEqual(new Set(files.map((f) => f.media_file)).size, 2);
+  files.forEach((f) => {
+    assert.strictEqual(f.media_type, 'video');
+    assert.ok(fs.readFileSync(path.join(config.mediaDir, f.media_file)).equals(video));
+  });
+  // Deleting one post's file leaves the other date's copy in place.
+  fs.rmSync(path.join(config.mediaDir, files[0].media_file));
+  assert.ok(fs.existsSync(path.join(config.mediaDir, files[1].media_file)));
+});
+
+test('a post pointing at missing shared media is refused', () => {
+  const r = importBundle({ posts: [{ caption: 'x', when: '2026-11-20T10:00:00-05:00', accounts: [{ platform: 'facebook', name: 'Parade Page' }], media: { use: 'nope' } }] },
+    { now: Date.parse('2026-11-07T20:00:00-05:00') });
+  assert.match(r.error, /no shared media/);
+});
