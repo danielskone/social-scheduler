@@ -44,6 +44,13 @@ nav a.active { background: var(--accent-soft); color: var(--accent); }
 main { flex: 1; padding: 28px 36px 40px; min-width: 0; max-width: 1280px; }
 .view-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 22px; flex-wrap: wrap; }
 
+/* Calendar header (month name, arrows, Month/Week) stays at the top while you scroll */
+#view-calendar > .view-head { position: sticky; top: var(--sticky-top, 0px); z-index: 16; margin: -28px -36px 12px; padding: 28px 36px 12px;
+  background: color-mix(in srgb, var(--bg) 93%, transparent); backdrop-filter: saturate(180%) blur(16px); -webkit-backdrop-filter: saturate(180%) blur(16px);
+  transition: box-shadow .2s, padding .2s; }
+#view-calendar > .view-head.stuck { padding-top: 14px; box-shadow: 0 1px 0 var(--line), 0 8px 20px -14px rgb(16 24 40 / .35); }
+[data-mode="month"] #cal-weekdays { position: sticky; top: calc(var(--sticky-top, 0px) + var(--cal-head-h, 0px)); z-index: 15; background: var(--bg); }
+
 /* ---------- Buttons & inputs ---------- */
 .btn { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 9px 16px; border-radius: 12px; cursor: pointer; font: inherit; font-weight: 600; font-size: .93rem; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: transform .08s, box-shadow .15s, background .15s; box-shadow: 0 1px 2px rgb(16 24 40 / .05); }
 .btn:hover { background: var(--panel-2); }
@@ -344,6 +351,9 @@ dialog textarea, dialog input { width: 100%; min-width: 0; }
   main { padding: 0 16px 24px; }
   h1 { font-size: 1.45rem; }
   .view-head { margin-bottom: 16px; }
+  #view-calendar > .view-head { margin: -14px -16px 10px; padding: 6px 16px 10px; gap: 8px; }
+  #view-calendar > .view-head.stuck { padding-top: 4px; }
+  #view-calendar > .view-head.stuck .row > label { display: none; } /* keep the stuck header short: hide Import posts */
 
   /* Inputs: 16px so iPhone doesn't zoom in */
   select, input, textarea, .btn { font-size: 16px; }
@@ -880,3 +890,58 @@ input[type=color] { width: 100%; height: 42px; padding: 4px; cursor: pointer; }
 .ad-talk-here .btn svg { width: 16px; height: 16px; }
 .ad-presenter-how summary { cursor: pointer; }
 @media (max-width: 560px) { .ad-talk-here { flex-wrap: wrap; } .ad-talk-here .btn { width: 100%; justify-content: center; } }
+
+/* ---------- Analytics: top posts, tap to see comments ---------- */
+.seg-sm button { font-size: .8rem; padding: 5px 10px; }
+.an-top-hint { margin: -6px 0 6px; }
+button.top-post { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; transition: background .15s; }
+button.top-post:hover { background: var(--panel-2); }
+button.top-post:active { transform: scale(.99); }
+.tp-chips { display: flex; gap: 10px; font-size: .74rem; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.tp-com { color: var(--accent); }
+.tp-go { color: var(--muted); font-size: 1.3rem; line-height: 1; margin-left: 2px; }
+.tile.tap { cursor: pointer; transition: transform .1s, box-shadow .15s; position: relative; }
+.tile.tap:hover { box-shadow: var(--shadow-lg); transform: translateY(-1px); }
+.tile.tap::after { content: "›"; position: absolute; right: 14px; top: 12px; color: var(--muted); font-size: 1.2rem; }
+#an-table tbody tr[data-tid] { cursor: pointer; }
+#an-table tbody tr[data-tid]:hover td { background: var(--panel-2); }
+
+.an-dialog { width: min(600px, 94vw); padding: 0; max-height: 90vh; overflow-y: auto; }
+.and-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px 10px; position: sticky; top: 0; background: var(--panel); z-index: 2; }
+.and-head .picon { width: 26px; height: 26px; }
+.and-head div { flex: 1; min-width: 0; display: grid; }
+.and-head small { font-size: .78rem; }
+.and-x { padding: 6px 11px; border-radius: 50%; }
+.and-post { padding: 0 18px; }
+.and-post img, .and-post video { max-height: 34vh; margin-bottom: 10px; }
+.and-post p { margin: 0 0 12px; white-space: pre-wrap; font-size: .9rem; color: var(--muted); max-height: 7.5em; overflow: auto; }
+.and-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 0 18px; }
+.and-stats div { background: var(--panel-2); border-radius: 12px; padding: 9px 6px; text-align: center; display: grid; }
+.and-stats b { font-size: 1.2rem; letter-spacing: -.02em; }
+.and-stats span { font-size: .72rem; color: var(--muted); font-weight: 600; }
+.and-h { margin: 18px 18px 8px; font-size: 1rem; }
+.and-comments { padding: 0 18px; }
+.and-count { margin: 0 0 10px; }
+.and-note { background: var(--accent-soft); color: var(--text); border-radius: 12px; padding: 10px 12px; font-size: .86rem; margin: 0 0 12px; }
+.and-empty { margin: 4px 0 8px; }
+.cmt { display: flex; gap: 9px; margin-bottom: 12px; }
+.cmt.reply { margin: 8px 0 0; }
+.cmt-pic { position: relative; flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%; overflow: hidden; background: var(--grad); color: #fff; font-size: .74rem; font-weight: 750; display: inline-flex; align-items: center; justify-content: center; }
+.cmt.reply .cmt-pic { flex-basis: 26px; width: 26px; height: 26px; font-size: .62rem; }
+.cmt-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; margin: 0; border-radius: 0; max-height: none; }
+.cmt-body { flex: 1; min-width: 0; }
+.cmt-bubble { background: var(--panel-2); border-radius: 14px; padding: 7px 11px; display: inline-block; max-width: 100%; }
+.cmt-bubble b { font-size: .82rem; }
+.cmt-bubble b a { color: inherit; text-decoration: none; }
+.cmt-bubble p { margin: 1px 0 0; font-size: .9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cmt-meta { font-size: .72rem; color: var(--muted); margin: 3px 0 0 11px; font-weight: 600; }
+.and-actions { padding: 8px 18px 18px; position: sticky; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); margin-top: 6px; }
+@media (max-width: 800px) {
+  .an-dialog { width: 100%; max-width: 100%; padding: 0 0 env(safe-area-inset-bottom); max-height: 90vh; }
+  .and-stats { gap: 6px; }
+  .and-stats b { font-size: 1.05rem; }
+  .and-stats span { font-size: .68rem; white-space: nowrap; }
+  .an-dialog .and-actions .btn { flex: 1; }
+  .tp-chips { gap: 8px; }
+  .tile.tap::after { right: 10px; top: 8px; }
+}

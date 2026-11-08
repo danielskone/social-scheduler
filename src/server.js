@@ -358,6 +358,28 @@ api.get('/analytics', (req, res) => {
   res.json({ days, posts, previous, failed, followers, since });
 });
 
+// Who commented on one published post, and what they said. Official APIs only; TikTok
+// doesn't let apps read comments, so it just points to the post.
+api.get('/analytics/comments/:targetId', async (req, res) => {
+  const t = db.prepare(`SELECT t.id, t.external_post_id, t.permalink, t.comments AS count, a.platform, a.name AS account_name,
+    a.external_id, a.access_token, a.username FROM post_targets t JOIN accounts a ON a.id=t.account_id
+    WHERE t.id=? AND t.status='published'`).get(req.params.targetId);
+  if (!t) return res.status(404).json({ error: 'That post is not published (or was removed).' });
+  const out = { platform: t.platform, account: t.account_name, permalink: t.permalink, count: t.count };
+  try {
+    let r;
+    if (t.platform === 'facebook') r = await meta.facebookComments(t, t.external_post_id);
+    else if (t.platform === 'instagram') r = await meta.instagramComments(t, t.external_post_id);
+    else if (t.platform === 'youtube') r = await youtube.videoComments(t, t.external_post_id);
+    else r = { comments: [], note: "TikTok doesn't let apps read comments. Tap \"Open post\" to see them in TikTok." };
+    if (r.needsReconnect) r.note = `${t.platform === 'facebook' ? 'Facebook' : 'Instagram'} needs one more permission to show comments. Go to Accounts and click "Connect Facebook & Instagram" again, then come back.`;
+    else if (r.namesHidden) r.note = 'Facebook hid the names of the people who commented. Reconnect Facebook & Instagram in Accounts to allow names.';
+    res.json({ ...out, ...r });
+  } catch (e) {
+    res.json({ ...out, comments: [], note: `Couldn't load comments right now: ${e.message}` });
+  }
+});
+
 api.post('/analytics/refresh', async (req, res) => {
   await scheduler.refreshStats();
   res.json({ ok: true });

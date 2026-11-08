@@ -12,6 +12,9 @@ const SCOPES = [
   'instagram_content_publish',
   'instagram_manage_insights',
   'business_management',
+  // Read the comments on your own posts and who wrote them (Analytics). Needs a reconnect.
+  'pages_read_user_content',
+  'instagram_manage_comments',
 ];
 
 // safeToRetry = Facebook/Instagram answered with an error, so nothing was posted and trying
@@ -317,11 +320,74 @@ async function facebookPostStats(account, postId) {
         likes: (d.reactions || d.likes)?.summary?.total_count ?? null,
         comments: d.comments?.summary?.total_count ?? null,
         shares: d.shares?.count ?? (fields.includes('shares') ? 0 : null),
-        views: null,
+        views: await facebookViews(account, postId),
       };
     } catch (err) { lastErr = err; }
   }
   throw lastErr;
+}
+
+// Facebook renamed its "how many people saw it" numbers over the years. Try the current name
+// first and remember which one this Page answers to. Never fails: no number is just null.
+const FB_VIEW_METRICS = ['post_media_view', 'post_video_views', 'post_impressions'];
+let fbViewMetric = null;
+async function facebookViews(account, postId) {
+  const list = fbViewMetric ? [fbViewMetric, ...FB_VIEW_METRICS.filter((m) => m !== fbViewMetric)] : FB_VIEW_METRICS;
+  for (const metric of list) {
+    try {
+      const ins = await call('GET', `${postId}/insights`, { metric, access_token: account.access_token });
+      const row = ins.data?.[0];
+      const v = row?.values?.[0]?.value ?? row?.total_value?.value;
+      if (typeof v === 'number') { fbViewMetric = metric; return v; }
+    } catch { /* this metric isn't available for this post type */ }
+  }
+  return null;
+}
+
+// ---------- Comments (who commented and what they said) ----------
+
+const COMMENT_LIMIT = 50;
+const noPermission = (e) => e && (e.code === 10 || (e.code >= 200 && e.code < 300));
+
+async function facebookComments(account, postId) {
+  // Facebook only shares a commenter's name with apps allowed to read Page user content;
+  // without it the comments still come back, just unnamed.
+  const base = 'id,message,created_time,like_count,comment_count,attachment{type,media{image{src}}}';
+  const shape = (c) => ({
+    id: c.id,
+    name: c.from?.name || null,
+    picture: c.from?.picture?.data?.url || null,
+    text: c.message || (c.attachment ? '(photo or sticker)' : ''),
+    time: c.created_time,
+    likes: c.like_count ?? 0,
+    replies: (c.comments?.data || []).map(shape),
+  });
+  let lastErr;
+  for (const fields of [`${base},from{id,name,picture},comments.limit(10){id,message,created_time,like_count,from{id,name,picture}}`, base]) {
+    try {
+      const d = await call('GET', `${postId}/comments`, { fields, filter: 'toplevel', order: 'reverse_chronological', limit: COMMENT_LIMIT, access_token: account.access_token });
+      const comments = (d.data || []).map(shape);
+      return { comments, namesHidden: comments.length > 0 && comments.every((c) => !c.name), more: Boolean(d.paging?.next) };
+    } catch (e) { lastErr = e; }
+  }
+  if (noPermission(lastErr)) return { comments: [], needsReconnect: true };
+  throw lastErr;
+}
+
+async function instagramComments(account, mediaId) {
+  try {
+    const d = await call('GET', `${mediaId}/comments`, {
+      fields: 'id,text,username,timestamp,like_count,replies{id,text,username,timestamp,like_count}',
+      limit: COMMENT_LIMIT, access_token: account.access_token,
+    });
+    const shape = (c) => ({ id: c.id, name: c.username ? `@${c.username}` : null, username: c.username || null, text: c.text || '', time: c.timestamp, likes: c.like_count ?? 0, replies: (c.replies?.data || []).map(shape) });
+    // Instagram lists oldest first; newest first is easier to read.
+    const comments = (d.data || []).map(shape).sort((a, b) => String(b.time).localeCompare(String(a.time)));
+    return { comments, more: Boolean(d.paging?.next) };
+  } catch (e) {
+    if (noPermission(e)) return { comments: [], needsReconnect: true };
+    throw e;
+  }
 }
 
 async function instagramPostStats(account, mediaId) {
@@ -351,5 +417,7 @@ module.exports = {
   tokenWorks,
   facebookPostStats,
   instagramPostStats,
+  facebookComments,
+  instagramComments,
   followerCount,
 };
