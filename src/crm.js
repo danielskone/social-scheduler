@@ -73,6 +73,15 @@ CREATE TABLE IF NOT EXISTS crm_forms (
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS crm_form_entries (
+  id INTEGER PRIMARY KEY,
+  form_id INTEGER NOT NULL REFERENCES crm_forms(id) ON DELETE CASCADE,
+  contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+  answers TEXT NOT NULL,                -- JSON [{ id, label, type, value }]
+  files TEXT,                           -- JSON [{ field, label, name, file }] saved in data/form-files
+  source TEXT NOT NULL DEFAULT 'link',  -- 'link' (this app's page) or 'website' (always-on website code)
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS crm_templates (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -360,7 +369,13 @@ function prepareMessage(contactId, templateId) {
 }
 
 // ---------- Sign-up forms (public pages that add leads) ----------
+// The form builder (forms.js) stores each form's questions as JSON in "fields" and its look in "style".
+// Older forms have no "fields" yet; forms.js builds their questions from the ask_* switches.
 const crypto = require('crypto');
+for (const col of ['fields', 'style']) {
+  if (!db.prepare('PRAGMA table_info(crm_forms)').all().some((c) => c.name === col)) db.exec(`ALTER TABLE crm_forms ADD COLUMN ${col} TEXT`);
+}
+const asJson = (v) => (v == null || v === '' ? null : typeof v === 'string' ? v : JSON.stringify(v));
 function saveForm(body, id) {
   const old = id ? db.prepare('SELECT * FROM crm_forms WHERE id=?').get(id) : null;
   if (id && !old) throw Object.assign(new Error('Form not found'), { status: 404 });
@@ -375,12 +390,24 @@ function saveForm(body, id) {
     email_checkbox: String(body.email_checkbox ?? old?.email_checkbox ?? '').trim() || null,
     thank_you: String(body.thank_you ?? old?.thank_you ?? '').trim() || null,
     active: bool(body.active, old ? old.active : 1),
+    fields: body.fields !== undefined ? asJson(body.fields) : old?.fields ?? null,
+    style: body.style !== undefined ? asJson(body.style) : old?.style ?? null,
   };
   if (!f.title) throw err400('Give the form a title.');
+  if (f.fields) {
+    // Keep the old switches in step with the questions, so older parts of the app still read them right.
+    let list;
+    try { list = JSON.parse(f.fields); } catch { throw err400('The form questions could not be read.'); }
+    if (!Array.isArray(list)) throw err400('The form questions could not be read.');
+    const has = (t) => list.some((x) => x && x.type === t);
+    f.ask_company = has('company') ? 1 : 0; f.ask_phone = has('phone') ? 1 : 0; f.ask_message = has('long') ? 1 : 0;
+    const consent = list.find((x) => x && x.type === 'consent');
+    f.email_checkbox = consent ? String(consent.label || '').trim() || 'Yes, email me news and updates. I can unsubscribe any time.' : null;
+  }
   if (old) db.prepare(`UPDATE crm_forms SET title=@title, intro=@intro, group_name=@group_name, ask_company=@ask_company, ask_phone=@ask_phone,
-    ask_message=@ask_message, email_checkbox=@email_checkbox, thank_you=@thank_you, active=@active WHERE id=@id`).run({ ...f, id });
-  else id = db.prepare(`INSERT INTO crm_forms (slug, title, intro, group_name, ask_company, ask_phone, ask_message, email_checkbox, thank_you, active)
-    VALUES (@slug,@title,@intro,@group_name,@ask_company,@ask_phone,@ask_message,@email_checkbox,@thank_you,@active)`).run({ ...f, slug: crypto.randomBytes(6).toString('hex') }).lastInsertRowid;
+    ask_message=@ask_message, email_checkbox=@email_checkbox, thank_you=@thank_you, active=@active, fields=@fields, style=@style WHERE id=@id`).run({ ...f, id });
+  else id = db.prepare(`INSERT INTO crm_forms (slug, title, intro, group_name, ask_company, ask_phone, ask_message, email_checkbox, thank_you, active, fields, style)
+    VALUES (@slug,@title,@intro,@group_name,@ask_company,@ask_phone,@ask_message,@email_checkbox,@thank_you,@active,@fields,@style)`).run({ ...f, slug: crypto.randomBytes(6).toString('hex') }).lastInsertRowid;
   return db.prepare('SELECT * FROM crm_forms WHERE id=?').get(id);
 }
 
@@ -452,46 +479,7 @@ button{margin-top:18px;width:100%;padding:12px;border:0;border-radius:8px;backgr
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nl = (v) => esc(v).replace(/\n/g, '<br>');
 
-function renderForm(f, error = '', values = {}) {
-  const v = (k) => esc(values[k]);
-  return page(f.title, `<h1>${esc(f.title)}</h1>${f.intro ? `<p>${nl(f.intro)}</p>` : ''}${error ? `<p class="err">${esc(error)}</p>` : ''}
-<form method="post">
-<label for="n">Name</label><input id="n" name="name" required maxlength="120" autocomplete="name" value="${v('name')}">
-${f.ask_company ? `<label for="c">Business or organization <span class="muted">(optional)</span></label><input id="c" name="company" maxlength="160" autocomplete="organization" value="${v('company')}">` : ''}
-<label for="e">Email</label><input id="e" name="email" type="email" maxlength="200" autocomplete="email" value="${v('email')}">
-${f.ask_phone ? `<label for="p">Phone</label><input id="p" name="phone" type="tel" maxlength="40" autocomplete="tel" value="${v('phone')}">` : ''}
-${f.ask_message ? `<label for="m">Message <span class="muted">(optional)</span></label><textarea id="m" name="message" rows="4" maxlength="2000">${v('message')}</textarea>` : ''}
-${f.email_checkbox ? `<label class="check"><input type="checkbox" name="email_ok" value="1"${values.email_ok ? ' checked' : ''}> <span>${esc(f.email_checkbox)}</span></label>` : ''}
-<div class="hp" aria-hidden="true"><label>Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label></div>
-<button type="submit">Send</button>
-<p class="muted">Your details are only used to reply to you${f.email_checkbox ? ', and to email you updates if you check the box' : ''}. They are never sold or shared.</p>
-</form>`);
-}
-
-// Public routes, mounted at /f before the password check.
-const publicForms = express.Router();
-publicForms.use(express.urlencoded({ extended: false, limit: '20kb' }));
-const activeForm = (slug) => db.prepare('SELECT * FROM crm_forms WHERE slug=? AND active=1').get(String(slug));
-publicForms.get('/:slug', (req, res) => {
-  const f = activeForm(req.params.slug);
-  if (!f) return res.status(404).send(page('Not found', '<h1>This form is not available.</h1>'));
-  res.send(renderForm(f));
-});
-publicForms.post('/:slug', async (req, res) => {
-  const f = activeForm(req.params.slug);
-  if (!f) return res.status(404).send(page('Not found', '<h1>This form is not available.</h1>'));
-  const thanks = () => res.send(page(f.title, `<h1>Thank you!</h1><p>${nl(f.thank_you || "We got your information and we'll be in touch soon.")}</p>`));
-  if (req.body.website) return thanks(); // hidden field only bots fill in
-  // Behind the Cloudflare tunnel every visitor looks like this computer, so use the visitor address it passes along.
-  if (tooMany(String(req.get('cf-connecting-ip') || req.ip))) return res.status(429).send(page(f.title, '<h1>Too many tries</h1><p>Please try again later.</p>'));
-  try {
-    const { contact, isNew } = submitForm(f, req.body);
-    notify.send(isNew ? 'New lead' : 'Form filled again', `${contact.name}${contact.company ? ` (${contact.company})` : ''} filled out "${f.title}"`, { tags: 'inbox_tray' }).catch(() => {});
-    thanks();
-  } catch (e) {
-    res.status(e.status || 500).send(renderForm(f, e.status ? e.message : 'Something went wrong. Please try again.', req.body));
-  }
-});
+// The public form pages (/f/...) and the form builder's routes live in forms.js.
 
 // ---------- Routes (mounted at /api/crm) ----------
 const router = express.Router();
@@ -531,15 +519,6 @@ router.post('/templates', wrap((req, res) => res.json(saveTemplate(req.body || {
 router.put('/templates/:id', wrap((req, res) => res.json(saveTemplate(req.body || {}, Number(req.params.id)))));
 router.delete('/templates/:id', wrap((req, res) => { db.prepare('DELETE FROM crm_templates WHERE id=?').run(req.params.id); res.json({ ok: true }); }));
 router.post('/contacts/:id/message', wrap((req, res) => res.json(prepareMessage(Number(req.params.id), Number((req.body || {}).template_id)))));
-router.get('/forms', wrap((req, res) => {
-  const forms = db.prepare('SELECT * FROM crm_forms ORDER BY id').all();
-  const counts = db.prepare("SELECT note, COUNT(*) AS n FROM contact_activities WHERE kind='Form' GROUP BY note").all();
-  forms.forEach((f) => { f.url = `${config.publicBaseUrl}/f/${f.slug}`; f.submissions = counts.filter((c) => c.note.startsWith(`Filled out "${f.title}"`)).reduce((n, c) => n + c.n, 0); });
-  res.json(forms);
-}));
-router.post('/forms', wrap((req, res) => res.json(saveForm(req.body || {}))));
-router.put('/forms/:id', wrap((req, res) => res.json(saveForm(req.body || {}, Number(req.params.id)))));
-router.delete('/forms/:id', wrap((req, res) => { db.prepare('DELETE FROM crm_forms WHERE id=?').run(req.params.id); res.json({ ok: true }); }));
 router.post('/import', express.text({ type: '*/*', limit: '10mb' }), wrap((req, res) => res.json(importCsv(req.body))));
 router.get('/export.csv', wrap((req, res) => {
   const emailList = req.query.list === 'email';
@@ -548,4 +527,4 @@ router.get('/export.csv', wrap((req, res) => {
   res.send('﻿' + exportCsv({ emailList }));
 }));
 
-module.exports = { events, emit, html: { page, esc, nl }, router, publicForms, listTasks, saveTask, saveTemplate, fillTemplate, prepareMessage, saveForm, submitForm, tooMany, createContact, updateContact, getContact, listContacts, logActivity, importCsv, exportCsv, parseCsv, summary, sendFollowUpReminder, GROUPS, STAGES };
+module.exports = { events, emit, html: { page, esc, nl }, router, listTasks, saveTask, saveTemplate, fillTemplate, prepareMessage, saveForm, submitForm, tooMany, createContact, updateContact, getContact, listContacts, logActivity, importCsv, exportCsv, parseCsv, summary, sendFollowUpReminder, GROUPS, STAGES };

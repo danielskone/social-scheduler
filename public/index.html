@@ -15,6 +15,7 @@
   <title>Viral Post</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/crm.css">
+  <link rel="stylesheet" href="/forms.css">
 </head>
 <body>
   <aside class="sidebar">
@@ -265,10 +266,7 @@
       </div>
 
       <div class="crm-panel" data-panel="forms" hidden>
-        <div class="row crm-filters">
-          <button class="btn primary" id="form-add">+ New form</button>
-        </div>
-        <div class="cards" id="form-list"></div>
+        <div id="form-list"></div>
       </div>
 
       <div class="crm-panel" data-panel="appointments" hidden>
@@ -336,8 +334,10 @@
   <div id="hover-card" class="hover-card" hidden></div>
   <dialog id="contact-dialog" class="wide"></dialog>
   <dialog id="crm-edit-dialog"></dialog>
+  <dialog id="form-builder" class="fb-dialog" aria-label="Form builder"></dialog>
   <dialog id="clip-dialog"></dialog>
   <div id="crm-coach" class="crm-coach" hidden role="dialog" aria-live="polite"></div>
+  <script src="/forms.js"></script>
   <script src="/crm.js"></script>
   <script src="/app.js"></script>
   <script src="/clips.js"></script>

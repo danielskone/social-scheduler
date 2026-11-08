@@ -11,6 +11,7 @@ const tiktok = require('./tiktok');
 const scheduler = require('./scheduler');
 const { importBundle } = require('./importer');
 const crm = require('./crm');
+const forms = require('./forms');
 const booking = require('./booking');
 const website = require('./website');
 const automations = require('./automations');
@@ -44,7 +45,7 @@ app.use('/media', express.static(config.mediaDir, { fallthrough: false, maxAge: 
 app.use(compression({ filter: (req, res) => !req.path.startsWith('/thumb/') && compression.filter(req, res) }));
 
 // Public sign-up forms from the Contacts tab. No password, so anyone with the link can fill one in.
-app.use('/f', crm.publicForms);
+app.use('/f', forms.publicForms);
 app.use('/book', booking.publicBooking);
 
 // ---------- Password protection ----------
@@ -387,6 +388,7 @@ api.post('/analytics/refresh', async (req, res) => {
 
 app.use('/api/clips', clipper.router);
 app.use('/api/ads', ads.router);
+app.use('/api/crm/forms', forms.router);
 app.use('/api/crm/booking', booking.router);
 app.use('/api/crm/automations', automations.router);
 app.use('/api/crm/email', campaigns.router);
