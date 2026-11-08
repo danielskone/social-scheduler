@@ -28,6 +28,12 @@ const state = () => db.prepare('SELECT * FROM website_inbox WHERE id=1').get();
 
 // Turns one inbox row into a CRM contact (new or updated) plus a history note.
 function importRow(r) {
+  // A form made in the form builder, sent by its always-on website code.
+  const own = /^vpform:([0-9a-f]+)$/.exec(String(r.form || '').trim());
+  if (own) {
+    const done = require('./forms').recordFromInbox(own[1], r);
+    if (done) return { ...done, viaForm: true };
+  }
   const site = String(r.form || '').split(':')[0].trim() || 'your website';
   const title = String(r.form || 'Website form').trim();
   const message = [
@@ -64,8 +70,9 @@ async function check({ fetchImpl = fetch } = {}) {
     let last = s.last_row;
     for (const r of body.rows || []) {
       try {
-        const { contact, isNew } = importRow(r);
-        if (isNew) added++; else updated++;
+        const { contact, isNew, viaForm } = importRow(r);
+        if (contact) { if (isNew) added++; else updated++; }
+        if (viaForm || !contact) { last = Math.max(last, Number(r.row) || last); continue; } // forms.js already sent the alert
         notify.send(isNew ? 'New website lead' : 'Website form filled again',
           `${contact.name}${contact.company ? ` (${contact.company})` : ''} filled out "${r.form}"${r.interest ? ` - ${r.interest}` : ''}`, { tags: 'globe_with_meridians' }).catch(() => {});
       } catch (e) {

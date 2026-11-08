@@ -55,7 +55,7 @@
       'Moving a card can start an automation, like a thank-you task when a sponsor reaches "Paid / Done".'],
     tasks: ['tasks', 'Your to-do list', 'Start each day here. <b>Tick the circle</b> when something is done. Red dates are late, orange ones are due today. When a task has a <b>Write</b> button, it opens a ready-made message in your Mail or Messages app, and you just press Send.'],
     appointments: ['appointments', 'Calls and meetings people booked', 'When someone books a time with you (from your Google booking page or a booking page made here), it shows up here, they\'re added to People, and <b>your iPhone buzzes</b>. Share a booking link below in a post, your bio or a text.'],
-    forms: ['forms', 'Sign-up forms', 'A form is a little web page people fill in, like "Become a parade sponsor". <b>Copy its link</b> and put it on a post, your website or a QR code. Every sign-up becomes a contact here and pings your iPhone.'],
+    forms: ['forms', 'Your own form builder', 'Make any form: sign-ups, RSVPs, surveys, quotes, releases with a signature. <b>Describe it</b> or pick a ready-made one, then drag questions around. Share it as a link, a QR code or website code. Every response is saved, people become contacts, and your iPhone gets a ping.'],
     templates: ['templates', 'Messages you send a lot', 'Write a message once, use it again and again. Put <b>{first_name}</b>, <b>{name}</b> or <b>{company}</b> in it and the right details fill in for each person. They open in your own Mail or Messages, one person at a time.'],
     email: ['email', 'Newsletters and email blasts', 'Send one email to many people at once. A <b>campaign</b> is the email, a <b>segment</b> is who gets it, and a <b>design</b> is how it looks. Only people who said yes to email ever get one, and your mailing address and an unsubscribe line are added for you.'],
     automations: ['automations', 'Your helper that works while you\'re busy', 'Each card says <b>When</b> something happens (a new lead, a form, a stage change, a booking) and the <b>steps</b> that follow, like making a task, buzzing your phone or sending a welcome email. They\'re already set up and switched on. Use <b>Turn off</b> to pause one.',
@@ -83,7 +83,7 @@
     { tab: 'pipeline', ico: 'pipeline', title: 'Pipeline', text: 'See where every deal stands, from New to Paid / Done. Drag a card to the next column when things move along.', tryIt: 'Try it: drag a sponsor from "Committed" to "Paid / Done" once they pay.' },
     { tab: 'tasks', ico: 'tasks', title: 'Tasks', text: 'Your to-do list. Many tasks are made for you by automations. Tick the circle when one is done.', tryIt: 'Good habit: check this tab first thing every morning.' },
     { tab: 'appointments', ico: 'appointments', title: 'Appointments', text: 'Calls people booked with you show up here, and your iPhone buzzes when a new one comes in.' },
-    { tab: 'forms', ico: 'forms', title: 'Sign-up forms', text: 'Forms people fill in from your posts, website or a QR code. Each sign-up becomes a contact by itself.', tryIt: 'Try it: press <b>Copy link</b> on a form and paste it into your next post.' },
+    { tab: 'forms', ico: 'forms', title: 'Forms', text: 'Build any form by dragging questions around: sign-ups, RSVPs, surveys, quotes. Each response is saved and becomes a contact by itself.', tryIt: 'Try it: pick a ready-made form, press <b>Save</b>, then <b>Share</b>.' },
     { tab: 'templates', ico: 'templates', title: 'Message templates', text: 'Messages you send often, written once. {first_name} fills in each person\'s name for you.' },
     { tab: 'email', ico: 'email', title: 'Email marketing', text: 'Send a newsletter to everyone who said yes to email. Pick a design, pick who gets it, then press Send or pick a time.' },
     { tab: 'automations', ico: 'automations', title: 'Automations', text: 'Your helper. When a new lead comes in, it can make a task, buzz your phone or send a welcome email, all by itself. These are already switched on for you.' },
@@ -282,76 +282,8 @@
     dlg.showModal();
   }
 
-  // ---------- Sign-up forms ----------
-  async function renderForms() {
-    const [forms, site] = await Promise.all([call('/forms'), call('/website').catch(() => null)]);
-    const url = forms[0]?.url || '';
-    const note = /localhost|127\.0\.0\.1/.test(url) ? 'Forms only work for other people when the app has a public web address (the same one Instagram uses). Right now it only has this computer\'s address, so wait a minute and refresh.'
-      : /trycloudflare\.com/.test(url) ? 'Heads up: these links change whenever your Mac restarts. Copy a fresh link here each time you share one, and update any old posts that use it.' : '';
-    const cal = site && site.calendar;
-    const calLine = !cal ? '' : cal.connected
-      ? `<div class="muted" style="margin-top:6px">📅 <b>Google Calendar bookings</b> also come in (events named "${h(cal.match)}"), with an alert. ${cal.imported} so far.${cal.lastError ? ` <span style="color:var(--bad)">${h(cal.lastError)}</span>` : ''}</div>`
-      : '<div class="muted" style="margin-top:6px">📅 Using a Google Calendar booking page? Run <b>npm run calendar</b> so bookings land here too.</div>';
-    const siteCard = !site ? '' : `<div class="item" style="grid-column:1/-1">
-        <b>Your website's forms</b> ${site.connected ? (site.lastError ? '<span class="pill" style="color:var(--bad)">Problem</span>' : '<span class="pill">Connected</span>') : '<span class="pill">Not set up</span>'}
-        ${site.connected
-          ? `<div class="muted">Sign-ups from your website land in <b>${h(site.group)}</b> within about 2 minutes, and your phone gets an alert. ${site.imported} so far.${site.lastCheck ? ` Last checked ${h(new Date(site.lastCheck.replace(' ', 'T') + 'Z').toLocaleString())}.` : ''}</div>
-            ${site.lastError ? `<div class="muted" style="color:var(--bad)">${h(site.lastError)}</div>` : ''}
-            <details style="margin-top:6px"><summary>Code for your website</summary><p class="muted">Paste this once into your website's "custom code" spot for every page (or before &lt;/body&gt;). Your forms keep working as before; this just copies each sign-up here.</p>
-            <textarea readonly rows="6" style="width:100%;font:12px ui-monospace,monospace">${h(site.snippet)}</textarea>
-            <div class="row"><button class="btn" data-site-copy>Copy code</button></div></details>
-            ${calLine}
-            <div class="row"><button class="btn ghost" data-site-check>Check now</button><span class="muted" data-site-msg></span></div>`
-          : '<div class="muted">Want sign-ups from your website (like viralattraction.com) to show up here by themselves? Follow the steps in <b>website-inbox/README.md</b>, then run <b>npm run website</b> in Terminal.</div>'}
-      </div>`;
-    q$('#form-list').innerHTML = siteCard + (note ? `<div class="note" style="grid-column:1/-1;max-width:none">${note}</div>` : '')
-      + (forms.map((f) => `<div class="item" data-form="${f.id}">
-        <b>${h(f.title)}</b> ${f.active ? '' : '<span class="pill" style="color:var(--bad)">Off</span>'}
-        <div class="muted">Adds people to <b>${h(f.group_name)}</b> · ${f.submissions} sign-up${f.submissions === 1 ? '' : 's'}</div>
-        <div class="linkbox"><input readonly value="${h(f.url)}"><button class="btn" data-copy>Copy link</button></div>
-        <div class="row"><a class="btn ghost" href="${h(f.url)}" target="_blank" rel="noopener">Open</a><button class="btn ghost" data-edit>Edit</button><button class="btn danger" data-del>Delete</button></div>
-      </div>`).join('') || '<p class="muted">No forms yet. Try one for "Become a parade sponsor" or "Register a parade entry".</p>');
-    q$('#form-list').onclick = async (e) => {
-      if ('siteCopy' in e.target.dataset) { await navigator.clipboard.writeText(site.snippet).catch(() => {}); e.target.textContent = 'Copied'; return; }
-      if ('siteCheck' in e.target.dataset) {
-        e.target.disabled = true;
-        const r = await call('/website/check', { method: 'POST' }).catch((err) => ({ error: err.message }));
-        q$('[data-site-msg]').textContent = r.error ? r.error : `Done: ${r.added || 0} new, ${r.updated || 0} updated, ${r.booked || 0} new bookings.`;
-        e.target.disabled = false; return;
-      }
-      const el = e.target.closest('[data-form]');
-      if (!el) return;
-      const f = forms.find((x) => x.id === Number(el.dataset.form));
-      if ('copy' in e.target.dataset) { await navigator.clipboard.writeText(f.url).catch(() => {}); e.target.textContent = 'Copied'; }
-      if ('edit' in e.target.dataset) editForm(f);
-      if ('del' in e.target.dataset && confirm(`Delete the form "${f.title}"? The link will stop working. People who already signed up stay in your contacts.`)) { await call(`/forms/${f.id}`, { method: 'DELETE' }); refresh(); }
-    };
-  }
-  q$('#form-add').onclick = () => editForm({ group_name: 'Parade sponsor', ask_company: 1, ask_phone: 1, ask_message: 1, active: 1,
-    email_checkbox: 'Yes, email me parade news and updates. I can unsubscribe any time.' });
-
-  function editForm(f) {
-    const dlg = q$('#crm-edit-dialog');
-    const box = (name, label) => `<label class="check" style="margin:4px 0"><input type="checkbox" name="${name}" ${f[name] ? 'checked' : ''}> ${label}</label>`;
-    dlg.innerHTML = `<form id="form-form"><h1>${f.id ? 'Edit form' : 'New sign-up form'}</h1>
-      <label class="field"><span>Title</span><input name="title" required value="${h(f.title)}" placeholder="Become a parade sponsor" style="width:100%"></label>
-      <label class="field"><span>Short intro <small>(optional)</small></span><textarea name="intro" rows="3">${h(f.intro)}</textarea></label>
-      <label class="field"><span>Put new people in group</span><input name="group_name" list="form-groups" value="${h(f.group_name)}" style="width:100%"><datalist id="form-groups">${meta.groups.map((g) => `<option value="${h(g)}">`).join('')}</datalist></label>
-      <div class="field"><span>Also ask for</span>${box('ask_company', 'Business or organization')}${box('ask_phone', 'Phone')}${box('ask_message', 'Message')}</div>
-      <label class="field"><span>Email permission box <small>(left unchecked for them to tick; leave empty for no box)</small></span><input name="email_checkbox" value="${h(f.email_checkbox)}" style="width:100%"></label>
-      <label class="field"><span>Thank-you message <small>(optional)</small></span><textarea name="thank_you" rows="2">${h(f.thank_you)}</textarea></label>
-      ${box('active', 'Form is on (people can fill it in)')}
-      <div class="row" style="margin-top:12px"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="form-msg"></span></div></form>`;
-    q$('[data-close]', dlg).onclick = () => dlg.close();
-    q$('#form-form', dlg).onsubmit = async (e) => {
-      e.preventDefault();
-      const fm = e.target, data = Object.fromEntries(new FormData(fm));
-      ['ask_company', 'ask_phone', 'ask_message', 'active'].forEach((k) => (data[k] = fm[k].checked));
-      try { await call(f.id ? `/forms/${f.id}` : '/forms', { method: f.id ? 'PUT' : 'POST', json: data }); dlg.close(); refresh(); }
-      catch (err) { q$('#form-msg', dlg).textContent = err.message; }
-    };
-    dlg.showModal();
-  }
+  // ---------- Forms (the form builder lives in forms.js) ----------
+  const renderForms = () => window.VPForms.render(meta);
 
   // ---------- Appointments ----------
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -713,6 +645,7 @@
   }
 
   // ---------- One contact ----------
+  window.crmOpenContact = (id) => openContact(id);
   async function openContact(id) {
     const c = id ? await call(`/contacts/${id}`) : { group_name: q$('#crm-group').value || 'Parade sponsor', stage: 'New', activities: [], tasks: [] };
     const templates = id ? await call('/templates') : [];
