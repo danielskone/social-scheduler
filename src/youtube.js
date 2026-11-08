@@ -136,10 +136,28 @@ async function videoStats(account, videoId) {
   return { likes: n(s.likeCount), comments: n(s.commentCount), shares: null, views: n(s.viewCount) };
 }
 
+// Comments on one of your videos, newest first, with the commenter's channel name.
+async function videoComments(account, videoId) {
+  const token = await accessToken(account.access_token);
+  try {
+    const d = await get('commentThreads', { part: 'snippet,replies', videoId, maxResults: '50', order: 'time', textFormat: 'plainText' }, token);
+    const shape = (c) => {
+      const s = c.snippet || {};
+      return { id: c.id, name: s.authorDisplayName || null, picture: s.authorProfileImageUrl || null, profile: s.authorChannelUrl || null, text: s.textOriginal || s.textDisplay || '', time: s.publishedAt, likes: s.likeCount ?? 0 };
+    };
+    const comments = (d.items || []).map((t) => ({ ...shape(t.snippet?.topLevelComment || {}), replies: (t.replies?.comments || []).map((r) => ({ ...shape(r), replies: [] })) }));
+    return { comments, more: Boolean(d.nextPageToken) };
+  } catch (e) {
+    if (/commentsDisabled/.test(e.message)) return { comments: [], note: 'Comments are turned off on this video.' };
+    if (/videoNotFound|forbidden/i.test(e.message)) return { comments: [], note: 'YouTube shows no comments for this video yet. Private videos can\'t get comments.' };
+    throw e;
+  }
+}
+
 async function subscriberCount(account) {
   const d = await get('channels', { part: 'statistics', id: account.external_id }, await accessToken(account.access_token));
   const s = d.items?.[0]?.statistics;
   return s && !s.hiddenSubscriberCount ? Number(s.subscriberCount) : null;
 }
 
-module.exports = { configured, redirectUri, loginUrl, accountsFromCode, publishYouTube, videoStats, subscriberCount, titleFor, YouTubeError };
+module.exports = { configured, redirectUri, loginUrl, accountsFromCode, publishYouTube, videoStats, videoComments, subscriberCount, titleFor, YouTubeError };

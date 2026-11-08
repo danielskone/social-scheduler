@@ -102,6 +102,22 @@ document.addEventListener('visibilitychange', () => {
   if (!$('#view-calendar').hidden) renderCalendar();
 });
 // Scrolls so today's day (or, if today has no posts, the next day that does) sits at the top.
+// The Month/Week header stays at the top while you scroll (below the app bar on iPhone).
+const stickyTop = () => (isPhone() ? ($('.appbar')?.offsetHeight || 0) : 0);
+function updateStickyHead() {
+  const head = $('#view-calendar > .view-head');
+  if (!head || $('#view-calendar').hidden) return;
+  const top = stickyTop();
+  document.documentElement.style.setProperty('--sticky-top', `${top}px`);
+  document.documentElement.style.setProperty('--cal-head-h', `${head.offsetHeight}px`);
+  head.classList.toggle('stuck', scrollY > 4 && head.getBoundingClientRect().top <= top + 1);
+}
+let stickyQueued = false;
+const queueSticky = () => { if (!stickyQueued) { stickyQueued = true; requestAnimationFrame(() => { stickyQueued = false; updateStickyHead(); }); } };
+addEventListener('scroll', queueSticky, { passive: true });
+addEventListener('resize', queueSticky);
+if (window.ResizeObserver) new ResizeObserver(queueSticky).observe($('#view-calendar > .view-head'));
+
 function scrollToToday(m) {
   if (!jumpToToday) return;
   jumpToToday = false;
@@ -112,10 +128,11 @@ function scrollToToday(m) {
     target = [...document.querySelectorAll('#cal-agenda .ag-day')].find((el) => new Date(el.dataset.day) >= now);
   }
   if (!target) { window.scrollTo(0, 0); return; }
-  const bar = isPhone() ? ($('.appbar')?.offsetHeight || 0) : 0;
+  // Leave room for the header that stays at the top (and the app bar on iPhone).
+  const bar = stickyTop() + $('#view-calendar > .view-head').offsetHeight + (m === 'month' ? $('#cal-weekdays').offsetHeight : 0);
   const r = target.getBoundingClientRect();
   // On the Mac, leave the page alone if today and its first posts are already on screen.
-  if (!isPhone() && r.top >= 0 && r.top + Math.min(r.height, 320) <= innerHeight) return;
+  if (!isPhone() && r.top >= bar && r.top + Math.min(r.height, 320) <= innerHeight) return;
   window.scrollTo({ top: Math.max(0, scrollY + r.top - bar - 10), behavior: 'auto' });
 }
 $('#cal-mode').onclick = (e) => {
@@ -177,6 +194,7 @@ async function renderCalendar() {
   const m = mode();
   document.querySelectorAll('#cal-mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === (m === 'list' && isPhone() && calMode === 'month' ? 'month' : m)));
   $('#view-calendar').dataset.mode = m;
+  queueSticky();
   const overview = renderOverview().catch(() => {});
   // Wait for the cards at the top so they don't push today down after we've scrolled to it.
   const jump = async () => { if (jumpToToday) { await overview; requestAnimationFrame(() => scrollToToday(m)); } };
@@ -450,6 +468,7 @@ let anPlatform = 'all';
 let anSort = { key: 'published_at', dir: -1 };
 let anData = null;
 let anShowAll = false;
+let anTopBy = (() => { try { return localStorage.getItem('anTopBy') || 'views'; } catch { return 'views'; } })();
 
 $('#an-range').onclick = (e) => {
   const b = e.target.closest('button[data-days]');
@@ -459,6 +478,24 @@ $('#an-range').onclick = (e) => {
   renderAnalytics();
 };
 $('#an-filter').onclick = (e) => { const b = e.target.closest('button[data-pl]'); if (b) { anPlatform = b.dataset.pl; drawAnalytics(); } };
+$('#an-top-by').onclick = (e) => {
+  const b = e.target.closest('button[data-by]');
+  if (!b) return;
+  anTopBy = b.dataset.by;
+  try { localStorage.setItem('anTopBy', anTopBy); } catch { /* private mode */ }
+  drawAnalytics();
+};
+// Tapping a post (top list or table) opens its numbers and the comments.
+$('#an-top').onclick = (e) => { const r = e.target.closest('[data-tid]'); if (r) { e.preventDefault(); openPostStats(r.dataset.tid); } };
+$('#an-table tbody').onclick = (e) => { const r = e.target.closest('tr[data-tid]'); if (r && !e.target.closest('a')) openPostStats(r.dataset.tid); };
+// Tapping the Engagement or Comments tile shows the posts behind that number.
+$('#an-tiles').onclick = (e) => {
+  const t = e.target.closest('[data-tile]');
+  if (!t) return;
+  anTopBy = t.dataset.tile === 'views' ? 'views' : 'eng';
+  drawAnalytics();
+  $('#an-top-head').scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
 $('#an-table thead').onclick = (e) => {
   const th = e.target.closest('th[data-sort]');
   if (!th) return;
@@ -512,7 +549,8 @@ function drawAnalytics() {
     ['Views', sum(posts, 'views'), sum(prev, 'views'), '👀'],
     ['Avg. per post', posts.length ? sum(posts, 'eng') / posts.length : 0, prev.length ? sum(prev, 'eng') / prev.length : 0, '⭐'],
   ];
-  $('#an-tiles').innerHTML = tiles.map(([l, v, b, e]) => `<div class="tile"><div class="label"><span class="emo">${e}</span>${l}</div>
+  const tapTile = { Engagement: 'eng', Comments: 'eng', Views: 'views' };
+  $('#an-tiles').innerHTML = tiles.map(([l, v, b, e]) => `<div class="tile${tapTile[l] ? ' tap' : ''}" ${tapTile[l] ? `data-tile="${tapTile[l]}" role="button" tabindex="0" title="See the posts behind this number"` : ''}><div class="label"><span class="emo">${e}</span>${l}</div>
     <div class="value">${fmtN(v)}</div><div class="sub">${change(v, b)} <span class="muted">vs last ${days} days</span></div></div>`).join('')
     + (failed ? `<a class="tile bad" href="#calendar"><div class="label"><span class="emo">⚠️</span>Failed posts</div><div class="value">${failed}</div><div class="sub muted">Open the calendar to retry</div></a>` : '');
 
@@ -556,13 +594,17 @@ function drawAnalytics() {
       <div class="plrow-stats"><span>❤️ ${fmtN(x.likes)}</span><span>💬 ${fmtN(x.comments)}</span><span>🔁 ${fmtN(x.shares)}</span>${x.views ? `<span>👀 ${fmtN(x.views)}</span>` : ''}<span class="muted">avg ${fmtN(x.eng / x.posts)}/post</span></div>
     </div>`).join('') || '<p class="empty small">Nothing published yet.</p>';
 
-  // Top posts
-  const top = [...posts].sort((a, b) => eng(b) - eng(a)).slice(0, 5);
-  $('#an-top').innerHTML = top.map((p, i) => `<a class="top-post" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''}>
+  // Top posts: most views (falls back to engagement when a platform gives no view count)
+  document.querySelectorAll('#an-top-by button').forEach((b) => b.classList.toggle('on', b.dataset.by === anTopBy));
+  const score = (p) => (anTopBy === 'views' ? (p.views || 0) : eng(p));
+  const top = [...posts].sort((a, b) => score(b) - score(a) || eng(b) - eng(a)).slice(0, 5);
+  $('#an-top').innerHTML = top.map((p, i) => `<button type="button" class="top-post" data-tid="${p.id}">
     <span class="rank">${i + 1}</span>${thumb(p, 'tp-thumb')}
     <span class="tp-body"><span class="tp-text">${esc(p.title || p.caption || '(no caption)')}</span>
-      <span class="tp-meta">${icon(p.platform)} ${esc(p.account_name)} · ${new Date(p.published_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span></span>
-    <span class="tp-nums"><b>${fmtN(eng(p))}</b><span class="muted small">❤️ ${p.likes ?? 0} · 💬 ${p.comments ?? 0}</span></span></a>`).join('') || '<p class="empty small">No published posts in this period yet.</p>';
+      <span class="tp-meta">${icon(p.platform)} ${esc(p.account_name)} · ${new Date(p.published_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+      <span class="tp-chips"><span>👀 ${p.views == null ? '–' : fmtN(p.views)}</span><span>❤️ ${fmtN(p.likes || 0)}</span><span class="tp-com">💬 ${fmtN(p.comments || 0)}</span></span></span>
+    <span class="tp-nums"><b>${anTopBy === 'views' ? (p.views == null ? '–' : fmtN(p.views)) : fmtN(eng(p))}</b><span class="muted small">${anTopBy === 'views' ? 'views' : 'engagement'}</span></span>
+    <span class="tp-go" aria-hidden="true">›</span></button>`).join('') || '<p class="empty small">No published posts in this period yet.</p>';
 
   // Best weekday + best hours
   const wd = [...Array(7)].map(() => ({ n: 0, e: 0 })), hr = {};
@@ -608,12 +650,64 @@ function drawAnalytics() {
   const LIMIT = 20;
   $('#an-more').innerHTML = rows.length > LIMIT ? `<button class="btn ghost show-all" type="button">${anShowAll ? 'Show fewer' : `Show all ${rows.length} posts`}</button>` : '';
   $('#an-more').onclick = () => { anShowAll = !anShowAll; drawAnalytics(); };
-  $('#an-table tbody').innerHTML = (anShowAll ? rows : rows.slice(0, LIMIT)).map((p) => `<tr>
+  $('#an-table tbody').innerHTML = (anShowAll ? rows : rows.slice(0, LIMIT)).map((p) => `<tr data-tid="${p.id}" title="Tap to see the comments">
     <td><div class="t-post">${thumb(p, 't-thumb')}${p.permalink ? `<a href="${esc(p.permalink)}" target="_blank" rel="noopener">${esc(p.title || p.caption || '(no caption)')}</a>` : `<span>${esc(p.title || p.caption || '(no caption)')}</span>`}</div></td>
     <td><span class="t-acct">${icon(p.platform)} ${esc(p.account_name)}</span></td>
     <td>${new Date(p.published_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
     <td>${p.likes ?? '–'}</td><td>${p.comments ?? '–'}</td><td>${p.shares ?? '–'}</td><td>${p.views ?? '–'}</td><td><b>${eng(p)}</b></td></tr>`).join('')
     || '<tr><td colspan="8" class="muted">Nothing published in this period yet.</td></tr>';
+}
+
+// One post's numbers plus its comments: who wrote them and what they said.
+const ago = (iso) => {
+  const s = (Date.now() - new Date(iso)) / 1000;
+  if (!(s >= 0)) return '';
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m`;
+  if (s < 86400) return `${Math.round(s / 3600)}h`;
+  if (s < 86400 * 7) return `${Math.round(s / 86400)}d`;
+  return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
+};
+function commentHtml(c, reply = false) {
+  const who = c.name || 'Someone';
+  const initials = who.replace(/^@/, '').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '?';
+  const pic = `<span>${esc(initials)}</span>${c.picture ? `<img src="${esc(c.picture)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}`;
+  const name = c.profile ? `<a href="${esc(c.profile)}" target="_blank" rel="noopener">${esc(who)}</a>` : esc(who);
+  return `<div class="cmt${reply ? ' reply' : ''}"><span class="cmt-pic">${pic}</span>
+    <div class="cmt-body"><div class="cmt-bubble"><b>${name}</b><p>${esc(c.text)}</p></div>
+      <div class="cmt-meta">${ago(c.time)}${c.likes ? ` · ❤️ ${c.likes}` : ''}${c.replies?.length ? ` · ${c.replies.length} repl${c.replies.length === 1 ? 'y' : 'ies'}` : ''}</div>
+      ${(c.replies || []).map((r) => commentHtml(r, true)).join('')}</div></div>`;
+}
+async function openPostStats(tid) {
+  const p = anData.posts.find((x) => String(x.id) === String(tid));
+  if (!p) return;
+  const dlg = $('#an-dialog');
+  const media = p.media_url ? (p.media_type === 'video'
+    ? `<video src="${esc(p.media_url)}" ${p.thumb_url ? `poster="${esc(p.thumb_url)}"` : ''} controls playsinline preload="none"></video>`
+    : `<img src="${esc(p.media_url)}" alt="">`) : '';
+  dlg.innerHTML = `<div class="and-head">${icon(p.platform)}<div><b>${esc(p.account_name)}</b><small>${fmtDateTime(p.published_at)}</small></div>
+      <button class="btn ghost and-x" type="button" aria-label="Close">✕</button></div>
+    <div class="and-post">${media}<p>${esc(p.title || p.caption || '(no caption)')}</p></div>
+    <div class="and-stats">
+      <div><b>${p.views == null ? '–' : fmtN(p.views)}</b><span>👀 Views</span></div>
+      <div><b>${fmtN(p.likes || 0)}</b><span>❤️ Likes</span></div>
+      <div><b>${fmtN(p.comments || 0)}</b><span>💬 Comments</span></div>
+      <div><b>${p.shares == null ? '–' : fmtN(p.shares)}</b><span>🔁 Shares</span></div>
+    </div>
+    <h3 class="and-h">Comments</h3>
+    <div class="and-comments" id="and-comments"><p class="muted">Loading comments…</p></div>
+    <div class="row and-actions">${p.permalink ? `<a class="btn primary" href="${esc(p.permalink)}" target="_blank" rel="noopener">Open post on ${NAMES[p.platform]}</a>` : ''}<button class="btn ghost and-close" type="button">Close</button></div>`;
+  dlg.showModal(); dlg.scrollTop = 0; document.activeElement?.blur();
+  dlg.querySelectorAll('.and-x, .and-close').forEach((b) => (b.onclick = () => dlg.close()));
+  dlg.onclick = (e) => { if (e.target === dlg) dlg.close(); };
+  let r;
+  try { r = await api(`/analytics/comments/${tid}`); } catch (e) { r = { comments: [], note: e.message }; }
+  if (!dlg.open) return;
+  const box = $('#and-comments');
+  const list = r.comments || [];
+  box.innerHTML = (r.note ? `<p class="and-note">${esc(r.note)}</p>` : '')
+    + (list.length
+      ? `<p class="muted small and-count">${list.length}${r.more ? '+' : ''} comment${list.length === 1 ? '' : 's'} · newest first</p>${list.map((c) => commentHtml(c)).join('')}`
+      : (r.note ? '' : '<p class="muted and-empty">No comments on this post yet.</p>'));
 }
 
 // ---------- Accounts ----------

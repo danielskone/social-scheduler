@@ -189,7 +189,9 @@
       </div>
       <div class="an-grid">
         <div class="panel">
-          <div class="panel-head"><h2>Top posts</h2><span class="muted small">Most likes + comments + shares</span></div>
+          <div class="panel-head" id="an-top-head"><h2>Top posts</h2>
+            <div class="seg seg-sm" id="an-top-by"><button type="button" data-by="views">👀 Most views</button><button type="button" data-by="eng">🔥 Engagement</button></div></div>
+          <p class="muted small an-top-hint">Tap a post to see who commented.</p>
           <div id="an-top"></div>
         </div>
         <div class="panel">
@@ -330,6 +332,7 @@
   </main>
 
   <dialog id="post-dialog"></dialog>
+  <dialog id="an-dialog" class="an-dialog"></dialog>
   <div id="hover-card" class="hover-card" hidden></div>
   <dialog id="contact-dialog" class="wide"></dialog>
   <dialog id="crm-edit-dialog"></dialog>
