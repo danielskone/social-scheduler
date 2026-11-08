@@ -17,6 +17,11 @@
 // at the same time for the same accounts (and not yet posted) gets the new caption instead
 // of being added again. Used to fix captions on posts imported earlier.
 //
+// With "clear": { "from": "2026-11-08T00:00:00-05:00", "to": "2026-11-09T00:00:00-05:00" }
+// at the top of the bundle, posts in that time window are removed first, so a day's posts
+// can be swapped for new ones in one import. Only posts that haven't gone out yet and only
+// go to accounts used in this bundle are removed; anything else on the calendar is kept.
+//
 // Everything is checked first; if any post has a problem nothing is imported. Posts that
 // already exist (same caption, time and accounts) are skipped, so importing twice is safe.
 const crypto = require('crypto');
@@ -97,6 +102,13 @@ function importBundle(json, { now = Date.now() } = {}) {
     ready.push({ caption, title: String(p.title || '').trim() || null, when: new Date(when).toISOString(), accts, media });
   });
 
+  let clear = null;
+  if (bundle.clear) {
+    const from = Date.parse(bundle.clear.from), to = Date.parse(bundle.clear.to);
+    if (isNaN(from) || isNaN(to) || to <= from) problems.push('The "clear" dates are missing or invalid.');
+    else clear = { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
+  }
+
   if (problems.length) return { error: `Nothing was imported. Please fix: ${problems.join(' ')}`, problems };
 
   const exists = db.prepare(`
@@ -110,9 +122,25 @@ function importBundle(json, { now = Date.now() } = {}) {
   const insPost = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, media_source_url, title) VALUES (?,?,?,?,?,?)');
   const insTarget = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
   const written = [];
-  let imported = 0, skipped = 0, updated = 0;
+  const removedFiles = [];
+  let imported = 0, skipped = 0, updated = 0, removed = 0;
   try {
     db.transaction(() => {
+      if (clear) {
+        const used = new Set(ready.flatMap((r) => r.accts.map((a) => a.id)));
+        const inWindow = db.prepare(`
+          SELECT p.id, p.media_file FROM posts p WHERE p.scheduled_at >= ? AND p.scheduled_at < ?
+            AND NOT EXISTS (SELECT 1 FROM post_targets WHERE post_id=p.id AND status IN ('published','publishing'))`).all(clear.from, clear.to);
+        const targetsOf = db.prepare('SELECT account_id FROM post_targets WHERE post_id=?');
+        const del = db.prepare('DELETE FROM posts WHERE id=?');
+        for (const p of inWindow) {
+          const accts = targetsOf.all(p.id).map((t) => t.account_id);
+          if (!accts.length || !accts.every((id) => used.has(id))) continue;
+          del.run(p.id);
+          if (p.media_file) removedFiles.push(p.media_file);
+          removed++;
+        }
+      }
       for (const r of ready) {
         const ids = r.accts.map((a) => a.id).sort((x, y) => x - y);
         if (exists.get(r.caption, r.when, ids.join(','))) { skipped++; continue; }
@@ -135,8 +163,9 @@ function importBundle(json, { now = Date.now() } = {}) {
     written.forEach((f) => fs.rmSync(path.join(config.mediaDir, f), { force: true }));
     throw err;
   }
+  removedFiles.forEach((f) => fs.rmSync(path.join(config.mediaDir, f), { force: true }));
   const first = ready.map((r) => r.when).sort()[0];
-  return { imported, skipped, updated, first };
+  return { imported, skipped, updated, removed, first };
 }
 
 module.exports = { importBundle };
