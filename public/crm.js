@@ -58,8 +58,8 @@
     forms: ['forms', 'Your own form builder', 'Make any form: sign-ups, RSVPs, surveys, quotes, releases with a signature. <b>Describe it</b> or pick a ready-made one, then drag questions around. Share it as a link, a QR code or website code. Every response is saved, people become contacts, and your iPhone gets a ping.'],
     templates: ['templates', 'Messages you send a lot', 'Write a message once, use it again and again. Put <b>{first_name}</b>, <b>{name}</b> or <b>{company}</b> in it and the right details fill in for each person. They open in your own Mail or Messages, one person at a time.'],
     email: ['email', 'Newsletters and email blasts', 'Send one email to many people at once. A <b>campaign</b> is the email, a <b>segment</b> is who gets it, and a <b>design</b> is how it looks. Only people who said yes to email ever get one, and your mailing address and an unsubscribe line are added for you.'],
-    automations: ['automations', 'Your helper that works while you\'re busy', 'Each card says <b>When</b> something happens (a new lead, a form, a stage change, a booking) and the <b>steps</b> that follow, like making a task, buzzing your phone or sending a welcome email. They\'re already set up and switched on. Use <b>Turn off</b> to pause one.',
-      'Texts are never sent automatically. Emails go out only through "Send email now" steps.'],
+    automations: ['automations', 'Your helper that works while you\'re busy', 'Each workflow starts with a <b>trigger</b> (a new lead, a form, a stage change, a booking) and then runs its <b>steps</b> in order, top to bottom, like sending an email, making a task or waiting 2 days. Click one to see it as a flow. <b>Draft</b> means it\'s off; switch on <b>Publish</b> to run it. Not sure? Describe what you want at the top, or pick a ready-made one.',
+      'Texts are never sent automatically: a "Send a text" step puts the message one tap away. Emails go out only through "Send email" steps.'],
   };
   function renderTip(t) {
     const panel = q$(`.crm-panel[data-panel="${t}"]`);
@@ -526,123 +526,8 @@
     dlg.showModal();
   }
 
-  // ---------- Automations ----------
-  const STEP_NAMES = { alert: 'Buzz my phone', email: 'Send email now', task: 'Make a task', stage: 'Move to stage', group: 'Put in group', follow_up: 'Set next follow-up', note: 'Add a note', wait: 'Wait' };
-  const stepText = (s, tpls) => ({
-    alert: () => `Buzz my phone: "${s.title}"`,
-    email: () => `Send email now: "${(tpls.find((t) => t.id === s.template_id) || {}).name || 'deleted template'}"`,
-    task: () => `Make a task: "${s.title}"${s.due_days ? `, due in ${s.due_days} day${s.due_days === 1 ? '' : 's'}` : ''}${s.template_id ? ` with "${(tpls.find((t) => t.id === s.template_id) || {}).name || 'a template'}" ready to send` : ''}`,
-    stage: () => `Move to "${s.stage}"`,
-    group: () => `Put in group "${s.group}"`,
-    follow_up: () => `Set next follow-up ${s.days ? `${s.days} day${s.days === 1 ? '' : 's'} later` : 'for today'}`,
-    note: () => `Add a note: "${s.note}"`,
-    wait: () => `Wait ${s.amount} ${s.unit}${s.if_stage ? `, then keep going only if still "${s.if_stage}"` : ''}`,
-  }[s.type] || (() => s.type))();
-  const triggerText = (t, triggers) => `${t.type === 'stage_changed' ? `A contact moves to "${t.stage}"` : triggers[t.type]}${t.group ? ` in group "${t.group}"` : ''}${t.type !== 'stage_changed' && t.stage ? ` while "${t.stage}"` : ''}${t.form ? ` (form name has "${t.form}")` : ''}`;
-
-  async function renderAutomations() {
-    const [data, tpls] = await Promise.all([call('/automations'), call('/templates')]);
-    const em = data.email;
-    const emailCard = `<div class="item" style="grid-column:1/-1"><b>Automatic emails</b> ${em.ready ? '<span class="pill">Connected</span>' : '<span class="pill">Not set up</span>'}
-      <div class="muted">${em.ready
-        ? `"Send email now" steps go out from <b>${h(em.from)}</b> ${em.provider === 'mailbox' ? '(your own mailbox)' : 'through Brevo'}. ${em.sentToday} sent in the last day (limit ${em.limit}). Emails only go to people who just contacted you or said yes to email, never to "Do not contact", and each one has your address and an unsubscribe line. ${em.provider === 'mailbox' ? '"Unsubscribe" replies are turned into "Do not contact" every hour.' : 'If someone replies "unsubscribe", open them and tick "Do not contact".'}`
-        : 'Emails are switched off until you connect your email (like your viralattraction.com address). In Terminal run: <b>cd ~/social-scheduler && npm run email-setup</b>. Until then those steps are skipped and everything else still runs.'}</div>
-      ${em.recent.length ? `<details style="margin-top:6px"><summary>Recent emails</summary><ul class="history">${em.recent.map((e) => `<li><b>${h(e.status === 'sent' ? 'Sent' : e.status === 'failed' ? 'Failed' : 'Sending')}</b> · ${h(e.contact_name || e.to_email)} · ${h(e.subject || '')}${e.error ? `<br><span style="color:var(--bad)">${h(e.error)}</span>` : ''}</li>`).join('')}</ul></details>` : ''}</div>`;
-    q$('#auto-list').innerHTML = emailCard + data.automations.map((a) => `<div class="item" data-auto="${a.id}">
-      <b>${h(a.name)}</b> <div>${a.active ? '<span class="pill on">● On</span>' : '<span class="pill off">Off</span>'}</div>
-      <div class="auto-when">${svg('automations')}<div><b>When</b> ${h(triggerText(a.trigger, data.triggers))}</div></div>
-      <ol class="auto-steps">${a.steps.map((s) => `<li>${h(stepText(s, tpls))}</li>`).join('')}</ol>
-      <div class="muted small">Ran ${a.runs} time${a.runs === 1 ? '' : 's'}${a.waiting ? ` · ${a.waiting} waiting` : ''}${a.last_run_at ? ` · last ${h(new Date(a.last_run_at.replace(' ', 'T') + 'Z').toLocaleString())}` : ''}</div>
-      <div class="row"><button class="btn ghost" data-toggle>${a.active ? 'Turn off' : 'Turn on'}</button><button class="btn ghost" data-edit>Edit</button><button class="btn danger" data-del>Delete</button></div>
-    </div>`).join('') || '<p class="muted">No automations yet. Click "+ New automation".</p>';
-    q$('#auto-log').innerHTML = data.log.map((l) => `<li><b>${h(l.automation_name || 'Deleted automation')}</b>${l.contact_name ? ` · <a href="#" data-open="${l.contact_id}">${h(l.contact_name)}</a>` : ''}
-      <span class="muted"> · ${h(new Date(l.at.replace(' ', 'T') + 'Z').toLocaleString())}</span><br>${h(l.summary)}</li>`).join('') || '<li class="muted">Nothing has run yet. Automations start with the next new lead, form, stage change or booking.</li>';
-    q$('#auto-log').onclick = (e) => { if (e.target.dataset.open) { e.preventDefault(); openContact(Number(e.target.dataset.open)); } };
-    q$('#auto-list').onclick = async (e) => {
-      const el = e.target.closest('[data-auto]');
-      if (!el) return;
-      const a = data.automations.find((x) => x.id === Number(el.dataset.auto));
-      try {
-        if ('toggle' in e.target.dataset) { await call(`/automations/${a.id}`, { method: 'PUT', json: { active: !a.active } }); refresh(); }
-        if ('edit' in e.target.dataset) editAutomation(a, data.triggers, tpls);
-        if ('del' in e.target.dataset && confirm(`Delete "${a.name}"? Anything it was waiting to do is cancelled. Tasks it already made stay.`)) { await call(`/automations/${a.id}`, { method: 'DELETE' }); refresh(); }
-      } catch (err) { say(err.message, true); }
-    };
-    q$('#auto-add').onclick = () => editAutomation({ name: '', active: true, trigger: { type: 'contact_added' }, steps: [{ type: 'task', title: 'Call {name}', due_days: 0 }] }, data.triggers, tpls);
-  }
-
-  function editAutomation(a, triggers, tpls) {
-    const dlg = q$('#crm-edit-dialog');
-    let steps = a.steps.map((s) => ({ ...s }));
-    const stageOpts = (cur, blank) => (blank ? `<option value="">${blank}</option>` : '') + meta.stages.map((x) => `<option${x === cur ? ' selected' : ''}>${h(x)}</option>`).join('');
-    const stepFields = (s, i) => {
-      const inp = (k, ph = '', type = 'text', extra = '') => `<input data-i="${i}" data-k="${k}" type="${type}" value="${h(s[k] ?? '')}" placeholder="${h(ph)}" ${extra}>`;
-      return {
-        email: () => `<select data-i="${i}" data-k="template_id">${tpls.filter((t) => t.channel === 'email').map((t) => `<option value="${t.id}"${t.id === Number(s.template_id) ? ' selected' : ''}>${h(t.name)}</option>`).join('')}</select>
-          <span class="muted small">Goes out by itself, only to people who contacted you or said yes to email.</span>`,
-        alert: () => `${inp('title', 'Alert title', 'text', 'style="width:160px"')} ${inp('message', 'Message, e.g. {name} needs a call', 'text', 'style="flex:1;min-width:180px"')}`,
-        task: () => `${inp('title', 'e.g. Call {name}', 'text', 'style="flex:1;min-width:180px"')} <label class="muted">due in ${inp('due_days', '0', 'number', 'min="0" max="365" style="width:64px"')} days</label>
-          <select data-i="${i}" data-k="template_id"><option value="">No message</option>${tpls.map((t) => `<option value="${t.id}"${t.id === Number(s.template_id) ? ' selected' : ''}>With message: ${h(t.name)}</option>`).join('')}</select>`,
-        stage: () => `<select data-i="${i}" data-k="stage">${stageOpts(s.stage)}</select>`,
-        group: () => `<input data-i="${i}" data-k="group" list="auto-groups" value="${h(s.group || '')}" placeholder="Group">`,
-        follow_up: () => `<label class="muted">${inp('days', '0', 'number', 'min="0" max="365" style="width:64px"')} days from now</label>`,
-        note: () => inp('note', 'Note for their history', 'text', 'style="flex:1;min-width:200px"'),
-        wait: () => `${inp('amount', '1', 'number', 'min="1" style="width:64px"')} <select data-i="${i}" data-k="unit"><option value="days"${s.unit !== 'hours' ? ' selected' : ''}>days</option><option value="hours"${s.unit === 'hours' ? ' selected' : ''}>hours</option></select>
-          <label class="muted">then keep going <select data-i="${i}" data-k="if_stage">${stageOpts(s.if_stage, 'no matter what')}</select></label>`,
-      }[s.type]();
-    };
-    const drawSteps = () => {
-      q$('#auto-steps', dlg).innerHTML = steps.map((s, i) => `<li class="row" style="align-items:center;gap:6px;margin:6px 0">
-        <b style="min-width:130px">${i + 1}. ${STEP_NAMES[s.type]}</b> ${stepFields(s, i)}
-        <button type="button" class="x" data-up="${i}" title="Move up">↑</button><button type="button" class="x" data-rm="${i}" title="Remove">×</button></li>`).join('');
-    };
-    const drawTrigger = () => {
-      const type = q$('[name=type]', dlg).value;
-      q$('#auto-stage-label', dlg).textContent = type === 'stage_changed' ? 'Moves to stage' : 'Only while in stage';
-      q$('[name=stage]', dlg).innerHTML = stageOpts(q$('[name=stage]', dlg).value || a.trigger.stage, type === 'stage_changed' ? '' : 'any stage');
-      q$('#auto-form-field', dlg).hidden = type !== 'form_filled';
-    };
-    dlg.innerHTML = `<form id="auto-form"><h1>${a.id ? 'Edit automation' : 'New automation'}</h1>
-      <label class="field"><span>Name</span><input name="name" required value="${h(a.name)}" placeholder="e.g. New volunteer: welcome call" style="width:100%"></label>
-      <div class="row">
-        <label class="field"><span>When</span><select name="type">${Object.entries(triggers).map(([k, v]) => `<option value="${k}"${k === a.trigger.type ? ' selected' : ''}>${h(v)}</option>`).join('')}</select></label>
-         <label class="field"><span>In group <small>(several: separate with commas)</small></span><input name="group" list="auto-groups" value="${h(a.trigger.group || '')}" placeholder="any group"></label>
-        <label class="field"><span id="auto-stage-label">Stage</span><select name="stage"></select></label>
-        <label class="field" id="auto-form-field"><span>Form name has <small>(optional)</small></span><input name="form" value="${h(a.trigger.form || '')}" placeholder="e.g. sponsor">
-          <label class="check" style="font-weight:400"><input type="checkbox" name="skip_newsletter" ${a.trigger.skip_newsletter ? 'checked' : ''}> Skip newsletter-only sign-ups</label></label>
-      </div>
-      <datalist id="auto-groups">${meta.groups.map((g) => `<option value="${h(g)}">`).join('')}</datalist>
-      <div class="field"><span>Then do these steps, in order</span><ol id="auto-steps" style="list-style:none;padding:0;margin:0"></ol>
-        <div class="row"><select id="auto-step-type">${Object.entries(STEP_NAMES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select><button type="button" class="btn ghost" id="auto-step-add">+ Add step</button></div></div>
-      <p class="muted small">Fill-ins: {first_name}, {name}, {company}, {email}, {phone}, {group}, {stage}, {form}, {when} (appointment time). Email templates use {first_name}, {name}, {company}. Texts are never sent automatically.</p>
-      <label class="check"><input type="checkbox" name="active" ${a.active ? 'checked' : ''}> Automation is on</label>
-      <div class="row" style="margin-top:12px"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="auto-msg"></span></div></form>`;
-    drawTrigger(); drawSteps();
-    q$('[name=type]', dlg).onchange = drawTrigger;
-    q$('#auto-steps', dlg).addEventListener('input', (e) => { const { i, k } = e.target.dataset; if (k) steps[i][k] = e.target.value; });
-    q$('#auto-steps', dlg).addEventListener('change', (e) => { const { i, k } = e.target.dataset; if (k) steps[i][k] = e.target.value; });
-    q$('#auto-steps', dlg).onclick = (e) => {
-      const { rm, up } = e.target.dataset;
-      if (rm != null) { steps.splice(Number(rm), 1); drawSteps(); }
-      if (up != null && Number(up) > 0) { const i = Number(up); [steps[i - 1], steps[i]] = [steps[i], steps[i - 1]]; drawSteps(); }
-    };
-    q$('#auto-step-add', dlg).onclick = () => {
-      const type = q$('#auto-step-type', dlg).value;
-      steps.push({ email: { type, template_id: (tpls.find((t) => t.channel === 'email') || {}).id }, alert: { type, title: 'Viral Touch CRM', message: '{name}' }, task: { type, title: '', due_days: 0 }, stage: { type, stage: meta.stages[1] }, group: { type, group: '' },
-        follow_up: { type, days: 1 }, note: { type, note: '' }, wait: { type, amount: 1, unit: 'days', if_stage: '' } }[type]);
-      drawSteps();
-    };
-    q$('[data-close]', dlg).onclick = () => dlg.close();
-    q$('#auto-form', dlg).onsubmit = async (e) => {
-      e.preventDefault();
-      const v = (n) => q$(`[name=${n}]`, e.target);
-      const json = { name: v('name').value, active: v('active').checked, steps: steps.map((s) => ({ ...s, template_id: s.template_id ? Number(s.template_id) : null })),
-        trigger: { type: v('type').value, group: v('group').value, stage: v('stage').value, form: v('form').value, skip_newsletter: v('skip_newsletter').checked } };
-      try { await call(a.id ? `/automations/${a.id}` : '/automations', { method: a.id ? 'PUT' : 'POST', json }); dlg.close(); refresh(); }
-      catch (err) { q$('#auto-msg', dlg).textContent = err.message; }
-    };
-    dlg.showModal();
-  }
+  // ---------- Automations (the workflow builder lives in workflows.js) ----------
+  const renderAutomations = () => window.VPWorkflows.render(meta);
 
   // ---------- One contact ----------
   window.crmOpenContact = (id) => openContact(id);

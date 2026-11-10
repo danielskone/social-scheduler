@@ -17,6 +17,7 @@ const db = require('./db');
 const crm = require('./crm');
 const notify = require('./notify');
 const email = require('./email');
+const kit = require('./workflow-kit');
 
 const TRIGGERS = {
   contact_added: 'A new contact is added',
@@ -25,7 +26,7 @@ const TRIGGERS = {
   appointment_booked: 'Someone books an appointment',
   email_opt_in: 'Someone says yes to email (subscribes)',
 };
-const STEPS = ['alert', 'email', 'task', 'stage', 'group', 'follow_up', 'note', 'wait'];
+const STEPS = ['alert', 'email', 'text', 'task', 'stage', 'group', 'follow_up', 'note', 'wait'];
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS crm_automations (
@@ -80,6 +81,11 @@ function cleanStep(s) {
     if (!t) throw err400('A "send email" step needs one of your email templates.');
     return { type, template_id: t.id };
   }
+  if (type === 'text') { // a text ready to send: you tap Send in Messages (texts never go out by themselves)
+    const t = db.prepare('SELECT * FROM crm_templates WHERE id=?').get(Number(s.template_id));
+    if (!t) throw err400('A "send a text" step needs one of your message templates.');
+    return { type, template_id: t.id, title: str(s.title, 200) || 'Text {name}' };
+  }
   if (type === 'task') {
     const title = str(s.title, 200);
     if (!title) throw err400('A "make a task" step needs a task name.');
@@ -117,9 +123,32 @@ function cleanTrigger(t) {
   return out;
 }
 
-const parse = (a) => a && { ...a, active: Boolean(a.active), trigger: JSON.parse(a.trigger_json), steps: JSON.parse(a.steps_json), trigger_json: undefined, steps_json: undefined };
+const parse = (a) => {
+  if (!a) return a;
+  const steps = JSON.parse(a.steps_json);
+  return { ...a, active: Boolean(a.active), trigger: JSON.parse(a.trigger_json), steps, problems: problems(steps), trigger_json: undefined, steps_json: undefined };
+};
 const get = (id) => parse(db.prepare('SELECT * FROM crm_automations WHERE id=?').get(id));
 const list = () => db.prepare('SELECT * FROM crm_automations ORDER BY id').all().map(parse);
+
+// A draft (switched off) may still have unfinished steps: each one keeps a "problem" note,
+// shown as an orange mark in the builder. Publishing (switching on) needs every step finished.
+const KEEP = ['type', 'title', 'message', 'template_id', 'due_days', 'stage', 'group', 'days', 'note', 'amount', 'unit', 'if_stage'];
+function draftStep(s) {
+  try { return cleanStep(s); } catch (e) {
+    const out = { problem: e.message };
+    for (const k of KEEP) if (s?.[k] !== undefined && s[k] !== null && s[k] !== '') out[k] = typeof s[k] === 'string' ? str(s[k], 1000) : s[k];
+    if (!STEPS.includes(out.type)) out.type = 'task';
+    return out;
+  }
+}
+function problems(steps) {
+  const out = [];
+  steps.forEach((s, i) => { if (s.problem) out.push(`Step ${i + 1}: ${s.problem}`); });
+  if (!steps.length) out.push('Add at least one step.');
+  else if (steps[steps.length - 1].type === 'wait') out.push('A "wait" step needs something after it.');
+  return out;
+}
 
 function save(body, id) {
   const old = id ? get(id) : null;
@@ -127,11 +156,14 @@ function save(body, id) {
   const name = str(body.name ?? old?.name, 120);
   if (!name) throw err400('Give the automation a name.');
   const trigger = cleanTrigger(body.trigger ?? old?.trigger);
-  const steps = (body.steps ?? old?.steps ?? []).map(cleanStep);
-  if (!steps.length) throw err400('Add at least one step.');
-  if (steps.length > 20) throw err400('Keep it to 20 steps or fewer.');
-  if (steps[steps.length - 1].type === 'wait') throw err400('A "wait" step needs something after it.');
   const active = body.active === undefined ? (old ? old.active : true) : Boolean(body.active);
+  const raw = body.steps ?? old?.steps ?? [];
+  if (raw.length > 20) throw err400('Keep it to 20 steps or fewer.');
+  if (active) { // publishing: every step must be finished
+    const p = problems(raw.map(draftStep));
+    if (p.length) throw err400(`Can't publish yet. ${p[0]}`);
+  }
+  const steps = raw.map(active ? cleanStep : draftStep);
   const row = { name, active: active ? 1 : 0, trigger_json: JSON.stringify(trigger), steps_json: JSON.stringify(steps) };
   if (old) db.prepare('UPDATE crm_automations SET name=@name, active=@active, trigger_json=@trigger_json, steps_json=@steps_json WHERE id=@id').run({ ...row, id });
   else id = db.prepare('INSERT INTO crm_automations (name, active, trigger_json, steps_json) VALUES (@name,@active,@trigger_json,@steps_json)').run(row).lastInsertRowid;
@@ -181,6 +213,13 @@ function runSteps(a, contactId, from, vars, now = new Date()) {
       done.push('phone alert');
     } else if (s.type === 'email') {
       done.push(sendEmail(a, c, s, vars));
+    } else if (s.type === 'text') {
+      // Texts never go out by themselves: a task with the filled-in text, one tap away.
+      if (c.do_not_contact) { done.push('skipped text (Do not contact)'); continue; }
+      if (!c.phone) { done.push('skipped text (no phone number)'); continue; }
+      const t = crm.saveTask({ title: fill(s.title || 'Text {name}', c, vars), due_on: addDays(0, now), contact_id: c.id });
+      db.prepare('UPDATE crm_tasks SET template_id=? WHERE id=?').run(s.template_id, t.id);
+      done.push(`text ready to send ("${t.title}")`);
     } else if (s.type === 'task') {
       // Never line up a message for someone who asked not to be contacted.
       if (s.template_id && c.do_not_contact) { done.push('skipped message (Do not contact)'); continue; }
@@ -276,6 +315,37 @@ function runWaiting(now = new Date()) {
   return ran;
 }
 
+// ---------- Test run: says what would happen for one contact, without doing any of it ----------
+function dryRun(body, contactId) {
+  const c = db.prepare('SELECT * FROM contacts WHERE id=?').get(contactId);
+  if (!c) throw err400('Pick a contact to test with.');
+  const trigger = cleanTrigger(body.trigger);
+  const steps = (body.steps || []).map(draftStep);
+  const event = { contact: c, form: trigger.form || 'a form', to: trigger.stage, newsletterOnly: false };
+  const would = matches({ trigger }, trigger.type, event);
+  const why = [];
+  if (trigger.group && !trigger.group.split(',').map((g) => g.trim().toLowerCase()).includes(String(c.group_name).toLowerCase())) why.push(`${c.name} is in group "${c.group_name}", not "${trigger.group}"`);
+  if (trigger.type !== 'stage_changed' && trigger.stage && trigger.stage !== c.stage) why.push(`${c.name} is "${c.stage}", not "${trigger.stage}"`);
+  const vars = { form: trigger.form || 'your form', when: 'their appointment time', reached_out: ['form_filled', 'appointment_booked'].includes(trigger.type) };
+  const tplName = (id) => db.prepare('SELECT name FROM crm_templates WHERE id=?').get(id)?.name || 'a template';
+  const lines = steps.map((s) => {
+    if (s.problem) return `Not finished: ${s.problem}`;
+    return {
+      alert: () => `Buzz your phone: "${fill(s.title, c, vars)}: ${fill(s.message, c, vars)}"`,
+      email: () => (c.do_not_contact ? `Skip email "${tplName(s.template_id)}" (${c.name} is Do not contact)` : !c.email ? 'Skip email (no email address)'
+        : !vars.reached_out && !c.email_ok ? `Skip email "${tplName(s.template_id)}" (${c.name} didn't contact you or say yes to email)` : `Email "${tplName(s.template_id)}" to ${c.email}`),
+      text: () => (c.phone ? `Make a task to text ${c.phone} with "${tplName(s.template_id)}" (you tap Send)` : 'Skip text (no phone number)'),
+      task: () => `Make a task: "${fill(s.title, c, vars)}"${s.due_days ? `, due in ${s.due_days} day${s.due_days === 1 ? '' : 's'}` : ', due today'}`,
+      stage: () => `Move ${c.name} to "${s.stage}"`,
+      group: () => `Put ${c.name} in group "${s.group}"`,
+      follow_up: () => `Set next follow-up to ${addDays(s.days)}`,
+      note: () => `Add a note: "${fill(s.note, c, vars)}"`,
+      wait: () => `Wait ${s.amount} ${s.unit}${s.if_stage ? `, then carry on only if ${c.name} is still "${s.if_stage}"` : ''}`,
+    }[s.type]();
+  });
+  return { contact: c.name, would_start: would, why, steps: lines };
+}
+
 // ---------- Ready-made automations, added once (deleting one keeps it deleted) ----------
 db.exec('CREATE TABLE IF NOT EXISTS crm_flags (name TEXT PRIMARY KEY)');
 if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_automations'").get()) {
@@ -362,8 +432,22 @@ router.get('/', wrap((req, res) => {
       LEFT JOIN crm_automations a ON a.id=l.automation_id LEFT JOIN contacts c ON c.id=l.contact_id ORDER BY l.id DESC LIMIT 30`).all(),
   });
 }));
+// The builder: ready-made workflows, "describe it" drafts, history and a safe test run.
+router.get('/library', wrap((req, res) => res.json(kit.library())));
+router.post('/library/:key', wrap((req, res) => res.json(save(kit.fromLibrary(req.params.key)))));
+router.post('/suggest', wrap((req, res) => res.json(kit.suggest(String(req.body?.text || '')))));
+router.get('/:id/history', wrap((req, res) => {
+  const id = Number(req.params.id);
+  res.json({
+    log: db.prepare(`SELECT l.*, c.name AS contact_name FROM crm_automation_log l LEFT JOIN contacts c ON c.id=l.contact_id
+      WHERE l.automation_id=? ORDER BY l.id DESC LIMIT 200`).all(id),
+    waiting: db.prepare(`SELECT w.*, c.name AS contact_name FROM crm_automation_waits w JOIN contacts c ON c.id=w.contact_id
+      WHERE w.automation_id=? ORDER BY w.run_at`).all(id),
+  });
+}));
+router.post('/test', wrap((req, res) => res.json(dryRun(req.body?.automation || {}, Number(req.body?.contact_id)))));
 router.post('/', wrap((req, res) => res.json(save(req.body || {}))));
 router.put('/:id', wrap((req, res) => res.json(save(req.body || {}, Number(req.params.id)))));
 router.delete('/:id', wrap((req, res) => { remove(Number(req.params.id)); res.json({ ok: true }); }));
 
-module.exports = { router, save, get, list, remove, runWaiting, handle, fill, TRIGGERS };
+module.exports = { router, save, get, list, remove, runWaiting, handle, fill, dryRun, TRIGGERS, STEPS };
