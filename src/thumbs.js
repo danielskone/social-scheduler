@@ -56,4 +56,28 @@ async function thumbFor(file) {
   return made || (VIDEO.test(file) ? null : src);
 }
 
-module.exports = { thumbFor };
+// Makes the previews for posts around today ahead of time (a few at a time, in the
+// background), so the calendar opens with its pictures ready instead of making them while you wait.
+let warming = false;
+async function warm(db, limit = 12) {
+  if (warming || !isMac) return 0;
+  warming = true;
+  let made = 0;
+  try {
+    const now = Date.now();
+    const rows = db.prepare(`SELECT media_file FROM posts WHERE media_file IS NOT NULL AND scheduled_at BETWEEN ? AND ?
+      ORDER BY ABS(julianday(scheduled_at) - julianday(?))`).all(new Date(now - 45 * 864e5).toISOString(), new Date(now + 75 * 864e5).toISOString(), new Date(now).toISOString());
+    for (const { media_file: file } of rows) {
+      if (made >= limit) break;
+      if (!/^[\w.-]+$/.test(file) || fs.existsSync(path.join(thumbDir, `${file}.jpg`))) continue;
+      if (!fs.existsSync(path.join(config.mediaDir, file))) continue;
+      await thumbFor(file);
+      made++;
+    }
+  } finally {
+    warming = false;
+  }
+  return made;
+}
+
+module.exports = { thumbFor, warm };

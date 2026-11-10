@@ -8,6 +8,7 @@ const path = require('node:path');
 
 const calls = [];
 let statusFor = 'SEND_TO_USER_INBOX';
+let inboxFull = false;
 const tk = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
@@ -31,6 +32,7 @@ const tk = http.createServer((req, res) => {
     }
     if (p === '/v2/post/publish/creator_info/query/') return send({ data: { privacy_level_options: ['SELF_ONLY'] }, error: ok });
     if (p === '/v2/post/publish/inbox/video/init/' || p === '/v2/post/publish/video/init/') {
+      if (inboxFull) return send({ error: { code: 'spam_risk_too_many_pending_share', message: 'too many pending' } }, 403);
       return send({ data: { publish_id: 'pub1', upload_url: `http://127.0.0.1:${tk.address().port}/upload/1` }, error: ok });
     }
     if (p === '/upload/1') { res.writeHead(201); return res.end(); }
@@ -142,4 +144,39 @@ test('big files are split into allowed chunk sizes', () => {
   assert.equal(big.chunkSize, 10 * MB);
   assert.equal(big.count, 20);
   assert.ok(205 * MB - (big.count - 1) * big.chunkSize <= 128 * MB);
+});
+
+test('a full TikTok inbox waits and tries again later instead of failing', async () => {
+  inboxFull = true;
+  const a = await schedule('Sunday video 1');
+  const b = await schedule('Sunday video 2');
+  const before = calls.filter((c) => c.path === '/v2/post/publish/inbox/video/init/').length;
+  const t0 = Date.now();
+  await scheduler.publishDue(new Date(t0));
+  // Only one knock on TikTok's door; both wait, nothing failed.
+  assert.equal(calls.filter((c) => c.path === '/v2/post/publish/inbox/video/init/').length, before + 1);
+  for (const id of [a, b]) {
+    const t = target(id);
+    assert.equal(t.status, 'scheduled');
+    assert.match(t.error, /Waiting on TikTok.*inbox/);
+    assert.ok(Math.abs(new Date(t.retry_at) - (t0 + 6 * 3600e3)) < 5000);
+  }
+  await scheduler.publishDue(new Date(t0 + 3600e3)); // too early: left alone
+  assert.equal(target(a).status, 'scheduled');
+
+  inboxFull = false; // Daniel cleared his TikTok inbox
+  await scheduler.publishDue(new Date(t0 + 6 * 3600e3 + 1000));
+  assert.equal(target(a).status, 'published', target(a).error);
+  assert.equal(target(b).status, 'published', target(b).error);
+});
+
+test('after 3 days of a full TikTok inbox the post shows as failed', async () => {
+  inboxFull = true;
+  const id = await schedule('Never cleared');
+  let at = Date.now();
+  for (let i = 0; i <= 12; i++) { await scheduler.publishDue(new Date(at)); at += 6 * 3600e3 + 1000; }
+  const t = target(id);
+  assert.equal(t.status, 'failed');
+  assert.match(t.error, /inbox/);
+  inboxFull = false;
 });

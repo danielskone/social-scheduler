@@ -24,6 +24,7 @@ const redirectUri = () => process.env.TIKTOK_REDIRECT_URI || 'https://danielskon
 const configured = () => Boolean(clientKey() && clientSecret());
 
 class TikTokError extends Error {}
+const WAIT_CODES = new Set(['spam_risk_too_many_pending_share', 'spam_risk_too_many_posts']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function loginUrl(state) {
@@ -40,7 +41,8 @@ function explain(data, status) {
   const e = data?.error;
   const code = typeof e === 'string' ? e : e?.code;
   if (code === 'invalid_grant' || code === 'access_token_invalid') return 'TikTok sign-in has expired. Go to Accounts and click "Connect TikTok" again.';
-  if (code === 'spam_risk_too_many_posts') return 'TikTok says this account has posted too much today. Retry tomorrow.';
+  if (code === 'spam_risk_too_many_posts') return 'TikTok says this account has posted too much today.';
+  if (code === 'spam_risk_too_many_pending_share') return 'Your TikTok inbox has too many videos waiting to be posted. Open TikTok > Inbox and post or delete them.';
   if (code === 'unaudited_client_can_only_post_to_private_accounts') return 'TikTok only lets unreviewed apps post to PRIVATE accounts. Use draft mode (the default) or make the TikTok account private.';
   if (code === 'scope_not_authorized') return 'TikTok permission missing. In the TikTok developer site, add the scopes from the setup guide, then Connect TikTok again.';
   return [typeof e === 'object' ? e?.message : data?.error_description, code].filter(Boolean).join(' ') || `HTTP ${status}`;
@@ -52,7 +54,13 @@ async function json(res) {
   try { data = JSON.parse(raw); } catch { /* keep {} */ }
   Object.defineProperty(data, 'raw', { value: raw }); // video ids are too big for JS numbers
   const err = data.error;
-  if (!res.ok || (typeof err === 'string' && err) || (err && err.code && err.code !== 'ok')) throw new TikTokError(explain(data, res.status));
+  if (!res.ok || (typeof err === 'string' && err) || (err && err.code && err.code !== 'ok')) {
+    const e = new TikTokError(explain(data, res.status));
+    e.code = typeof err === 'string' ? err : err?.code;
+    // TikTok's "come back later" answers: nothing was uploaded, so the scheduler waits and tries again.
+    if (WAIT_CODES.has(e.code)) { e.tiktokWait = true; e.safeToRetry = true; }
+    throw e;
+  }
   return data;
 }
 

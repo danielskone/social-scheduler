@@ -110,7 +110,31 @@ app.get('/adlib/:file', ads.serveLibFile);
 
 // The free face finder (Google's MediaPipe) that runs in the browser for talking photos.
 app.use('/vendor/face', express.static(path.join(__dirname, '..', 'node_modules', '@mediapipe', 'tasks-vision'), { maxAge: '7d' }));
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// The app's own files: the page names each file with a fingerprint of its contents
+// (app.js?v=1a2b3c), so the browser and phone keep them and don't ask the Mac again on every
+// open. After an update the fingerprint changes, so the new version still loads right away.
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+const fingerprints = new Map();
+function fingerprint(file) {
+  if (!fingerprints.has(file)) {
+    let v = '0';
+    try { v = crypto.createHash('sha1').update(fs.readFileSync(path.join(PUBLIC_DIR, file))).digest('hex').slice(0, 10); } catch { /* missing file */ }
+    fingerprints.set(file, v);
+  }
+  return fingerprints.get(file);
+}
+let indexHtml = null;
+app.get(['/', '/index.html'], (req, res) => {
+  if (!indexHtml || process.env.NODE_ENV === 'development') {
+    fingerprints.clear();
+    indexHtml = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
+      .replace(/(src|href)="\/([\w.-]+\.(?:js|css))"/g, (m, attr, file) => `${attr}="/${file}?v=${fingerprint(file)}"`);
+  }
+  res.set('Cache-Control', 'no-cache').type('html').send(indexHtml);
+});
+app.use(express.static(PUBLIC_DIR, {
+  setHeaders(res) { if (res.req.query.v) res.set('Cache-Control', 'public, max-age=31536000, immutable'); },
+}));
 
 // ---------- Connecting Facebook / Instagram ----------
 const loginStates = new Set();
@@ -240,9 +264,11 @@ function loadPost(id) {
   post.targets = db.prepare(`
     SELECT t.*, a.platform, a.name AS account_name, a.username
     FROM post_targets t JOIN accounts a ON a.id=t.account_id WHERE t.post_id=?`).all(id);
-  post.media_url = post.media_file ? `/media/${post.media_file}` : post.media_source_url || null;
-  post.thumb_url = post.media_file ? `/thumb/${post.media_file}` : post.media_url;
-  return post;
+  return Object.assign(post, mediaUrls(post));
+}
+function mediaUrls(post) {
+  const media_url = post.media_file ? `/media/${post.media_file}` : post.media_source_url || null;
+  return { media_url, thumb_url: post.media_file ? `/thumb/${post.media_file}` : media_url };
 }
 
 function validatePost({ caption, scheduledAt, accountIds, mediaType }) {
@@ -291,8 +317,14 @@ api.post('/posts', upload.single('media'), (req, res) => {
 api.get('/posts', (req, res) => {
   const from = req.query.from || new Date(Date.now() - 31 * 864e5).toISOString();
   const to = req.query.to || new Date(Date.now() + 62 * 864e5).toISOString();
-  const ids = db.prepare('SELECT id FROM posts WHERE scheduled_at BETWEEN ? AND ? ORDER BY scheduled_at').all(from, to);
-  res.json(ids.map((r) => loadPost(r.id)));
+  // Two queries for the whole range (not two per post), so a busy month opens quickly.
+  const posts = db.prepare('SELECT * FROM posts WHERE scheduled_at BETWEEN ? AND ? ORDER BY scheduled_at').all(from, to);
+  const byId = new Map(posts.map((p) => [p.id, Object.assign(p, mediaUrls(p), { targets: [] })]));
+  for (const t of db.prepare(`
+    SELECT t.*, a.platform, a.name AS account_name, a.username
+    FROM post_targets t JOIN accounts a ON a.id=t.account_id JOIN posts p ON p.id=t.post_id
+    WHERE p.scheduled_at BETWEEN ? AND ? ORDER BY t.id`).all(from, to)) byId.get(t.post_id)?.targets.push(t);
+  res.json(posts);
 });
 
 api.get('/posts/:id', (req, res) => {
