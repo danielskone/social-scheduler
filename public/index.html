@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/crm.css">
   <link rel="stylesheet" href="/forms.css">
+  <link rel="stylesheet" href="/workflows.css">
 </head>
 <body>
   <aside class="sidebar">
@@ -305,12 +306,7 @@
       </div>
 
       <div class="crm-panel" data-panel="automations" hidden>
-        <div class="row crm-filters">
-          <button class="btn primary" id="auto-add">+ New automation</button>
-        </div>
-        <div class="cards" id="auto-list"></div>
-        <h2>Recent runs</h2>
-        <ul class="history" id="auto-log"></ul>
+        <div id="wf-root"></div>
       </div>
     </section>
 
@@ -335,9 +331,13 @@
   <dialog id="contact-dialog" class="wide"></dialog>
   <dialog id="crm-edit-dialog"></dialog>
   <dialog id="form-builder" class="fb-dialog" aria-label="Form builder"></dialog>
+  <dialog id="wf-builder" class="wf-dialog" aria-label="Workflow builder"></dialog>
+  <dialog id="wf-library" class="wf-lib-dialog" aria-label="Ready-made workflows"></dialog>
+  <dialog id="wf-test-dlg" class="wf-test-dialog" aria-label="Test workflow"></dialog>
   <dialog id="clip-dialog"></dialog>
   <div id="crm-coach" class="crm-coach" hidden role="dialog" aria-live="polite"></div>
   <script src="/forms.js"></script>
+  <script src="/workflows.js"></script>
   <script src="/crm.js"></script>
   <script src="/app.js"></script>
   <script src="/clips.js"></script>
