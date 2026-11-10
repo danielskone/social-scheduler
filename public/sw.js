@@ -1,15 +1,16 @@
-// Keeps Viral Post usable on the phone with a weak signal: the app's own files always come
+// Keeps Viral Post quick and usable on the phone with a weak signal: the page itself always comes
 // fresh from the Mac (so updates show on the first load), with the saved copy as a fallback; previews are kept; data always comes fresh from the Mac
 // (or, if the signal is gone, the last copy is shown).
-const SHELL = 'vp-shell-v2';
+const SHELL = 'vp-shell-v3';
 const PICS = 'vp-pics-v1';
-const SHELL_FILES = ['/', '/app.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
+const DATA = 'vp-data-v1';
+const SHELL_FILES = ['/', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).catch(() => {}).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => ![SHELL, PICS].includes(k)).map((k) => caches.delete(k))))
+  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => ![SHELL, PICS, DATA].includes(k)).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
@@ -36,9 +37,33 @@ self.addEventListener('fetch', (e) => {
   // Data: fresh from the Mac; the last copy if there's no signal.
   if (url.pathname.startsWith('/api/')) {
     e.respondWith(fetch(req).then((res) => {
-      if (good(res)) { const copy = res.clone(); caches.open(SHELL).then((c) => c.put(req, copy)); }
+      if (good(res)) {
+        const copy = res.clone();
+        caches.open(DATA).then(async (c) => {
+          await c.put(req, copy);
+          const keys = await c.keys(); // keep only the latest 60 answers, so the saved copy stays small
+          keys.slice(0, Math.max(0, keys.length - 60)).forEach((k) => c.delete(k));
+        });
+      }
       return res;
     }).catch(async () => (await caches.match(req)) || Response.error()));
+    return;
+  }
+
+  // App files named with a fingerprint (app.js?v=1a2b3c) never change: use the saved copy, which
+  // opens instantly. An update gives them a new fingerprint, so the new version is fetched.
+  if (url.searchParams.has('v')) {
+    e.respondWith(caches.open(SHELL).then(async (c) => {
+      const hit = await c.match(req);
+      if (hit) return hit;
+      const res = await fetch(req);
+      if (good(res)) {
+        c.put(req, res.clone());
+        // Forget older versions of the same file.
+        (await c.keys()).filter((k) => { const u = new URL(k.url); return u.pathname === url.pathname && u.search !== url.search; }).forEach((k) => c.delete(k));
+      }
+      return res;
+    }));
     return;
   }
 

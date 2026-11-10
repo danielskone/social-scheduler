@@ -15,6 +15,7 @@ const website = require('./website');
 const automations = require('./automations');
 const campaigns = require('./campaigns');
 const gcal = require('./gcal');
+const thumbs = require('./thumbs');
 
 const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram, youtube: youtube.publishYouTube, tiktok: tiktok.publishTikTok };
 const postStats = { facebook: meta.facebookPostStats, instagram: meta.instagramPostStats, youtube: youtube.videoStats, tiktok: tiktok.videoStats };
@@ -184,7 +185,7 @@ function start() {
   // rather than retrying and risking a double post.
   db.prepare(`UPDATE post_targets SET status='failed', error='App restarted while publishing. Check the platform, then retry if it did not post.' WHERE status='publishing'`).run();
   cron.schedule('* * * * *', () => publishDue().catch((e) => console.error(e)));
-  cron.schedule('*/2 * * * *', () => media.prefetch().catch((e) => console.error(e)));
+  cron.schedule('*/2 * * * *', () => media.prefetch().then(() => thumbs.warm(db)).catch((e) => console.error(e)));
   cron.schedule('7-59/15 * * * *', () => headsUp().catch((e) => console.error(e)));
   // Contacts: one phone alert at 8am (Eastern unless BOOKING_TIMEZONE says otherwise) with today's appointments, tasks and follow-ups.
   cron.schedule('0 8 * * *', () => crm.sendFollowUpReminder().catch((e) => console.error(e)), { timezone: process.env.BOOKING_TIMEZONE || 'America/New_York' });

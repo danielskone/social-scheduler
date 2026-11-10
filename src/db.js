@@ -78,6 +78,14 @@ const targetCols = db.prepare('PRAGMA table_info(post_targets)').all().map((c) =
 if (!targetCols.includes('attempts')) db.exec('ALTER TABLE post_targets ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
 if (!targetCols.includes('retry_at')) db.exec('ALTER TABLE post_targets ADD COLUMN retry_at TEXT');
 
+// Look-up shortcuts so the calendar and analytics stay quick as posts pile up.
+db.exec(`
+CREATE INDEX IF NOT EXISTS idx_posts_scheduled ON posts(scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_targets_post ON post_targets(post_id);
+CREATE INDEX IF NOT EXISTS idx_targets_status ON post_targets(status);
+CREATE INDEX IF NOT EXISTS idx_targets_account ON post_targets(account_id);
+`);
+
 // Fix Facebook Reel links saved as "/reel/123/" (they opened on localhost).
 db.prepare(`UPDATE post_targets SET permalink = 'https://www.facebook.com' || permalink WHERE permalink LIKE '/%'`).run();
 

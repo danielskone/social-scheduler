@@ -90,6 +90,12 @@ CREATE TABLE IF NOT EXISTS crm_templates (
   body TEXT NOT NULL
 );
 `);
+// Look-up shortcuts so contact pages stay quick as the list grows.
+db.exec(`
+CREATE INDEX IF NOT EXISTS idx_activities_contact ON contact_activities(contact_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_contact ON crm_tasks(contact_id);
+CREATE INDEX IF NOT EXISTS idx_form_entries_form ON crm_form_entries(form_id);
+`);
 // Tasks can carry a message template (automations use this), ready to open with one tap.
 if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_tasks') WHERE name='template_id'").get()) {
   db.exec('ALTER TABLE crm_tasks ADD COLUMN template_id INTEGER REFERENCES crm_templates(id) ON DELETE SET NULL');
