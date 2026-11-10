@@ -26,6 +26,14 @@ let running = false;
 // still fails does it show as Failed and buzz your phone. It's only retried when we know
 // nothing was posted, so a retry can never make a double post.
 const RETRY_MINUTES = [5, 20, 60];
+// TikTok (until the app is approved) puts each video in your TikTok inbox, and refuses new ones while
+// too many are waiting there, or after too many posts in a day. Then the TikTok part waits and is
+// tried again every 6 hours, for up to 3 days, instead of failing right away. Your phone gets one
+// buzz telling you to clear the TikTok inbox. Nothing was uploaded, so it can't post twice.
+const TIKTOK_WAIT_HOURS = 6;
+const TIKTOK_MAX_WAITS = 12; // 12 x 6 hours = 3 days
+const whenText = (d) => d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+
 function retryable(err, platform) {
   if (err.safeToRetry === false) return false;
   if (err.safeToRetry === true) return true; // Facebook/Instagram said no; nothing was posted
@@ -38,15 +46,20 @@ async function publishDue(now = new Date()) {
   running = true;
   try {
     const due = db.prepare(`
-      SELECT t.id AS target_id, p.*, a.platform, a.external_id, a.access_token, a.name AS account_name, a.username AS account_username
+      SELECT t.id AS target_id, t.account_id AS target_account, p.*, a.platform, a.external_id, a.access_token, a.name AS account_name, a.username AS account_username
       FROM post_targets t
       JOIN posts p ON p.id = t.post_id
       JOIN accounts a ON a.id = t.account_id
       WHERE t.status = 'scheduled' AND p.scheduled_at <= ? AND (t.retry_at IS NULL OR t.retry_at <= ?)
       ORDER BY p.scheduled_at`).all(now.toISOString(), now.toISOString());
     const results = [];
+    const tiktokFull = new Map(); // account id -> TikTok's "come back later" error, for this run
 
     for (const row of due) {
+      if (tiktokFull.has(row.target_account)) { // TikTok just said it's full: don't knock again this run
+        holdTikTok(row, tiktokFull.get(row.target_account), now, false);
+        continue;
+      }
       db.prepare(`UPDATE post_targets SET status='publishing', error=NULL WHERE id=?`).run(row.target_id);
       const account = { platform: row.platform, external_id: row.external_id, access_token: row.access_token, username: row.account_username };
       try {
@@ -61,6 +74,11 @@ async function publishDue(now = new Date()) {
       } catch (err) {
         const why = err.cause ? `${err.message} (${[err.cause.code, err.cause.message].filter(Boolean).join(': ')})` : String(err.message || err);
         const tries = db.prepare('SELECT attempts FROM post_targets WHERE id=?').get(row.target_id).attempts;
+        if (row.platform === 'tiktok' && err.tiktokWait && tries < TIKTOK_MAX_WAITS) {
+          tiktokFull.set(row.target_account, err);
+          holdTikTok(row, err, now, true);
+          continue;
+        }
         if (row.platform !== 'youtube' && row.platform !== 'tiktok' && tries < RETRY_MINUTES.length && retryable(err, row.platform)) {
           const at = new Date(now.getTime() + RETRY_MINUTES[tries] * 60e3);
           db.prepare(`UPDATE post_targets SET status='scheduled', attempts=attempts+1, retry_at=?, error=? WHERE id=?`)
@@ -76,6 +94,23 @@ async function publishDue(now = new Date()) {
     await notify.postResults(results);
   } finally {
     running = false;
+  }
+}
+
+function holdTikTok(row, err, now, alert) {
+  const tries = db.prepare('SELECT attempts FROM post_targets WHERE id=?').get(row.target_id).attempts;
+  if (tries >= TIKTOK_MAX_WAITS) { // waited 3 days already: give up and show it as failed
+    db.prepare(`UPDATE post_targets SET status='failed', error=?, retry_at=NULL WHERE id=?`)
+      .run(`${err.message} (waited 3 days; clear the TikTok inbox, then click Retry)`, row.target_id);
+    return;
+  }
+  const at = new Date(now.getTime() + TIKTOK_WAIT_HOURS * 3600e3);
+  db.prepare(`UPDATE post_targets SET status='scheduled', attempts=attempts+1, retry_at=?, error=? WHERE id=?`)
+    .run(at.toISOString(), `Waiting on TikTok. ${err.message} Viral Post will try again by itself ${whenText(at)}.`, row.target_id);
+  console.error(`[publish] post ${row.id} -> tiktok waiting until ${at.toISOString()}: ${err.message}`);
+  if (alert && tries === 0) {
+    notify.send('TikTok inbox is full', `"${String(row.caption || '').slice(0, 60)}" is waiting.\n${err.message}\nViral Post will try again ${whenText(at)}.`,
+      { priority: 'high', tags: 'point_right' }).catch(() => {});
   }
 }
 
