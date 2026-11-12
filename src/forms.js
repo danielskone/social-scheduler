@@ -398,7 +398,7 @@ function formInner(form, { error = '', values = {}, embed = false, action = '' }
   const fields = form.fields, st = form.style;
   const hasFile = !embed && fields.some((f) => f.type === 'file');
   const consent = fields.some((f) => f.type === 'consent');
-  return `<div class="vpf-card">${st.logo && !embed ? `<img class="vpf-logo" src="${esc(st.logo)}" alt="">` : ''}<h1>${esc(form.title)}</h1>${form.intro ? `<p class="vpf-intro">${nl(form.intro)}</p>` : ''}
+  return `<div class="vpf-card">${st.logo && !embed ? `<img class="vpf-logo" src="${esc(st.logo.replace(/^\/media\//, '../media/'))}" alt="">` : ''}<h1>${esc(form.title)}</h1>${form.intro ? `<p class="vpf-intro">${nl(form.intro)}</p>` : ''}
 <div class="vpf-err" role="alert"${error ? '' : ' hidden'}>${esc(error)}</div>
 <form class="vpf-form" method="post"${action ? ` action="${esc(action)}"` : ''}${hasFile ? ' enctype="multipart/form-data"' : ''}${embed ? ' data-viral-post="off"' : ''}>
 ${fields.map((f) => fieldHtml(f, values, { embed })).join('\n')}

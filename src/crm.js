@@ -106,7 +106,7 @@ for (const col of DESIGN) {
   if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_templates') WHERE name=?").get(col)) db.exec(`ALTER TABLE crm_templates ADD COLUMN ${col} TEXT`);
 }
 
-if (!db.prepare('SELECT 1 FROM crm_templates LIMIT 1').get()) {
+if (config.ownerStarters && !db.prepare('SELECT 1 FROM crm_templates LIMIT 1').get()) {
   const add = db.prepare('INSERT INTO crm_templates (name, channel, subject, body) VALUES (?,?,?,?)');
   const site = 'https://fuquayvarinachristmasparade.org';
   add.run('Sponsor ask', 'email', 'Sponsor the Fuquay-Varina Christmas Parade?',
@@ -419,7 +419,7 @@ function saveForm(body, id) {
 
 // Ready-made parade forms, added once. If you delete one later it stays deleted.
 db.exec('CREATE TABLE IF NOT EXISTS crm_flags (name TEXT PRIMARY KEY)');
-if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_forms'").get()) {
+if (config.ownerStarters && !db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_forms'").get()) {
   const site = 'fuquayvarinachristmasparade.org';
   const box = 'Yes, email me Fuquay-Varina Christmas Parade news and updates. I can unsubscribe any time.';
   db.transaction(() => {

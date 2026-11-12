@@ -1,10 +1,24 @@
-require('dotenv').config();
 const path = require('path');
+
+// Customer copies (started by the sign-up gateway, see src/saas/) get TENANT_KEY. They must
+// not read the owner's .env; their own settings (email, phone alerts) live in their folder.
+if (process.env.TENANT_KEY) {
+  if (process.env.DATA_DIR) require('dotenv').config({ path: path.join(process.env.DATA_DIR, 'settings.env'), quiet: true });
+} else {
+  require('dotenv').config({ quiet: true });
+}
 
 const dataDir = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 
 module.exports = {
   port: Number(process.env.PORT || 3000),
+  // Leave empty to listen on every network (needed for Tailscale). Customer copies use 127.0.0.1.
+  host: process.env.HOST || '',
+  // Set only on customer copies: requests must come from the gateway carrying this key.
+  tenantKey: process.env.TENANT_KEY || '',
+  // Daniel's own ready-made forms, emails and booking page (parade, Viral Attraction, car
+  // business). Customers start with a clean CRM instead.
+  ownerStarters: !process.env.TENANT_KEY,
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || 'http://localhost:3000').replace(/\/$/, ''),
   // Where Facebook sends you back after connecting. Defaults to PUBLIC_BASE_URL; set it to
   // http://localhost:3000 when the public address changes each run (e.g. a quick tunnel).

@@ -9,6 +9,7 @@
 // never to "Do not contact", and every email shows your mailing address and an unsubscribe link.
 const express = require('express');
 const db = require('./db');
+const config = require('./config');
 const crm = require('./crm');
 const email = require('./email');
 const design = require('./emaildesign');
@@ -74,8 +75,10 @@ const listSegments = () => db.prepare('SELECT * FROM crm_segments ORDER BY id').
 if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_segments'").get()) {
   db.transaction(() => {
     saveSegment({ name: 'Everyone who said yes to email' });
-    saveSegment({ name: 'Viral Attraction subscribers', groups: ['Viral Attraction lead'] });
-    saveSegment({ name: 'Parade community', groups: ['Parade sponsor', 'Parade entry', 'Volunteer', 'Vendor', 'Donor'] });
+    if (config.ownerStarters) {
+      saveSegment({ name: 'Viral Attraction subscribers', groups: ['Viral Attraction lead'] });
+      saveSegment({ name: 'Parade community', groups: ['Parade sponsor', 'Parade entry', 'Volunteer', 'Vendor', 'Donor'] });
+    }
     saveSegment({ name: 'Joined in the last 30 days', joined_days: 30 });
     db.prepare("INSERT INTO crm_flags (name) VALUES ('starter_segments')").run();
   })();

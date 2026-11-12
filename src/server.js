@@ -23,6 +23,12 @@ const compression = require('compression');
 const { thumbFor } = require('./thumbs');
 
 const app = express();
+// Customer copy behind the sign-up gateway (src/saas/): only the gateway may talk to it, and
+// the gateway marks which requests come from a signed-in customer.
+const fromGateway = (req) => Boolean(config.tenantKey) && same(req.headers['x-vp-tenant-key'] || '', config.tenantKey);
+if (config.tenantKey) {
+  app.use((req, res, next) => (fromGateway(req) ? next() : res.status(404).send('Not found')));
+}
 app.use(express.json());
 // Private app: ask search engines never to list it.
 app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next(); });
@@ -60,6 +66,7 @@ function cookie(req, name) {
   return m ? m[1] : '';
 }
 function signedIn(req) {
+  if (config.tenantKey) return fromGateway(req) && req.headers['x-vp-user'] === '1';
   if (!config.appPassword) return isLocal(req);
   if (cookie(req, 'vp_login') && same(cookie(req, 'vp_login'), loginToken())) return true;
   const [scheme, encoded] = (req.headers.authorization || '').split(' ');
@@ -88,6 +95,7 @@ app.post('/login', express.urlencoded({ extended: false }), (req, res) => {
 
 app.use((req, res, next) => {
   if (PUBLIC_FILES.has(req.path) || req.path.startsWith('/icons/') || signedIn(req)) return next();
+  if (config.tenantKey) return res.status(401).json({ error: 'Please sign in again.' });
   if (!config.appPassword) {
     return res.status(403).send('<meta name="viewport" content="width=device-width, initial-scale=1"><p style="font:18px system-ui;padding:20px">To open Viral Post on your phone, first set a password on your Mac. In Terminal run: <b>npm run password</b></p>');
   }
@@ -229,6 +237,7 @@ const api = express.Router();
 api.get('/status', (req, res) => {
   res.json({
     metaConfigured: Boolean(config.metaAppId && config.metaAppSecret),
+    saas: Boolean(config.tenantKey), // a customer's copy: show Account / Sign out
     publicBaseUrl: config.publicBaseUrl,
     instagramReady: config.publicBaseUrl.startsWith('https://'),
     redirectUri: meta.redirectUri(),
@@ -442,7 +451,8 @@ function startApp() {
   scheduler.start();
   clipper.start();
   ads.start();
-  app.listen(config.port, () => console.log(`Scheduler running at http://localhost:${config.port}`));
+  const args = config.host ? [config.port, config.host] : [config.port];
+  app.listen(...args, () => console.log(`Scheduler running at http://localhost:${config.port}`));
 }
 
 if (require.main === module) startApp();
