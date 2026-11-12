@@ -25,11 +25,22 @@
     <img src="/icons/apple-touch-icon.png" alt="">
     <h1>Viral Post</h1>
     <input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus required>
+    <input type="hidden" name="next" id="next">
     <button class="btn primary" type="submit">Sign in</button>
     <p class="err" id="err"></p>
   </form>
   <script>
-    const e = new URLSearchParams(location.search).get('error');
+    const q = new URLSearchParams(location.search);
+    const e = q.get('error');
+    // Signing in from Viral Touch CRM, Viral Clips or Viral Ads Studio goes back to that app.
+    const apps = { '/crm/': ['Viral Touch CRM', 'crm'], '/clips/': ['Viral Clips', 'clips'], '/ads/': ['Viral Ads Studio', 'ads'] };
+    const next = q.get('next');
+    if (apps[next]) {
+      document.getElementById('next').value = next;
+      document.querySelector('.login h1').textContent = apps[next][0];
+      document.querySelector('.login img').src = `/icons/${apps[next][1]}-touch.png`;
+      document.title = apps[next][0];
+    }
     if (e) document.getElementById('err').textContent = e === 'wait' ? 'Too many tries. Wait 15 minutes.' : 'Wrong password. Try again.';
   </script>
 </body>

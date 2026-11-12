@@ -21,8 +21,11 @@ const clipper = require('./clipper');
 const ads = require('./ads');
 const compression = require('compression');
 const { thumbFor } = require('./thumbs');
+const apps = require('./apps');
 
 const app = express();
+const appsOn = apps.enabledApps();
+const appsOnKeys = new Set(appsOn.map((a) => a.key));
 // Customer copy behind the sign-up gateway (src/saas/): only the gateway may talk to it, and
 // the gateway marks which requests come from a signed-in customer.
 const fromGateway = (req) => Boolean(config.tenantKey) && same(req.headers['x-vp-tenant-key'] || '', config.tenantKey);
@@ -57,7 +60,7 @@ app.use('/book', booking.publicBooking);
 // ---------- Password protection ----------
 // On this Mac (localhost) the password is optional. From a phone or any other device a
 // password is required. Phones sign in once on /login and stay signed in (cookie).
-const PUBLIC_FILES = new Set(['/login', '/login.html', '/manifest.webmanifest', '/style.css', '/sw.js']);
+const PUBLIC_FILES = new Set(['/login', '/login.html', '/manifest.webmanifest', '/style.css', '/sw.js', ...apps.APPS.map((a) => `/manifest-${a.key}.webmanifest`)]);
 const isLocal = (req) => !viaTunnel(req) && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
 const loginToken = () => crypto.createHmac('sha256', config.appPassword).update('viral-post-login').digest('hex');
 const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
@@ -81,16 +84,18 @@ const failed = new Map(); // ip -> { n, until }
 app.post('/login', express.urlencoded({ extended: false }), (req, res) => {
   const ip = req.socket.remoteAddress;
   const f = failed.get(ip) || { n: 0, until: 0 };
-  if (f.until > Date.now()) return res.redirect('/login.html?error=wait');
+  const next = apps.APPS.some((a) => a.path !== '/' && a.path === req.body.next) ? `&next=${encodeURIComponent(req.body.next)}` : '';
+  if (f.until > Date.now()) return res.redirect(`/login.html?error=wait${next}`);
   if (config.appPassword && same(req.body.password || '', config.appPassword)) {
     failed.delete(ip);
     res.set('Set-Cookie', `vp_login=${loginToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 365}`);
-    return res.redirect('/#calendar');
+    const back = apps.APPS.find((a) => a.path === req.body.next);
+    return res.redirect(back ? `${back.path}#${back.home}` : '/#calendar');
   }
   f.n += 1;
   if (f.n >= 5) { f.n = 0; f.until = Date.now() + 15 * 60 * 1000; }
   failed.set(ip, f);
-  res.redirect('/login.html?error=wrong');
+  res.redirect(`/login.html?error=wrong${next}`);
 });
 
 app.use((req, res, next) => {
@@ -99,9 +104,18 @@ app.use((req, res, next) => {
   if (!config.appPassword) {
     return res.status(403).send('<meta name="viewport" content="width=device-width, initial-scale=1"><p style="font:18px system-ui;padding:20px">To open Viral Post on your phone, first set a password on your Mac. In Terminal run: <b>npm run password</b></p>');
   }
-  if (req.method === 'GET' && (req.headers.accept || '').includes('text/html')) return res.redirect('/login.html');
+  if (req.method === 'GET' && (req.headers.accept || '').includes('text/html')) {
+    const from = apps.APPS.find((a) => a.path !== '/' && (req.path === a.path || req.path + '/' === a.path));
+    return res.redirect(from ? `/login.html?next=${encodeURIComponent(from.path)}` : '/login.html');
+  }
   res.status(401).json({ error: 'Please sign in again.' });
 });
+
+// An app that is switched off (APPS in .env) is closed: its pages and data can't be reached (nothing is deleted).
+for (const a of apps.APPS) {
+  if (appsOnKeys.has(a.key)) continue;
+  for (const p of a.apis || []) app.use(p, (req, res) => res.status(404).json({ error: `${a.name} is not part of this plan.` }));
+}
 
 // Small previews for the calendar (see thumbs.js).
 app.get('/thumb/:file', async (req, res) => {
@@ -131,15 +145,43 @@ function fingerprint(file) {
   }
   return fingerprints.get(file);
 }
+// Each app (Viral Post, Viral Touch CRM, Viral Clips, Viral Ads Studio) has its own address,
+// name, icon and menu. They share one page file; the server fills in which app it is.
 let indexHtml = null;
-app.get(['/', '/index.html'], (req, res) => {
+const appPages = new Map();
+function appPage(a) {
   if (!indexHtml || process.env.NODE_ENV === 'development') {
     fingerprints.clear();
+    appPages.clear();
     indexHtml = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
       .replace(/(src|href)="\/([\w.-]+\.(?:js|css))"/g, (m, attr, file) => `${attr}="/${file}?v=${fingerprint(file)}"`);
   }
-  res.set('Cache-Control', 'no-cache').type('html').send(indexHtml);
-});
+  if (!appPages.has(a.key)) {
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+    const icon = a.icon === 'icon' ? '/icons/icon-192.png' : `/icons/${a.icon}-192.png`;
+    const info = JSON.stringify({ app: a.key, apps: apps.publicInfo(appsOn) }).replace(/</g, '\\u003c');
+    appPages.set(a.key, indexHtml
+      .replace('<title>Viral Post</title>', `<title>${esc(a.name)}</title>`)
+      .replace('content="Viral Post">', `content="${esc(a.short)}">`)
+      .replace('href="/manifest.webmanifest"', `href="${a.key === 'scheduler' ? '/manifest.webmanifest' : `/manifest-${a.key}.webmanifest`}"`)
+      .replace('href="/icons/apple-touch-icon.png"', `href="${apps.touchIcon(a)}"`)
+      .replace(/src="\/icons\/icon-192\.png"/g, `src="${icon}"`)
+      .replace(/<span class="app-name">Viral Post<\/span>/g, `<span class="app-name">${esc(a.name)}</span>`)
+      .replace('<body>', `<body data-app="${a.key}">\n  <script>window.VP_APPS = ${info};</script>`));
+  }
+  return appPages.get(a.key);
+}
+for (const a of apps.APPS) {
+  const paths = a.path === '/' ? ['/', '/index.html'] : [a.path, a.path.slice(0, -1)];
+  app.get(paths, (req, res) => {
+    if (!appsOnKeys.has(a.key)) return res.redirect('/');
+    if (a.path !== '/' && req.path === a.path.slice(0, -1)) return res.redirect(a.path);
+    res.set('Cache-Control', 'no-cache').type('html').send(appPage(a));
+  });
+  if (a.key !== 'scheduler') {
+    app.get(`/manifest-${a.key}.webmanifest`, (req, res) => res.type('application/manifest+json').json(apps.manifest(a)));
+  }
+}
 app.use(express.static(PUBLIC_DIR, {
   setHeaders(res) { if (res.req.query.v) res.set('Cache-Control', 'public, max-age=31536000, immutable'); },
 }));

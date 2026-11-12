@@ -15,6 +15,8 @@
 //   SAAS_TRIAL_DAYS        default 14
 //   SAAS_PRICE_LABEL       shown on the site, e.g. "$29/month"
 //   SAAS_SIGNUPS           "open" (default) or "closed"
+//   SAAS_APPS              which apps customers get: "all" (default) or e.g. "scheduler" for Viral Post
+//                          on its own, or "scheduler,crm" (crm, clips, ads)
 //   SAAS_SMTP_HOST/PORT/USER/PASS, SAAS_EMAIL_FROM  to email password-reset links (optional)
 //   STRIPE_SECRET_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET  to switch payments on (optional)
 require('dotenv').config({ quiet: true });

@@ -94,11 +94,13 @@
   function showTour(i) {
     tourAt = i;
     const box = q$('#crm-coach');
-    document.querySelectorAll('#crm-tabs a').forEach((a) => a.classList.remove('tour-glow'));
+    document.querySelectorAll('#crm-tabs a, .sidebar nav a').forEach((a) => a.classList.remove('tour-glow'));
     if (i < 0 || i >= TOUR.length) { box.hidden = true; tourAt = -1; store.set('tour-done', true); return; }
     const st = TOUR[i];
     if (location.hash !== TAB_ROUTE(st.tab) && !(st.tab === 'list' && location.hash === '#contacts/list')) location.hash = TAB_ROUTE(st.tab);
-    const link = q$(`#crm-tabs a[data-tab="${st.tab}"]`);
+    // The CRM's own app shows its sections in the side menu on a Mac and as tabs on an iPhone.
+    const side = q$(`.sidebar nav a[data-tab="${st.tab}"]`);
+    const link = side && side.offsetParent && getComputedStyle(q$('#crm-tabs')).display === 'none' ? side : q$(`#crm-tabs a[data-tab="${st.tab}"]`);
     if (i > 0 && i < TOUR.length - 1 && link) { link.classList.add('tour-glow'); link.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); }
     const last = i === TOUR.length - 1;
     box.innerHTML = `<button class="skip" data-skip>${last ? 'Close' : 'Skip tour'}</button>
