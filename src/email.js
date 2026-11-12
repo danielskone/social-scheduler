@@ -41,7 +41,7 @@ const settings = () => ({
   imapPort: Number(process.env.IMAP_PORT || 993),
   key: (process.env.BREVO_API_KEY || '').trim(),
   from: (process.env.EMAIL_FROM || '').trim(),
-  fromName: (process.env.EMAIL_FROM_NAME || '').trim() || 'Daniel King',
+  fromName: (process.env.EMAIL_FROM_NAME || '').trim() || (process.env.TENANT_KEY ? '' : 'Daniel King'),
   address: (process.env.EMAIL_MAILING_ADDRESS || '').trim(),
   limit: Number(process.env.EMAIL_DAILY_LIMIT || 100),
   api: (process.env.BREVO_API_BASE || 'https://api.brevo.com').replace(/\/$/, ''),

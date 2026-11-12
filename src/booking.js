@@ -106,7 +106,7 @@ function savePage(body, id) {
 }
 
 // A ready-made page for the car business, added once (stays deleted if you delete it).
-if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_booking'").get()) {
+if (config.ownerStarters && !db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_booking'").get()) {
   db.transaction(() => {
     savePage({ title: 'Book a visit with Daniel King Automotive', group_name: 'Auto customer', minutes: 30, days: '1,2,3,4,5,6', start_time: '09:00', end_time: '17:00',
       intro: 'Pick a time to come see a vehicle, take a test drive or talk about financing. Tell us what you are looking for and we will have it ready.',

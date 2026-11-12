@@ -14,6 +14,7 @@
 // address and an unsubscribe line in every email. Texts are never sent automatically.
 const express = require('express');
 const db = require('./db');
+const config = require('./config');
 const crm = require('./crm');
 const notify = require('./notify');
 const email = require('./email');
@@ -348,7 +349,7 @@ function dryRun(body, contactId) {
 
 // ---------- Ready-made automations, added once (deleting one keeps it deleted) ----------
 db.exec('CREATE TABLE IF NOT EXISTS crm_flags (name TEXT PRIMARY KEY)');
-if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_automations'").get()) {
+if (config.ownerStarters && !db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_automations'").get()) {
   const tpl = (name) => db.prepare('SELECT id FROM crm_templates WHERE name=?').get(name)?.id || null;
   const addTpl = (name, subject, body) => tpl(name) || crm.saveTemplate({ name, channel: 'email', subject, body }).id;
   db.transaction(() => {
@@ -388,7 +389,7 @@ if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_automations'").get(
 }
 
 // Ready-made email flows (Omnisend-style welcome series), added once.
-if (!db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_email_flows'").get()) {
+if (config.ownerStarters && !db.prepare("SELECT 1 FROM crm_flags WHERE name='starter_email_flows'").get()) {
   const tpl = (name) => db.prepare('SELECT id FROM crm_templates WHERE name=?').get(name)?.id || null;
   const add = (name, f) => tpl(name) || crm.saveTemplate({ name, channel: 'email', ...f }).id;
   const va = 'https://viralattraction.com', parade = 'https://fuquayvarinachristmasparade.org';

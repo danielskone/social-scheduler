@@ -714,6 +714,14 @@ async function openPostStats(tid) {
 async function renderAccounts() {
   const status = await api('/status');
   const notes = [];
+  if (status.saas) {
+    // A customer of the sellable version: no technical setup, just their plan and sign out.
+    if (!$('#saas-links')) $('#view-accounts .view-head .row').insertAdjacentHTML('beforeend', '<span id="saas-links"><a class="btn" href="/account">Plan &amp; settings</a> <a class="btn" href="/logout">Sign out</a></span>');
+    notes.push('Click a Connect button and sign in to Facebook, Google or TikTok. You choose which Pages, profiles and channels Viral Post may post to, and you can remove them here any time.');
+    if (status.tiktokMode !== 'direct') notes.push('TikTok videos go to your TikTok inbox at the scheduled time; open TikTok and tap Post to finish.');
+  }
+  if (status.saas) { $('#setup-notes').innerHTML = `<div class="note">${notes.map((n) => `<div>${n}</div>`).join('')}</div>`; }
+  else {
   if (!status.metaConfigured) notes.push('Add your <code>META_APP_ID</code> and <code>META_APP_SECRET</code> to the <code>.env</code> file, then restart the app.');
   notes.push(`In your Meta app, add <code>${esc(status.redirectUri)}</code> as a Valid OAuth Redirect URI (Facebook Login → Settings).`);
   if (!status.youtubeConfigured) notes.push('To add YouTube: in Terminal run <code>npm run youtube-keys</code>, then <code>npm run background:on</code>.');
@@ -722,6 +730,7 @@ async function renderAccounts() {
   else notes.push(`TikTok mode: <b>${status.tiktokMode === 'direct' ? 'posts by itself' : 'sends to your TikTok inbox, then you tap Post'}</b>. TikTok redirect URI: <code>${esc(status.tiktokRedirectUri)}</code>.`);
   if (!status.instagramReady) notes.push('Instagram posting needs <code>PUBLIC_BASE_URL</code> to be a public https address. Facebook posts work without it.');
   $('#setup-notes').innerHTML = `<div class="note">${notes.map((n) => `<div>${n}</div>`).join('')}</div>`;
+  }
 
   $('#account-list').innerHTML = accounts.map((a) => `<div class="account">
       ${a.picture_url ? `<img src="${esc(a.picture_url)}" alt="">` : '<span class="avatar"></span>'}
