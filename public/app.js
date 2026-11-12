@@ -14,7 +14,7 @@ const icon = (pl) => `<span class="picon" title="${NAMES[pl] || pl}">${(ICONS[pl
 
 async function api(path, opts = {}) {
   const res = await fetch(`/api${path}`, opts);
-  if (res.status === 401) { location.href = '/login.html'; throw new Error('Please sign in.'); }
+  if (res.status === 401) { const p = location.pathname; location.href = p.length > 1 ? `/login.html?next=${encodeURIComponent(p)}` : '/login.html'; throw new Error('Please sign in.'); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
@@ -46,15 +46,77 @@ function banner(msg, isError = false) {
   b.hidden = false;
 }
 
+// ---------- Which app this is ----------
+// Viral Post, Viral Touch CRM, Viral Clips and Viral Ads Studio are separate apps, each at its
+// own address (/, /crm/, /clips/, /ads/) with its own menu. The server says which one this is.
+const VP = window.VP_APPS || { app: 'scheduler', apps: [{ key: 'scheduler', name: 'Viral Post', path: '/', home: 'calendar', views: ['calendar', 'compose', 'analytics', 'accounts'], icon: 'icon' }] };
+const THIS_APP = VP.apps.find((a) => a.key === VP.app) || VP.apps[0];
+const appForView = (view) => VP.apps.find((a) => a.views.includes(view));
+const appIcon = (a) => `/icons/${a.icon}-192.png`;
+// On the Mac each app is its own program on its own port (same computer, same address).
+const appHref = (a) => (a.port ? `${location.protocol}//${location.hostname}:${a.port}/` : a.path);
+
+function buildAppMenu() {
+  const nav = $('.sidebar nav');
+  // The scheduler's menu is in the page. The other apps show their own sections instead.
+  if (THIS_APP.key === 'crm') {
+    nav.innerHTML = [...document.querySelectorAll('#crm-tabs a')].map((a) => {
+      const svgEl = a.querySelector('svg');
+      return `<a href="${a.getAttribute('href')}" data-tab="${a.dataset.tab}"><span class="nav-ico">${svgEl ? svgEl.outerHTML : ''}</span><span>${esc(a.textContent.trim())}</span></a>`;
+    }).join('');
+  } else if (THIS_APP.key === 'ads') {
+    const ico = (d) => `<span class="nav-ico"><svg viewBox="0 0 24 24">${d}</svg></span>`;
+    const ICO = {
+      create: '<path d="M12 3.5 14 9l5.5 2-5.5 2-2 5.5-2-5.5-5.5-2L10 9z"/>',
+      list: '<rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="m10 9.5 4.5 2.5-4.5 2.5z"/>',
+      brands: '<path d="M4 12.5 11.5 5H19v7.5L11.5 20z"/><circle cx="15.5" cy="8.5" r="1.3"/>',
+      products: '<path d="M4 8 12 4l8 4v8l-8 4-8-4z"/><path d="m4 8 8 4 8-4M12 12v8"/>',
+      presenters: '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5"/>',
+      voices: '<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/>',
+      media: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m4 18 5-5 4 4 3-3 4 4"/>',
+    };
+    nav.innerHTML = [...document.querySelectorAll('#ads-tabs button')].map((b) => {
+      const sub = b.dataset.sub;
+      return `<a href="${sub === 'create' ? '#ads' : `#ads/${sub}`}" data-sub="${sub}">${ico(ICO[sub] || ICO.create)}<span>${esc(b.textContent.trim())}</span></a>`;
+    }).join('');
+  } else if (THIS_APP.key === 'clips') {
+    nav.innerHTML = '<a href="#clips" data-view="clips"><span class="nav-ico"><svg viewBox="0 0 24 24"><circle cx="6.5" cy="6.5" r="2.8"/><circle cx="6.5" cy="17.5" r="2.8"/><path d="M8.6 8.3 20 18M8.6 15.7 20 6"/></svg></span><span>Make clips</span></a>';
+  }
+  // Switching between apps: a list at the bottom of the menu (Mac) and a button at the top (iPhone).
+  if (VP.apps.length < 2) return;
+  const list = VP.apps.map((a) => `<a href="${appHref(a)}#${a.home}" class="${a.key === THIS_APP.key ? 'on' : ''}"${a.key === THIS_APP.key ? ' aria-current="page"' : ''}><img src="${appIcon(a)}" alt=""><span>${esc(a.name)}</span></a>`).join('');
+  const box = $('#app-switch');
+  box.innerHTML = `<div class="app-switch-title">Your apps</div>${list}`;
+  box.hidden = false;
+  const pop = $('#app-switch-pop');
+  pop.innerHTML = `<div class="app-switch-title">Your apps</div>${list}`;
+  const btn = $('#app-switch-btn');
+  btn.hidden = false;
+  btn.onclick = (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; };
+  document.addEventListener('click', (e) => { if (!pop.hidden && !e.target.closest('#app-switch-pop')) pop.hidden = true; });
+}
+document.body.dataset.app = THIS_APP.key;
+buildAppMenu();
+
 // ---------- Routing ----------
 let lastView = '';
 async function route() {
-  const [path, query] = (location.hash.slice(1) || 'calendar').split('?');
+  const [path, query] = (location.hash.slice(1) || THIS_APP.home).split('?');
   const [view, sub] = path.split('/');
+  // A link to a page of another app (e.g. "Schedule this clip" goes to Viral Post) opens that app.
+  const owner = appForView(view);
+  if (!owner || owner.key !== THIS_APP.key) {
+    if (owner) { location.href = `${appHref(owner)}#${location.hash.slice(1)}`; return; }
+    history.replaceState(null, '', `#${THIS_APP.home}`);
+    return route();
+  }
   const params = new URLSearchParams(query);
   banner(params.get('error') ? `Couldn't connect: ${params.get('error')}` : params.get('connected') ? `Connected ${params.get('connected')} account(s).` : '', Boolean(params.get('error')));
   document.querySelectorAll('.view').forEach((v) => (v.hidden = v.id !== `view-${view}`));
-  document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === view));
+  const crmTab = ['pipeline', 'tasks', 'appointments', 'forms', 'templates', 'automations', 'email'].includes(sub) ? sub : 'list';
+  const adsSub = !sub ? 'create' : /^\d+$/.test(sub) ? 'list' : sub;
+  document.querySelectorAll('.sidebar nav a').forEach((a) => a.classList.toggle('active',
+    a.dataset.tab ? a.dataset.tab === crmTab : a.dataset.sub ? a.dataset.sub === adsSub : a.dataset.view === view));
   const acctLoad = api('/accounts').then((a) => (accounts = a));
   if (view === 'calendar' && lastView && lastView !== 'calendar') goToToday(); // coming back to the Calendar tab
   lastView = view;

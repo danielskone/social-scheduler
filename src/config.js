@@ -10,6 +10,21 @@ if (process.env.TENANT_KEY) {
 
 const dataDir = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 
+// The public address (the free Instagram tunnel) is found by Viral Post's program, which saves
+// it in data/public-url.txt so the other apps (e.g. Viral Touch CRM's form and booking links)
+// use it too.
+const publicUrlFile = path.join(dataDir, 'public-url.txt');
+let publicBaseUrl = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+let fileUrl = { at: 0, url: '' };
+function sharedPublicUrl() {
+  if (Date.now() - fileUrl.at > 5000) {
+    let url = '';
+    try { url = require('fs').readFileSync(publicUrlFile, 'utf8').trim(); } catch { /* not saved */ }
+    fileUrl = { at: Date.now(), url: /^https?:\/\/\S+$/.test(url) ? url.replace(/\/$/, '') : '' };
+  }
+  return fileUrl.url;
+}
+
 module.exports = {
   port: Number(process.env.PORT || 3000),
   // Leave empty to listen on every network (needed for Tailscale). Customer copies use 127.0.0.1.
@@ -19,7 +34,9 @@ module.exports = {
   // Daniel's own ready-made forms, emails and booking page (parade, Viral Attraction, car
   // business). Customers start with a clean CRM instead.
   ownerStarters: !process.env.TENANT_KEY,
-  publicBaseUrl: (process.env.PUBLIC_BASE_URL || 'http://localhost:3000').replace(/\/$/, ''),
+  get publicBaseUrl() { return publicBaseUrl || sharedPublicUrl() || 'http://localhost:3000'; },
+  set publicBaseUrl(v) { publicBaseUrl = String(v || '').replace(/\/$/, ''); },
+  publicUrlFile,
   // Where Facebook sends you back after connecting. Defaults to PUBLIC_BASE_URL; set it to
   // http://localhost:3000 when the public address changes each run (e.g. a quick tunnel).
   oauthBaseUrl: (process.env.OAUTH_BASE_URL || process.env.PUBLIC_BASE_URL || 'http://localhost:3000').replace(/\/$/, ''),

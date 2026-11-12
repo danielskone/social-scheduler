@@ -79,6 +79,8 @@ function createTenants({ dir, basePort = 4100, publicBaseUrl, env = process.env,
       // Facebook, Google and TikTok send people back to one shared address on the main site.
       OAUTH_BASE_URL: publicBaseUrl,
       TIKTOK_REDIRECT_URI: `${publicBaseUrl}/auth/tiktok/callback`,
+      // Which apps customers get (SAAS_APPS=scheduler sells Viral Post on its own; default all).
+      APPS: env.SAAS_APPS || 'all',
     };
   }
 

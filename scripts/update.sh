@@ -17,4 +17,6 @@ node -e "require('better-sqlite3')" 2>/dev/null || npm rebuild better-sqlite3
 # Clips tab: ffmpeg (video tool) is downloaded by its installer, which newer npm asks to approve.
 npm install-scripts approve ffmpeg-static >/dev/null 2>&1 || true
 node -e "process.exit(require('fs').existsSync(require('ffmpeg-static')) ? 0 : 1)" 2>/dev/null || npm rebuild ffmpeg-static
+# Desktop apps: if you use them, refresh them (adds Viral Touch CRM, Viral Clips and Viral Ads Studio).
+if [ "$(uname)" = "Darwin" ] && [ -d "$HOME/Desktop/Viral Post.app" ]; then node scripts/mac-app.js >/dev/null 2>&1 || true; fi
 echo "UPDATED"

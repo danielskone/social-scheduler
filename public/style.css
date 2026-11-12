@@ -945,3 +945,28 @@ button.top-post:active { transform: scale(.99); }
   .tp-chips { gap: 8px; }
   .tile.tap::after { right: 10px; top: 8px; }
 }
+
+/* ---------- Separate apps: switcher between Viral Post, Viral Touch CRM, Viral Clips, Viral Ads Studio ---------- */
+.app-switch { margin: 18px 0 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.app-switch-title { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 12px 8px; }
+.app-switch a, .app-switch-pop a { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 12px; color: var(--muted); text-decoration: none; font-weight: 600; font-size: .9rem; }
+.app-switch a:hover, .app-switch-pop a:hover { background: var(--panel-2); color: var(--text); }
+.app-switch a.on, .app-switch-pop a.on { color: var(--text); }
+.app-switch img, .app-switch-pop img { width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0; }
+.app-switch-btn { display: none; }
+.app-switch-pop { position: fixed; z-index: 60; top: calc(54px + env(safe-area-inset-top)); right: 12px; min-width: 230px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 10px 6px; box-shadow: 0 12px 34px -10px rgb(16 24 40 / .4); }
+.app-switch-pop a { padding: 10px 12px; font-size: 1rem; }
+.app-switch-pop img { width: 32px; height: 32px; border-radius: 8px; }
+/* On a Mac the CRM and Ads Studio sections are in the side menu, so the tabs on the page aren't needed */
+@media (min-width: 801px) {
+  body[data-app="crm"] #crm-tabs, body[data-app="ads"] #ads-tabs { display: none; }
+}
+@media (max-width: 800px) {
+  .app-switch { display: none; }
+  .app-switch-btn:not([hidden]) { display: inline-flex; margin-left: auto; width: 40px; height: 40px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); cursor: pointer; padding: 0; }
+  .app-switch-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; }
+  nav { grid-template-columns: repeat(4, 1fr); }
+  /* The CRM, Clips and Ads Studio keep their own tabs at the top of the page on an iPhone */
+  body[data-app="crm"] .sidebar, body[data-app="ads"] .sidebar, body[data-app="clips"] .sidebar { display: none; }
+  body[data-app="crm"], body[data-app="ads"], body[data-app="clips"] { padding-bottom: env(safe-area-inset-bottom); }
+}

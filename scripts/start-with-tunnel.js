@@ -16,6 +16,12 @@ const config = require('../src/config');
 // cloudflared also logs https://api.trycloudflare.com, which is not a tunnel address.
 const TUNNEL_URL = /https:\/\/(?!api\.)[a-z0-9-]+\.trycloudflare\.com/;
 
+const fs = require('fs');
+function saveUrl(url) {
+  if (process.env.PUBLIC_BASE_URL) return;
+  try { fs.writeFileSync(config.publicUrlFile, url); } catch { /* the app still works */ }
+}
+
 let tunnel = null;
 let attempt = 0;
 let stopping = false;
@@ -40,6 +46,7 @@ function startTunnel() {
       found = true;
       attempt = 0;
       config.publicBaseUrl = m[0];
+      saveUrl(m[0]); // so the other apps (Viral Touch CRM links) use it too
       console.log(`Public address for Instagram media: ${m[0]}`);
     }
   };
@@ -49,6 +56,7 @@ function startTunnel() {
   tunnel.on('exit', (code) => {
     if (stopping) return;
     config.publicBaseUrl = `http://localhost:${port}`;
+    saveUrl('');
     const wait = Math.min(60, 5 * attempt);
     console.error(`Instagram tunnel stopped (code ${code}). Retrying in ${wait} seconds. The app is still running.`);
     if (!found && recent.length) console.error(`  cloudflared said: ${recent[recent.length - 1]}`);
@@ -56,6 +64,7 @@ function startTunnel() {
   });
 }
 
+saveUrl(''); // forget last run's address until the new one is known
 require('../src/server').startApp();
 startTunnel();
 
