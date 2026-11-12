@@ -187,6 +187,11 @@ function start() {
   cron.schedule('* * * * *', () => publishDue().catch((e) => console.error(e)));
   cron.schedule('*/2 * * * *', () => media.prefetch().then(() => thumbs.warm(db)).catch((e) => console.error(e)));
   cron.schedule('7-59/15 * * * *', () => headsUp().catch((e) => console.error(e)));
+  cron.schedule('17 */3 * * *', () => refreshStats().catch((e) => console.error(e)));
+}
+
+// Viral Touch CRM's background work (its own program on the Mac; see src/apps.js).
+function startCrm() {
   // Contacts: one phone alert at 8am (Eastern unless BOOKING_TIMEZONE says otherwise) with today's appointments, tasks and follow-ups.
   cron.schedule('0 8 * * *', () => crm.sendFollowUpReminder().catch((e) => console.error(e)), { timezone: process.env.BOOKING_TIMEZONE || 'America/New_York' });
   // Website sign-ups (e.g. viralattraction.com) -> Contacts, every 2 minutes.
@@ -201,7 +206,6 @@ function start() {
   // Google Calendar bookings (the website's "Book a free call" page) -> Contacts + Appointments.
   cron.schedule('*/5 * * * *', () => gcal.check().catch((e) => console.error(e)));
   gcal.check().catch(() => {});
-  cron.schedule('17 */3 * * *', () => refreshStats().catch((e) => console.error(e)));
 }
 
-module.exports = { start, publishDue, refreshStats, headsUp };
+module.exports = { start, startCrm, publishDue, refreshStats, headsUp };

@@ -53,6 +53,8 @@ const VP = window.VP_APPS || { app: 'scheduler', apps: [{ key: 'scheduler', name
 const THIS_APP = VP.apps.find((a) => a.key === VP.app) || VP.apps[0];
 const appForView = (view) => VP.apps.find((a) => a.views.includes(view));
 const appIcon = (a) => `/icons/${a.icon}-192.png`;
+// On the Mac each app is its own program on its own port (same computer, same address).
+const appHref = (a) => (a.port ? `${location.protocol}//${location.hostname}:${a.port}/` : a.path);
 
 function buildAppMenu() {
   const nav = $('.sidebar nav');
@@ -82,7 +84,7 @@ function buildAppMenu() {
   }
   // Switching between apps: a list at the bottom of the menu (Mac) and a button at the top (iPhone).
   if (VP.apps.length < 2) return;
-  const list = VP.apps.map((a) => `<a href="${a.path}#${a.home}" class="${a.key === THIS_APP.key ? 'on' : ''}"${a.key === THIS_APP.key ? ' aria-current="page"' : ''}><img src="${appIcon(a)}" alt=""><span>${esc(a.name)}</span></a>`).join('');
+  const list = VP.apps.map((a) => `<a href="${appHref(a)}#${a.home}" class="${a.key === THIS_APP.key ? 'on' : ''}"${a.key === THIS_APP.key ? ' aria-current="page"' : ''}><img src="${appIcon(a)}" alt=""><span>${esc(a.name)}</span></a>`).join('');
   const box = $('#app-switch');
   box.innerHTML = `<div class="app-switch-title">Your apps</div>${list}`;
   box.hidden = false;
@@ -104,7 +106,7 @@ async function route() {
   // A link to a page of another app (e.g. "Schedule this clip" goes to Viral Post) opens that app.
   const owner = appForView(view);
   if (!owner || owner.key !== THIS_APP.key) {
-    if (owner) { location.href = `${owner.path}#${location.hash.slice(1)}`; return; }
+    if (owner) { location.href = `${appHref(owner)}#${location.hash.slice(1)}`; return; }
     history.replaceState(null, '', `#${THIS_APP.home}`);
     return route();
   }

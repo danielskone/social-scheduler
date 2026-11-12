@@ -98,3 +98,35 @@ test('Viral Post can run on its own (APPS=scheduler)', async () => {
     assert.strictEqual((await fetch(`${base}/api/posts`)).status, 200);
   });
 });
+
+test('on the Mac each app is its own program on its own port (APP=crm)', async () => {
+  await withServer({ APP: 'crm' }, async (base) => {
+    const page = await (await fetch(`${base}/`)).text();
+    assert.match(page, /<title>Viral Touch CRM<\/title>/);
+    assert.match(page, /data-app="crm"/);
+    const info = JSON.parse(page.match(/window\.VP_APPS = (.*?);<\/script>/)[1]);
+    assert.strictEqual(info.app, 'crm');
+    assert.deepStrictEqual(info.apps.map((a) => [a.key, a.port]), [['scheduler', 3000], ['crm', 3001], ['clips', 3002], ['ads', 3003]]);
+    // old /crm/ link inside this program -> its home; another app's link -> that app's program
+    const self = await fetch(`${base}/crm/`, { redirect: 'manual' });
+    assert.strictEqual(self.headers.get('location'), '/');
+    const ads = await fetch(`${base}/ads/`, { redirect: 'manual' });
+    assert.strictEqual(ads.headers.get('location'), 'http://127.0.0.1:3003/');
+    const man = await (await fetch(`${base}/manifest-crm.webmanifest`)).json();
+    assert.strictEqual(man.start_url, '/#contacts');
+    assert.match(await (await fetch(`${base}/login.html`)).text(), /<h1>Viral Touch CRM<\/h1>/);
+    // shared data: Viral Post's posts can still be read (e.g. a clip scheduled from another app)
+    assert.strictEqual((await fetch(`${base}/api/posts`)).status, 200);
+  });
+});
+
+test('the other apps use the public address Viral Post found', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apps-url-'));
+  const code = `const c = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'config.js'))});
+    const a = c.publicBaseUrl;
+    require('fs').writeFileSync(c.publicUrlFile, 'https://abc.trycloudflare.com');
+    setTimeout(() => { console.log(JSON.stringify([a, c.publicBaseUrl])); }, 5200);`;
+  const out = require('node:child_process').execFileSync(process.execPath, ['-e', code], { env: { ...process.env, DATA_DIR: dir, PUBLIC_BASE_URL: '' } }).toString();
+  assert.deepStrictEqual(JSON.parse(out), ['http://localhost:3000', 'https://abc.trycloudflare.com']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

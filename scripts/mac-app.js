@@ -1,6 +1,7 @@
 // npm run mac-app : puts an app on your Desktop for each of your apps: Viral Post (the
-// scheduler), Viral Touch CRM, Viral Clips and Viral Ads Studio. Double-click one to start them
-// (if they aren't running) and open that app in its own window.
+// scheduler), Viral Touch CRM, Viral Clips and Viral Ads Studio. Each app is its own program
+// on its own port (see src/apps.js). Double-click one to open it in its own window (it starts
+// the background programs first if they aren't running).
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -9,8 +10,7 @@ const { execFileSync } = require('child_process');
 if (process.platform !== 'darwin') { console.log('This is only for Macs.'); process.exit(1); }
 const root = path.join(__dirname, '..');
 require('dotenv').config({ path: path.join(root, '.env'), quiet: true });
-const { APPS, enabledApps } = require('../src/apps');
-const port = process.env.PORT || 3000;
+const { APPS, enabledApps, portOf } = require('../src/apps');
 const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 function makeApp(a) {
@@ -38,13 +38,12 @@ function makeApp(a) {
 
   const exe = path.join(contents, 'MacOS', exeName);
   fs.writeFileSync(exe, `#!/bin/bash
-  # Start Viral Post and its apps in the background if they aren't running, then open ${a.name}.
-  BASE="http://localhost:${port}"
-  URL="$BASE${a.path}"
-  up() { /usr/bin/curl -s -o /dev/null --max-time 2 "$BASE/login.html"; }
+  # Start the apps in the background if ${a.name} isn't running, then open it.
+  URL="http://localhost:${portOf(a)}/"
+  up() { /usr/bin/curl -s -o /dev/null --max-time 2 "\${URL}login.html"; }
   if ! up; then
     cd ${q(root)} && ${q(process.execPath)} scripts/background.js on >/dev/null 2>&1
-    for i in $(seq 1 40); do up && break; sleep 0.5; done
+    for i in $(seq 1 60); do up && break; sleep 0.5; done
   fi
   if [ -d "/Applications/Google Chrome.app" ]; then
     open -na "Google Chrome" --args --app="$URL"
