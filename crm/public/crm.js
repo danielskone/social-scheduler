@@ -66,7 +66,7 @@
     launchpad: ['check', 'Start here', 'A short list of things to set up once. <b>Green means done.</b> Press the button next to anything that isn\'t done yet.'],
     dashboard: ['pipeline', 'How things are going', 'Your numbers at a glance: new people, money still open, money won and what\'s coming up. Pick a date range at the top right. Use the <b>business switcher</b> at the top of the menu to see one business or all of them.'],
     conversations: ['email', 'Your email inbox, inside the CRM', 'When someone in your CRM emails you, it shows up here, on their card, and <b>your iPhone buzzes</b>. Click a name to read it and <b>answer right here</b>. Your reply goes out from your own email address. Mail from strangers and newsletters stays in your normal inbox.'],
-    sites: ['forms', 'A simple website, no coding', 'Make a one-page website for a business or an event. Pick a design, change the words and pictures, and press <b>Save</b> with <b>Live</b> ticked. Put your <b>booking page</b> and <b>forms</b> right on it, so every visitor who books or signs up lands in People by itself.'],
+    sites: ['forms', 'A simple website, no coding', 'Make a one-page website for a business or an event. Pick a design, change the words and pictures, and press <b>Save</b> with <b>Live</b> ticked. Put your <b>booking page</b> and <b>forms</b> right on it, so every visitor who books or signs up lands in People by itself. <b>Funnels</b> put pages in order: sign-up, then thank-you, then an offer.'],
     courses: ['check', 'Teach and sell courses', 'Make a course with lessons: a <b>YouTube or Vimeo link</b> or your own video, plus notes. Share the <b>sales page</b>. Free courses open right away, paid ones go through your Stripe. Members watch in their private <b>customer portal</b> and tick lessons done. You see everyone\'s progress here.'],
     reports: ['pipeline', 'Your month in numbers', 'New people, deals won, money paid, appointments and more, compared with last month. <b>Email it</b> to yourself or a client, or tick the box and it goes out by itself on the 1st of every month. Pick a business at the top of the menu for its own report.'],
     payments: ['email', 'Get paid', 'Send a <b>quote</b> people sign on their phone, then an <b>invoice</b> they pay by card. Make an invoice, then <b>email it</b> or copy its link. People open it on their phone and <b>pay by card</b> with your own Stripe (the money goes straight to you), or by cash, check or Zelle, which you mark as paid. Your iPhone buzzes when a card payment comes in.'],
@@ -195,8 +195,8 @@
     templates: ['Templates', 'Messages you send a lot, written once.'],
     email: ['Email', 'Newsletters and email blasts to people who said yes.'],
     automations: ['Automations', 'Your helper that works while you\'re busy.'],
-    payments: ['Payments', 'Quotes people sign online, and invoices they pay by card, cash, check or Zelle.'],
-    sites: ['Sites', 'Simple one-page websites for your businesses and events.'],
+    payments: ['Payments', 'Quotes, invoices, products, coupons and referral partners.'],
+    sites: ['Sites', 'Simple websites, and funnels that lead people from one page to the next.'],
     courses: ['Courses', 'Lessons people watch in their private members area.'],
     reports: ['Reports', 'Your month in numbers, ready to email.'],
     reviews: ['Reviews', 'Ask happy customers for a review, and see who opened the link.'],
@@ -232,7 +232,7 @@
     ].map(([l, v, ico, c]) => `<div class="tile"><div class="tile-ico" style="--c:${c}">${svg(ico)}</div><div><div class="label">${l}</div><div class="value">${v ?? 0}</div></div></div>`).join('');
     renderTip(tab);
     if (!store.get('tour-done', false) && tourAt < 0) setTimeout(() => showTour(0), 400);
-    await ({ launchpad: () => window.VTHome.renderLaunchpad(), dashboard: () => window.VTHome.renderDashboard(), conversations: () => window.VTInbox.render({ openContact }), payments: () => window.VTMore.renderPayments(), reviews: () => window.VTMore.renderReviews(), sites: () => window.VTExtra.renderSites(), courses: () => window.VTExtra2.renderCourses(), reports: () => window.VTExtra.renderReports(), settings: () => window.VTHome.renderSettings(meta), list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
+    await ({ launchpad: () => window.VTHome.renderLaunchpad(), dashboard: () => window.VTHome.renderDashboard(), conversations: () => window.VTInbox.render({ openContact }), payments: () => window.VTMore.renderPayments(), reviews: () => window.VTMore.renderReviews(), sites: () => window.VTExtra3.renderSitesTab(), courses: () => window.VTExtra2.renderCourses(), reports: () => window.VTExtra.renderReports(), settings: () => window.VTHome.renderSettings(meta), list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
   }
   window.renderContacts = renderContacts;
   window.addEventListener('load', () => setTimeout(() => window.VTInbox.badge(), 500));

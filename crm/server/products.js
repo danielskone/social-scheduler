@@ -67,23 +67,30 @@ function buyer(body, bizId, note) {
     c = crm().createContact({ name, email, phone: phone || null, group_name: (b && b.groups[0]) || 'Other', stage: 'New' }, { source: 'pay link' });
   } else if (phone && !c.phone) crm().updateContact(c.id, { phone });
   crm().logActivity(c.id, { kind: 'Payment', note });
+  if (body.ref) { try { require('./referrals').attach(c, body.ref); } catch (e) { console.error(`[products] ${e.message}`); } }
   return c;
 }
 // Starts a card payment: makes the invoice, marks it sent, and returns the Stripe page to go to.
 async function startPayment({ contact, items, note }) {
-  if (!invoices().settings().stripe) throw err('Card payments are not set up yet. Please contact us to pay another way.');
-  const inv = invoices().save({ contact_id: contact.id, items, note });
+  const total = items.reduce((n, i) => n + i.qty * i.price, 0);
+  if (total > 0 && !invoices().settings().stripe) throw err('Card payments are not set up yet. Please contact us to pay another way.');
+  const inv = invoices().save({ contact_id: contact.id, items, note }, null, { allowZero: total <= 0 });
   await invoices().send(inv.id, { by: 'link' });
+  // Free after a coupon: no card needed.
+  if (total <= 0) { invoices().markPaid(inv.id, 'Coupon'); return { invoice: invoices().get(inv.id), url: `../invoice/${inv.token}?paid=1`, free: true }; }
   const out = await invoices().checkout(inv.token);
   return { invoice: invoices().get(inv.id), url: out.url };
 }
 async function buy(token, body = {}) {
   const p = db.prepare('SELECT * FROM crm_products WHERE token=? AND active=1').get(String(token));
   if (!p) throw err('This product is not available.', 404);
-  if (!invoices().settings().stripe) throw err('Card payments are not set up yet. Please contact us to pay another way.');
   const qty = Math.min(p.max_qty, Math.max(1, Math.round(Number(body.qty) || 1)));
-  const c = buyer(body, p.business_id, `Started buying ${qty > 1 ? `${qty} x ` : ''}${p.name} (${money(p.price * qty)})`);
-  const r = await startPayment({ contact: c, items: [{ what: p.name, qty, price: p.price }], note: p.description || null });
+  const cp = require('./coupons').check(body.coupon, 'products', p.price);
+  const price = cp ? cp.price : p.price;
+  if (price > 0 && !invoices().settings().stripe) throw err('Card payments are not set up yet. Please contact us to pay another way.');
+  const c = buyer(body, p.business_id, `Started buying ${qty > 1 ? `${qty} x ` : ''}${p.name} (${money(price * qty)}${cp ? `, coupon ${cp.coupon.code}` : ''})`);
+  const r = await startPayment({ contact: c, items: [{ what: cp ? `${p.name} (coupon ${cp.coupon.code})` : p.name, qty, price }], note: p.description || null });
+  if (cp) require('./coupons').use(cp.coupon.id);
   db.prepare('UPDATE crm_products SET sold=sold+? WHERE id=?').run(qty, p.id);
   return r;
 }
@@ -91,7 +98,7 @@ async function buy(token, body = {}) {
 // ---------- The public "Buy now" page ----------
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 const nl = (v) => esc(v).replace(/\n/g, '<br>');
-function buyPage({ title, sub, description, price, maxQty = 1, bizId, error, values = {}, button = 'Pay with card', extra = '' }) {
+function buyPage({ title, sub, description, price, maxQty = 1, bizId, error, values = {}, button = 'Pay with card', extra = '', coupon = false }) {
   const b = (bizId && businesses().get(bizId)) || businesses().all()[0] || { name: '', color: '#4f46e5' };
   const stripeOn = invoices().settings().stripe;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}${b.name ? ` · ${esc(b.name)}` : ''}</title>
@@ -111,6 +118,7 @@ ${error ? `<div class="err">${esc(error)}</div>` : ''}
 <label for="n">Your name</label><input id="n" name="name" required maxlength="80" autocomplete="name" value="${esc(values.name)}">
 <label for="e">Email <span class="muted">(for your receipt)</span></label><input id="e" name="email" type="email" required maxlength="200" autocomplete="email" value="${esc(values.email)}">
 <label for="p">Phone <span class="muted">(optional)</span></label><input id="p" name="phone" type="tel" maxlength="40" autocomplete="tel" value="${esc(values.phone)}">
+${coupon ? `<label for="cp">Coupon code <span class="muted">(optional)</span></label><input id="cp" name="coupon" maxlength="30" autocapitalize="characters" value="${esc(values.coupon)}">` : ''}
 <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
 <button type="submit"${price > 0 && !stripeOn ? ' disabled' : ''}>${esc(button)}</button>
 ${price > 0 ? (stripeOn ? '<p class="muted lock">🔒 You pay on a secure Stripe page.</p>' : '<p class="muted lock">Card payments are not set up yet. Please contact us to pay.</p>') : ''}
@@ -121,7 +129,7 @@ function publicRouter() {
   const r = express.Router();
   r.use(express.urlencoded({ extended: false, limit: '20kb' }));
   const product = (t) => db.prepare('SELECT * FROM crm_products WHERE token=? AND active=1').get(String(t));
-  const show = (p, extra = {}) => buyPage({ title: p.name, description: p.description, price: p.price, maxQty: p.max_qty, bizId: p.business_id, button: `Pay ${money(p.price)} with card`, ...extra });
+  const show = (p, extra = {}) => buyPage({ title: p.name, description: p.description, price: p.price, maxQty: p.max_qty, bizId: p.business_id, button: `Pay ${money(p.price)} with card`, coupon: require('./coupons').anyLive('products'), ...extra });
   r.get('/:token', (req, res) => {
     const p = product(req.params.token);
     if (!p) return res.status(404).send('<meta name="viewport" content="width=device-width, initial-scale=1"><p style="font:18px system-ui;padding:20px">This product is not available.</p>');
@@ -132,7 +140,7 @@ function publicRouter() {
     if (!p) return res.status(404).send('Not available');
     if (req.body.website) return res.send('Thank you!');
     if (crm().tooMany(String(req.get('cf-connecting-ip') || req.ip))) return res.status(429).send(show(p, { error: 'Too many tries. Please wait a bit.', values: req.body }));
-    try { const out = await buy(p.token, req.body); res.redirect(303, out.url); }
+    try { const out = await buy(p.token, { ...req.body, ref: require('./referrals').fromReq(req) }); res.redirect(303, out.url); }
     catch (e) { res.status(e.status || 500).send(show(p, { error: e.message, values: req.body })); }
   });
   return r;

@@ -88,6 +88,9 @@ const ADMIN_ONLY = [
   [/^\/api\/crm\/chat\/settings/, 'PUT'],
   [/^\/api\/crm\/products\/\d+$/, 'DELETE'],
   [/^\/api\/crm\/courses\/\d+$/, 'DELETE'],
+  [/^\/api\/crm\/referrals\/settings/, 'PUT'],
+  [/^\/api\/crm\/referrals\/\d+\/paid/, 'POST'],
+  [/^\/api\/crm\/funnels\/\d+$/, 'DELETE'],
   [/^\/api\/crm\/sites\/\d+$/, 'DELETE'],
 ];
 function allowed(member, req) {

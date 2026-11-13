@@ -97,6 +97,7 @@ function home(c, token) {
   const pages = db.prepare('SELECT * FROM crm_booking_pages WHERE active=1 ORDER BY id').all()
     .filter((p) => !b.groups || !b.groups.length || b.groups.includes(p.group_name));
   const due = invoices.filter((i) => i.status !== 'paid');
+  const partner = (() => { try { return require('./referrals').forContact(c.id); } catch { return null; } })();
   const sec = (title, items, emptyText) => `<h2>${title}</h2>${items.length ? items.join('') : `<div class="empty">${emptyText}</div>`}`;
   const body = `<h1>Hi ${esc(String(c.name).split(' ')[0])}</h1><div class="muted">Everything you have with ${esc(b.name || 'us')}, in one place.</div>
 ${due.length ? `<div class="note"><b>You have ${due.length} invoice${due.length > 1 ? 's' : ''} to pay</b> (${money(due.reduce((s, i) => s + i.total, 0))}).</div>` : ''}
@@ -108,6 +109,9 @@ ${pages.length ? `<div class="row" style="gap:8px;justify-content:flex-start">${
 ${sec('Invoices', invoices.map((i) => `<div class="card"><div class="row"><div><b>#${i.number} · ${money(i.total)}</b> <span class="pill ${i.status === 'paid' ? 'ok' : 'due'}">${i.status === 'paid' ? 'Paid' : 'Due'}</span>
 <div class="muted small">${i.status === 'paid' ? `Paid ${day(i.paid_at)}` : i.due_date ? `Due ${day(i.due_date)}` : `Sent ${day(i.sent_at || i.created_at)}`}</div></div>
 <a class="btn${i.status === 'paid' ? ' ghost' : ''}" href="../invoice/${esc(i.token)}">${i.status === 'paid' ? 'View' : 'View and pay'}</a></div></div>`), 'No invoices yet.')}
+${partner ? `<h2>Share and earn</h2><div class="card"><div class="muted small">Send friends your link. When they buy, you earn ${partner.percent}% of the sale.</div>
+<input readonly value="${esc(partner.link)}" aria-label="Your link" onclick="this.select()" style="margin:10px 0">
+<div class="row" style="justify-content:flex-start;gap:22px"><div><b>${partner.clicks}</b><div class="muted small">Visits</div></div><div><b>${partner.people}</b><div class="muted small">People</div></div><div><b>${partner.sales}</b><div class="muted small">Sales</div></div><div><b>${money(partner.owed)}</b><div class="muted small">To be paid</div></div><div><b>${money(partner.paid)}</b><div class="muted small">Paid to you</div></div></div></div>` : ''}
 ${quotes.length ? sec('Quotes', quotes.map((q) => `<div class="card"><div class="row"><div><b>${esc(q.title || `Quote #${q.number}`)} · ${money(q.total)}</b> <span class="pill ${q.status === 'accepted' ? 'ok' : ''}">${esc({ sent: 'Waiting for you', accepted: 'Signed', declined: 'Declined', expired: 'Expired' }[q.status] || q.status)}</span></div>
 <a class="btn ghost" href="../quote/${esc(q.token)}">View</a></div></div>`), '') : ''}
 <p class="muted small" style="margin-top:30px">This private link opens your account without a password, so keep it to yourself.</p>`;
@@ -140,7 +144,7 @@ function publicRouter() {
     const c = contactFor(req.params.token);
     if (!c) return page(res, gone(), 404);
     if (req.query.course) {
-      const html = require('./courses').coursePage(c, req.params.token, req.query.course, req.query.lesson);
+      const html = require('./courses').coursePage(c, req.params.token, req.query.course, req.query.lesson, req.query.tab);
       return html ? page(res, html) : res.redirect(303, encodeURIComponent(req.params.token));
     }
     page(res, home(c, req.params.token));
@@ -151,6 +155,18 @@ function publicRouter() {
     const next = require('./courses').markDone(c.id, req.body.lesson, req.body.undo === '1');
     res.redirect(303, `../${encodeURIComponent(req.params.token)}?course=${next.course}${next.lesson ? `&lesson=${next.lesson}` : ''}`);
   });
+  // The members community.
+  const talk = (fn) => (req, res) => {
+    const c = contactFor(req.params.token);
+    if (!c) return page(res, gone(), 404);
+    const back = `../${encodeURIComponent(req.params.token)}?course=${Number(req.body.course) || 0}&tab=talk`;
+    try { const out = fn(c, req.body); res.redirect(303, `${back}${out && out.post ? `#p${out.post}` : ''}`); }
+    catch (e) { res.redirect(303, back); }
+  };
+  const community = () => require('./community');
+  r.post('/:token/post', talk((c, b) => community().memberPost(c.id, b.course, b.body)));
+  r.post('/:token/comment', talk((c, b) => community().memberComment(c.id, b.post, b.body)));
+  r.post('/:token/unpost', talk((c, b) => community().memberDelete(c.id, 'post', b.post)));
   r.get('/:token/media/:file', (req, res) => {
     const c = contactFor(req.params.token);
     const f = c && require('./courses').mediaFor(c.id, req.params.file);

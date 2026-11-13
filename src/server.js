@@ -62,6 +62,8 @@ app.use('/media', express.static(config.mediaDir, { fallthrough: false, maxAge: 
 app.use(compression({ filter: (req, res) => !req.path.startsWith('/thumb/') && compression.filter(req, res) }));
 
 // Public sign-up forms from the Contacts tab. No password, so anyone with the link can fill one in.
+// Referral links: ?ref=CODE on any shared page remembers who sent the visitor.
+app.use(['/s', '/pay', '/learn', '/portal', '/book', '/f'], require('../crm/server/referrals').catcher);
 app.use('/f', forms.publicForms);
 app.use('/book', booking.publicBooking);
 // Invoices you send (customers view and pay them) and review-request links: also meant to be shared.
@@ -577,6 +579,10 @@ app.use('/api/crm/chat', require('../crm/server/chat').router);
 app.use('/api/crm/products', require('../crm/server/products').router);
 app.use('/api/crm/portal', require('../crm/server/portal').router);
 app.use('/api/crm/courses', require('../crm/server/courses').router);
+app.use('/api/crm/funnels', require('../crm/server/funnels').router);
+app.use('/api/crm/coupons', require('../crm/server/coupons').router);
+app.use('/api/crm/referrals', require('../crm/server/referrals').router);
+app.use('/api/crm/community', require('../crm/server/community').router);
 app.use('/api/crm', crmDashboard.router);
 app.use('/api/crm/forms', forms.router);
 app.use('/api/crm/booking', booking.router);

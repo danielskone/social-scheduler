@@ -105,7 +105,7 @@ function cleanItems(list) {
   return items;
 }
 
-function save(body = {}, id) {
+function save(body = {}, id, { allowZero = false } = {}) {
   const old = id ? get(id) : null;
   if (id && !old) throw err('Invoice not found', 404);
   if (old && old.status !== 'draft' && old.status !== 'sent') throw err('A paid or cancelled invoice can\'t be changed.');
@@ -118,7 +118,7 @@ function save(body = {}, id) {
   const due = /^\d{4}-\d{2}-\d{2}$/.test(body.due_date || '') ? body.due_date : body.due_date === '' ? null : (old ? old.due_date : null);
   const note = 'note' in body ? String(body.note || '').trim().slice(0, 1000) || null : (old ? old.note : null);
   const { total } = sums(items, taxRate);
-  if (total <= 0) throw err('The total must be more than $0.');
+  if (total <= 0 && !allowZero) throw err('The total must be more than $0.');
   if (total > 999999) throw err('That total is too big for one invoice.');
   const biz = businesses().ownerOf(c.group_name);
   if (old) {
@@ -175,6 +175,7 @@ function markPaid(id, how = 'Cash or check', { quiet } = {}) {
   if (inv.status === 'void') throw err('This invoice was cancelled.');
   db.prepare("UPDATE crm_invoices SET status='paid', paid_at=?, paid_how=? WHERE id=?").run(new Date().toISOString(), String(how).slice(0, 60), inv.id);
   try { require('./courses').onPaid(inv.id); } catch (e) { console.error(`[invoices] ${e.message}`); }
+  try { require('./referrals').onPaid(get(inv.id)); } catch (e) { console.error(`[invoices] ${e.message}`); }
   if (inv.contact) {
     crm().logActivity(inv.contact.id, { kind: 'Payment', note: `Paid invoice #${inv.number}: ${money(inv.total)} (${how})` });
     if (!quiet) notify.send('Invoice paid', `${inv.contact.name} paid ${money(inv.total)} (invoice #${inv.number}, ${how}).`, { tags: 'moneybag' }).catch(() => {});

@@ -45,11 +45,16 @@
   const pill = (l) => `<span class="pay-pill" style="--c:${LABEL[l][1]}">${LABEL[l][0]}</span>`;
   let payFilter = '';
   let payMode = store.get('pay-mode', 'invoices');
-  const modeBar = () => `<div class="seg pay-seg" role="group" aria-label="Show"><button type="button" data-mode="invoices" class="${payMode === 'invoices' ? 'on' : ''}">Invoices</button><button type="button" data-mode="quotes" class="${payMode === 'quotes' ? 'on' : ''}">Quotes</button><button type="button" data-mode="products" class="${payMode === 'products' ? 'on' : ''}">Products</button></div>`;
+  const modeBar = () => `<div class="seg pay-seg" role="group" aria-label="Show"><button type="button" data-mode="invoices" class="${payMode === 'invoices' ? 'on' : ''}">Invoices</button><button type="button" data-mode="quotes" class="${payMode === 'quotes' ? 'on' : ''}">Quotes</button><button type="button" data-mode="products" class="${payMode === 'products' ? 'on' : ''}">Products</button><button type="button" data-mode="coupons" class="${payMode === 'coupons' ? 'on' : ''}">Coupons</button><button type="button" data-mode="referrals" class="${payMode === 'referrals' ? 'on' : ''}">Referrals</button></div>`;
   async function renderPayments(opts = {}) {
     const root = q$('#pay-root');
     const switchMode = (e) => { const m = e.target.closest('[data-mode]'); if (!m) return false; payMode = m.dataset.mode; store.set('pay-mode', payMode); renderPayments(); return true; };
     if (opts.quoteFor) { payMode = 'quotes'; store.set('pay-mode', payMode); }
+    if (payMode === 'coupons' || payMode === 'referrals') {
+      const handle = await window.VTExtra3[payMode === 'coupons' ? 'renderCoupons' : 'renderReferrals'](root, modeBar());
+      root.onclick = (e) => { if (!switchMode(e)) handle(e); };
+      return;
+    }
     if (payMode === 'products') {
       const handle = await window.VTExtra2.renderProducts(root, modeBar());
       root.onclick = (e) => { if (!switchMode(e)) handle(e); };

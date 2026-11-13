@@ -209,7 +209,7 @@ function embed(u) {
   } catch {}
   return null;
 }
-function coursePage(contact, token, courseId, lessonId) {
+function coursePage(contact, token, courseId, lessonId, tab) {
   const c = get(courseId);
   if (!c || !hasAccess(c.id, contact.id)) return null;
   const lessons = lessonsOf(c.id);
@@ -223,10 +223,11 @@ function coursePage(contact, token, courseId, lessonId) {
   const isDone = l && done.has(l.id);
   const body = `<p><a href="${base}">&larr; Your account</a></p><h1>${esc(c.title)}</h1><div class="muted small">${n} of ${lessons.length} lessons done</div>
 <div class="prog" style="margin-bottom:18px"><i style="width:${lessons.length ? Math.round(n / lessons.length * 100) : 0}%"></i></div>
-${n === lessons.length && lessons.length ? '<div class="note"><b>🎉 You finished this course.</b> Great work!</div>' : ''}
+<style>${require('./community').CSS}</style><nav class="tabs"><a href="${base}?course=${c.id}"${tab === 'talk' ? '' : ' class="on"'}>Lessons</a><a href="${base}?course=${c.id}&amp;tab=talk"${tab === 'talk' ? ' class="on"' : ''}>Community</a></nav>
+${tab === 'talk' ? require('./community').html(contact, token, c.id, biz && biz.name) : `${n === lessons.length && lessons.length ? '<div class="note"><b>🎉 You finished this course.</b> Great work!</div>' : ''}
 <div class="course"><div class="card side lessons">${lessons.map((x, i) => `<a href="${base}?course=${c.id}&amp;lesson=${x.id}"${l && x.id === l.id ? ' class="on" aria-current="page"' : ''}><span class="tick${done.has(x.id) ? ' done' : ''}">${done.has(x.id) ? '✓' : ''}</span><span>${i + 1}. ${esc(x.title)}</span></a>`).join('') || '<div class="empty" style="padding:14px">Lessons are coming soon.</div>'}</div>
 <div>${l ? `<div class="card"><h2 style="margin-top:4px">${esc(l.title)}</h2>${player}${l.body ? `<div>${nl(l.body)}</div>` : ''}
-<form method="post" action="${base}/done" style="margin-top:16px"><input type="hidden" name="lesson" value="${l.id}">${isDone ? '<input type="hidden" name="undo" value="1"><button class="btn ghost">✓ Done (tap to undo)</button>' : '<button class="btn">Mark done and go on</button>'}</form></div>` : ''}</div></div>`;
+<form method="post" action="${base}/done" style="margin-top:16px"><input type="hidden" name="lesson" value="${l.id}">${isDone ? '<input type="hidden" name="undo" value="1"><button class="btn ghost">✓ Done (tap to undo)</button>' : '<button class="btn">Mark done and go on</button>'}</form></div>` : ''}</div></div>`}`;
   return portal().shell({ title: c.title, biz, body, wide: true });
 }
 
@@ -243,6 +244,7 @@ ${error ? `<div class="err">${esc(error)}</div>` : ''}
 <form method="post" class="card"><b>${c.price > 0 ? 'Get the course' : 'Join for free'}</b>
 <label for="n">Your name</label><input id="n" name="name" required maxlength="80" autocomplete="name" value="${esc(values.name)}">
 <label for="e">Email</label><input id="e" name="email" type="email" required maxlength="200" autocomplete="email" value="${esc(values.email)}">
+${c.price > 0 && require('./coupons').anyLive('courses') ? `<label for="cp">Coupon code <span class="muted small">(optional)</span></label><input id="cp" name="coupon" maxlength="30" value="${esc(values.coupon)}">` : ''}
 <input name="website" style="position:absolute;left:-9999px" tabindex="-1" autocomplete="off" aria-hidden="true">
 <p><button class="btn" type="submit"${c.price > 0 && !stripeOn ? ' disabled' : ''} style="width:100%;padding:14px">${c.price > 0 ? `Pay ${money(c.price)} with card` : 'Start now'}</button></p>
 ${c.price > 0 ? `<p class="muted small" style="text-align:center">${stripeOn ? '🔒 You pay on a secure Stripe page.' : 'Card payments are not set up yet. Please contact us.'}</p>` : ''}
@@ -253,16 +255,20 @@ async function join(slug, body = {}) {
   const c = db.prepare('SELECT * FROM crm_courses WHERE slug=? AND active=1').get(String(slug));
   if (!c) throw err('This course is not available.', 404);
   const email = String(body.email || '').trim().toLowerCase();
+  const cp = c.price > 0 ? require('./coupons').check(body.coupon, 'courses', c.price) : null;
+  if (cp) { c.price = cp.price; c.coupon = cp.coupon; }
   const isNew = !db.prepare('SELECT 1 FROM contacts WHERE lower(email)=?').get(email);
   const products = require('./products');
   if (c.price > 0 && !require('./invoices').settings().stripe) throw err('Card payments are not set up yet. Please contact us.');
   const p = products.buyer(body, c.business_id, c.price > 0 ? `Started buying the course "${c.title}" (${money(c.price)})` : `Signed up for the free course "${c.title}"`);
   if (c.price > 0) {
-    const r = await products.startPayment({ contact: p, items: [{ what: `Course: ${c.title}`, qty: 1, price: c.price }] });
+    const r = await products.startPayment({ contact: p, items: [{ what: `Course: ${c.title}${cp ? ` (coupon ${cp.coupon.code})` : ''}`, qty: 1, price: c.price }] });
+    if (cp) require('./coupons').use(cp.coupon.id);
     db.prepare('INSERT OR REPLACE INTO crm_course_orders (invoice_id, course_id, contact_id) VALUES (?,?,?)').run(r.invoice.id, c.id, p.id);
     return { redirect: r.url };
   }
-  await grant(c.id, p.id, { via: 'Free sign-up' });
+  if (cp) require('./coupons').use(cp.coupon.id);
+  await grant(c.id, p.id, { via: cp ? `Coupon ${cp.coupon.code}` : 'Free sign-up' });
   notify.send('New course member', `${p.name} joined "${c.title}" (free).`, { tags: 'mortar_board' }).catch(() => {});
   // Someone brand new can go straight in. For an email we already had, the link goes by email only,
   // so nobody can open another person's account by typing their address.
@@ -281,7 +287,7 @@ function publicRouter() {
     if (req.body.website) return res.type('html').send(salesPage(c, { sent: true }));
     if (crm().tooMany(String(req.get('cf-connecting-ip') || req.ip))) return res.status(429).type('html').send(salesPage(c, { error: 'Too many tries. Please wait a bit.', values: req.body }));
     try {
-      const out = await join(c.slug, req.body);
+      const out = await join(c.slug, { ...req.body, ref: require('./referrals').fromReq(req) });
       if (out.redirect) return res.redirect(303, out.redirect);
       res.type('html').send(salesPage(c, { sent: true }));
     } catch (e) { res.status(e.status || 500).type('html').send(salesPage(c, { error: e.message, values: req.body })); }
