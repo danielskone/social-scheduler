@@ -18,6 +18,8 @@
 //   SAAS_BETA              1 = beta test: invite only, testers get free access (npm run beta)
 //   SAAS_YOUTUBE / SAAS_TIKTOK  "on" lets customers connect YouTube / TikTok (default off; the
 //                          funnel address must be added in Google's / TikTok's settings first)
+//   SAAS_META_LIVE         "on" once the Meta app passed App Review and is Live: anyone can connect
+//                          Facebook and Instagram (until then only people added as Testers can)
 //   SAAS_APPS              which apps customers get: "all" (default) or e.g. "scheduler" for Viral Post
 //                          on its own, or "scheduler,crm" (crm, clips)
 //   SAAS_SMTP_HOST/PORT/USER/PASS, SAAS_EMAIL_FROM  to email password-reset links (optional)

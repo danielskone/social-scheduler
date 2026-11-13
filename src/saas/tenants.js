@@ -89,6 +89,9 @@ function createTenants({ dir, basePort = 4100, publicBaseUrl, env = process.env,
       TIKTOK_REDIRECT_URI: `${publicBaseUrl}/auth/tiktok/callback`,
       // Which apps customers get (SAAS_APPS=scheduler sells Viral Post on its own; default all).
       APPS: env.SAAS_APPS || 'all',
+      // Until the owner's Meta app is approved and Live (SAAS_META_LIVE=on), Facebook only lets
+      // people the owner added as Testers connect. The tutorial and Accounts page explain that.
+      META_TESTERS_ONLY: isOn(env.SAAS_META_LIVE) ? '' : '1',
     };
   }
 

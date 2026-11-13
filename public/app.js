@@ -768,6 +768,7 @@ async function renderAccounts() {
     $('#view-accounts a[href="/auth/tiktok"]').style.display = status.tiktokConfigured ? '' : 'none';
     const names = ['Facebook', status.youtubeConfigured && 'Google', status.tiktokConfigured && 'TikTok'].filter(Boolean);
     notes.push(`Click a Connect button and sign in to ${names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : 'Facebook'}. You choose which Pages, profiles and channels Viral Post may post to, and you can remove them here any time.`);
+    if (status.metaTestersOnly) notes.push('<b>Facebook and Instagram during the beta:</b> Facebook only lets you connect after we add you as a Tester. Reply to your welcome message with the name on your Facebook profile. You will get an invite. Accept it at <a href="https://developers.facebook.com/requests/" target="_blank" rel="noopener">developers.facebook.com/requests</a>, then come back here and click Connect. Instagram must be a Business or Creator account linked to your Facebook Page.');
     if (!status.youtubeConfigured || !status.tiktokConfigured) notes.push(`${[!status.youtubeConfigured && 'YouTube', !status.tiktokConfigured && 'TikTok'].filter(Boolean).join(' and ')} will be added after the beta.`);
     if (status.tiktokConfigured && status.tiktokMode !== 'direct') notes.push('TikTok videos go to your TikTok inbox at the scheduled time; open TikTok and tap Post to finish.');
   }
