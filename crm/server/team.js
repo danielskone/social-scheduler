@@ -92,6 +92,10 @@ const ADMIN_ONLY = [
   [/^\/api\/crm\/referrals\/\d+\/paid/, 'POST'],
   [/^\/api\/crm\/funnels\/\d+$/, 'DELETE'],
   [/^\/api\/crm\/sites\/\d+$/, 'DELETE'],
+  [/^\/api\/crm\/plans\/\d+$/, 'DELETE'],
+  [/^\/api\/crm\/plans\/subscriptions\/\d+\/cancel/, 'POST'],
+  [/^\/api\/crm\/checkouts/, 'PUT'],
+  [/^\/api\/crm\/blog\/\d+$/, 'DELETE'],
 ];
 function allowed(member, req) {
   if (!member || member.role === 'admin') return true;

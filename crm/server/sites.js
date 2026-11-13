@@ -49,8 +49,9 @@ const BLOCKS = {
   cta: { name: 'Call to action', fields: ['heading', 'text', 'button_text', 'button_link'] },
   buy: { name: 'Buy button (a product)', fields: ['heading', 'text', 'product', 'button_text'] },
   contact: { name: 'Contact details', fields: ['heading', 'text', 'show_map'] },
+  blog: { name: 'Latest blog posts', fields: ['heading', 'text', 'count'] },
 };
-const LIMITS = { heading: 120, text: 2000, button_text: 40, button_link: 500, image: 500, title: 120, price: 40, caption: 160, quote: 600, name: 80, q: 200, a: 1500, booking: 20, form: 40, show_map: 5, product: 20 };
+const LIMITS = { heading: 120, text: 2000, button_text: 40, button_link: 500, image: 500, title: 120, price: 40, caption: 160, quote: 600, name: 80, q: 200, a: 1500, booking: 20, form: 40, show_map: 5, product: 20, count: 2 };
 
 function cleanSections(list) {
   if (!Array.isArray(list)) throw err('Something went wrong with the blocks. Reload and try again.');
@@ -207,6 +208,10 @@ function render(site, { preview = false, base = '' } = {}) {
         ${b.address ? `<a href="https://maps.google.com/?q=${encodeURIComponent(b.address)}" target="_blank" rel="noopener">📍 ${esc(b.address)}</a>` : ''}${b.website && !preview ? '' : ''}</div>
         ${s.show_map && b.address ? `<iframe class="map" title="Map" loading="lazy" src="https://maps.google.com/maps?q=${encodeURIComponent(b.address)}&output=embed"></iframe>` : ''}
         ${!b.phone && !b.email && !b.address ? '<p class="sub">Add a phone, email or address to the business in Settings and it shows here.</p>' : ''}`, 'center');
+      case 'blog': { const posts = (() => { try { return require('./blog').latest(site.business_id, Number(s.count) || 3); } catch { return []; } })();
+        const bl = (x) => (preview ? '#' : `${up}blog/${x}`);
+        return sec(s, `${head(s)}${s.text ? `<p class="sub">${nl(s.text)}</p>` : ''}<div class="grid">${posts.map((p) => `<a class="tile post" href="${esc(bl(p.slug))}">${p.cover ? `<img src="${esc(img(p.cover))}" alt="" loading="lazy">` : ''}<h3>${esc(p.title)}</h3><p>${esc(p.summary)}</p></a>`).join('')
+          || '<p class="sub">Write a post in Sites, then Blog, and it shows here.</p>'}</div>${posts.length ? `<p style="margin-top:22px"><a class="btn" href="${esc(bl(''))}">See all posts</a></p>` : ''}`, 'center alt'); }
       default: return '';
     }
   }).join('\n');
@@ -228,6 +233,7 @@ h1,h2,h3{font-family:${f.head};line-height:1.15;margin:0 0 12px}h1{font-size:cla
 .tile p{color:var(--muted);margin:0 0 10px}.price{font-weight:800;color:var(--c);font-size:1.1rem}.price.big{font-size:2.2rem;margin:6px 0 18px}.stars{color:#f59e0b;letter-spacing:2px;margin-bottom:6px}cite{font-style:normal;font-weight:700}
 .split{display:grid;grid-template-columns:1.2fr 1fr;gap:36px;align-items:center}.split.one{grid-template-columns:1fr;max-width:760px}.split img{width:100%;border-radius:18px;object-fit:cover;max-height:420px}
 .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:20px}figure{margin:0}.photos img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:14px;display:block}figcaption{color:var(--muted);font-size:.9rem;margin-top:6px}
+a.post{text-decoration:none;color:var(--text)}a.post img{width:calc(100% + 44px);margin:-22px -22px 14px;aspect-ratio:16/9;object-fit:cover;display:block;border-radius:18px 18px 0 0}a.post:hover{border-color:var(--c)}
 div.faq{max-width:760px;margin-top:16px}details{border-bottom:1px solid var(--line);padding:14px 0}summary{cursor:pointer;font-weight:700;font-size:1.05rem}details p{color:var(--muted);margin:10px 0 0}
 .band{background:var(--c);color:#fff}.band .sub{color:#fff;opacity:.9}
 div.contact{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}div.contact a{padding:12px 18px;border:1px solid var(--line);border-radius:999px;color:var(--text);text-decoration:none;background:var(--card)}

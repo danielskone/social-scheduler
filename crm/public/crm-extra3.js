@@ -43,8 +43,9 @@
     const bar = q$('#site-mode');
     if (window.VTExtra.isEditing()) { bar.hidden = true; return window.VTExtra.renderSites(); }
     bar.hidden = false;
-    bar.innerHTML = `<div class="seg pay-seg" role="group" aria-label="Show"><button type="button" data-smode="pages" class="${siteMode === 'pages' ? 'on' : ''}">Pages</button><button type="button" data-smode="funnels" class="${siteMode === 'funnels' ? 'on' : ''}">Funnels</button></div>`;
+    bar.innerHTML = `<div class="seg pay-seg" role="group" aria-label="Show"><button type="button" data-smode="pages" class="${siteMode === 'pages' ? 'on' : ''}">Pages</button><button type="button" data-smode="funnels" class="${siteMode === 'funnels' ? 'on' : ''}">Funnels</button><button type="button" data-smode="blog" class="${siteMode === 'blog' ? 'on' : ''}">Blog</button></div>`;
     bar.onclick = (e) => { const b = e.target.closest('[data-smode]'); if (b) { siteMode = b.dataset.smode; store.set('site-mode', siteMode); renderSitesTab(); } };
+    if (siteMode === 'blog') return window.VTExtra4.renderBlog();
     return siteMode === 'funnels' ? renderFunnels() : window.VTExtra.renderSites();
   }
   async function renderFunnels() {

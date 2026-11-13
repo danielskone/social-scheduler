@@ -309,12 +309,12 @@
   // ======================= Sites (simple website pages) =======================
   const FIELD = {
     heading: ['Heading', 'text'], text: ['Text', 'area'], button_text: ['Button words', 'text', 'Book a time'], button_link: ['Button goes to', 'link'], image: ['Picture', 'image'],
-    booking: ['Booking page', 'booking'], form: ['Form', 'form'], show_map: ['Show a map of the address', 'check'], product: ['Product to sell', 'product'],
+    booking: ['Booking page', 'booking'], form: ['Form', 'form'], show_map: ['Show a map of the address', 'check'], product: ['Product to sell', 'product'], count: ['How many posts to show', 'count'],
     title: ['Name', 'text'], price: ['Price', 'text', '$49 or Free'], caption: ['Caption', 'text'], quote: ['What they said', 'area'], name: ['Who said it', 'text'], q: ['Question', 'text'], a: ['Answer', 'area'],
   };
   const LISTS = { services: ['title', 'text', 'price'], gallery: ['image', 'caption'], reviews: ['quote', 'name'], faq: ['q', 'a'] };
   const FIELDS = { hero: ['heading', 'text', 'button_text', 'button_link', 'image'], text: ['heading', 'text', 'image'], services: ['heading', 'text'], gallery: ['heading'], reviews: ['heading'],
-    booking: ['heading', 'text', 'booking'], form: ['heading', 'text', 'form'], faq: ['heading'], cta: ['heading', 'text', 'button_text', 'button_link'], contact: ['heading', 'text', 'show_map'], buy: ['heading', 'text', 'product', 'button_text'] };
+    booking: ['heading', 'text', 'booking'], form: ['heading', 'text', 'form'], faq: ['heading'], cta: ['heading', 'text', 'button_text', 'button_link'], contact: ['heading', 'text', 'show_map'], buy: ['heading', 'text', 'product', 'button_text'], blog: ['heading', 'text', 'count'] };
   const ITEM_NAME = { services: 'service', gallery: 'photo', reviews: 'review', faq: 'question' };
   let siteData = null, editing = null, previewTimer = null, dirty = false;
 
@@ -376,6 +376,7 @@
       if (kind === 'booking') return `<label class="field"><span>${label}</span><select ${at}><option value="">The first booking page</option>${siteData.pages.map((p) => `<option value="${p.id}"${String(p.id) === String(v) ? ' selected' : ''}>${h(p.title)}${p.active ? '' : ' (off)'}</option>`).join('')}</select></label>`;
       if (kind === 'form') return `<label class="field"><span>${label}</span><select ${at}><option value="">Pick a form</option>${siteData.forms.map((f) => `<option value="${h(f.slug)}"${f.slug === v ? ' selected' : ''}>${h(f.title)}${f.active ? '' : ' (off)'}</option>`).join('')}</select></label>`;
       if (kind === 'product') return `<label class="field"><span>${label}</span><select ${at}><option value="">Pick a product</option>${(siteData.products || []).map((p) => `<option value="${p.id}"${String(p.id) === String(v) ? ' selected' : ''}>${h(p.name)} · ${money(p.price)}${p.active ? '' : ' (hidden)'}</option>`).join('')}</select>${(siteData.products || []).length ? '' : '<small class="muted">Add products in Payments, Products first.</small>'}</label>`;
+      if (kind === 'count') return `<label class="field"><span>${label}</span><select ${at}>${[3, 6, 9].map((n) => `<option value="${n}"${String(n) === String(v || 3) ? ' selected' : ''}>${n}</option>`).join('')}</select><small class="muted">Write posts in Sites, then Blog.</small></label>`;
       if (kind === 'link') return `<label class="field"><span>${label}</span><input list="site-links" ${at} value="${h(v)}" placeholder="#book, #signup, #contact or a web address"></label>`;
       if (kind === 'image') return `<div class="field"><span>${label} <small class="muted">(optional)</small></span><div class="site-img">${v ? `<img src="${h(/^media\//.test(v) ? `${basePath()}s/${v}` : v)}" alt="">` : `<span class="site-noimg">${svg('image')}</span>`}
         <input ${at} value="${h(v)}" placeholder="Paste a picture link, or upload"><label class="btn ghost">Upload<input type="file" accept="image/*" hidden data-upload="${path}" data-uk="${k}"></label>${v ? `<button type="button" class="btn ghost" data-clear-img="${path}" data-uk="${k}">Remove</button>` : ''}</div></div>`;

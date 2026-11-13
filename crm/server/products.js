@@ -78,6 +78,7 @@ async function startPayment({ contact, items, note }) {
   await invoices().send(inv.id, { by: 'link' });
   // Free after a coupon: no card needed.
   if (total <= 0) { invoices().markPaid(inv.id, 'Coupon'); return { invoice: invoices().get(inv.id), url: `../invoice/${inv.token}?paid=1`, free: true }; }
+  try { require('./checkouts').track({ invoiceId: inv.id }); } catch {}
   const out = await invoices().checkout(inv.token);
   return { invoice: invoices().get(inv.id), url: out.url };
 }
