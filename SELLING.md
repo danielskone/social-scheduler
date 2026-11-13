@@ -5,6 +5,19 @@ the same app, made for a server:
 
     npm run saas
 
+## Beta test from the Mac (free)
+
+    npm run beta          # Tailscale Funnel address + invite-only tester site in the background
+    npm run beta:status
+    npm run beta:off
+
+Beta mode (SAAS_BETA=1): sign-ups are closed; the owner makes the first account at
+/signup?owner=1, then adds each tester on /admin ("Make their login"), which gives an invite
+link (14 days) where the tester picks a password. Testers get free access. YouTube and TikTok
+stay hidden for customers until SAAS_YOUTUBE=on / SAAS_TIKTOK=on (after adding the address in
+Google's and TikTok's developer settings). `npm run background:on` restarts the tester site
+too, so updates reach testers.
+
 ## How it works
 
 - Customers sign up at your site with their email and a password (stored scrambled, never readable).

@@ -763,8 +763,13 @@ async function renderAccounts() {
   if (status.saas) {
     // A customer of the sellable version: no technical setup, just their plan and sign out.
     if (!$('#saas-links')) $('#view-accounts .view-head .row').insertAdjacentHTML('beforeend', '<span id="saas-links"><a class="btn" href="/account">Plan &amp; settings</a> <a class="btn" href="/logout">Sign out</a></span>');
-    notes.push('Click a Connect button and sign in to Facebook, Google or TikTok. You choose which Pages, profiles and channels Viral Post may post to, and you can remove them here any time.');
-    if (status.tiktokMode !== 'direct') notes.push('TikTok videos go to your TikTok inbox at the scheduled time; open TikTok and tap Post to finish.');
+    // YouTube and TikTok are only offered once the owner switches them on for customers.
+    $('#view-accounts a[href="/auth/youtube"]').style.display = status.youtubeConfigured ? '' : 'none';
+    $('#view-accounts a[href="/auth/tiktok"]').style.display = status.tiktokConfigured ? '' : 'none';
+    const names = ['Facebook', status.youtubeConfigured && 'Google', status.tiktokConfigured && 'TikTok'].filter(Boolean);
+    notes.push(`Click a Connect button and sign in to ${names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : 'Facebook'}. You choose which Pages, profiles and channels Viral Post may post to, and you can remove them here any time.`);
+    if (!status.youtubeConfigured || !status.tiktokConfigured) notes.push(`${[!status.youtubeConfigured && 'YouTube', !status.tiktokConfigured && 'TikTok'].filter(Boolean).join(' and ')} will be added after the beta.`);
+    if (status.tiktokConfigured && status.tiktokMode !== 'direct') notes.push('TikTok videos go to your TikTok inbox at the scheduled time; open TikTok and tap Post to finish.');
   }
   if (status.saas) { $('#setup-notes').innerHTML = `<div class="note">${notes.map((n) => `<div>${n}</div>`).join('')}</div>`; }
   else {

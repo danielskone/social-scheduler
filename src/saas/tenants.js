@@ -65,9 +65,17 @@ function createTenants({ dir, basePort = 4100, publicBaseUrl, env = process.env,
   const folder = (id) => path.join(dir, String(Number(id)));
   const portFor = (id) => basePort + Number(id);
 
+  // YouTube and TikTok stay off for customers until the owner adds this site's address in
+  // Google's and TikTok's developer settings (SAAS_YOUTUBE=on / SAAS_TIKTOK=on).
+  const isOn = (v) => /^(1|on|yes|true)$/i.test(String(v || ''));
+  const blocked = [
+    ...(isOn(env.SAAS_YOUTUBE) ? [] : ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']),
+    ...(isOn(env.SAAS_TIKTOK) ? [] : ['TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET']),
+  ];
+
   function childEnv(id, key) {
     const e = {};
-    for (const k of SHARED_ENV) if (env[k] !== undefined) e[k] = env[k];
+    for (const k of SHARED_ENV) if (env[k] !== undefined && !blocked.includes(k)) e[k] = env[k];
     return {
       ...e,
       TENANT_KEY: key,

@@ -155,7 +155,7 @@ test('owner page: only the owner sees customers and can make a reset link', asyn
 
   const a = g.store.getUserByEmail('alice@example.com');
   const r = await owner(`/admin/users/${a.id}`, { method: 'POST', form: { action: 'reset' } });
-  const token = r.text.match(/reset\?token=([\w-]+)/)[1];
+  const token = r.text.match(/invite\?token=([\w-]+)/)[1];
   const reset = await browser()('/reset', { method: 'POST', form: { token, password: 'brand-new-pass-2' } });
   assert.strictEqual(reset.location, '/login?reset=1');
   // Old sessions were signed out; the new password works; the link can't be reused.
