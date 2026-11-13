@@ -67,6 +67,7 @@
     dashboard: ['pipeline', 'How things are going', 'Your numbers at a glance: new people, money still open, money won and what\'s coming up. Pick a date range at the top right. Use the <b>business switcher</b> at the top of the menu to see one business or all of them.'],
     conversations: ['email', 'Your email inbox, inside the CRM', 'When someone in your CRM emails you, it shows up here, on their card, and <b>your iPhone buzzes</b>. Click a name to read it and <b>answer right here</b>. Your reply goes out from your own email address. Mail from strangers and newsletters stays in your normal inbox.'],
     sites: ['forms', 'A simple website, no coding', 'Make a one-page website for a business or an event. Pick a design, change the words and pictures, and press <b>Save</b> with <b>Live</b> ticked. Put your <b>booking page</b> and <b>forms</b> right on it, so every visitor who books or signs up lands in People by itself.'],
+    courses: ['check', 'Teach and sell courses', 'Make a course with lessons: a <b>YouTube or Vimeo link</b> or your own video, plus notes. Share the <b>sales page</b>. Free courses open right away, paid ones go through your Stripe. Members watch in their private <b>customer portal</b> and tick lessons done. You see everyone\'s progress here.'],
     reports: ['pipeline', 'Your month in numbers', 'New people, deals won, money paid, appointments and more, compared with last month. <b>Email it</b> to yourself or a client, or tick the box and it goes out by itself on the 1st of every month. Pick a business at the top of the menu for its own report.'],
     payments: ['email', 'Get paid', 'Send a <b>quote</b> people sign on their phone, then an <b>invoice</b> they pay by card. Make an invoice, then <b>email it</b> or copy its link. People open it on their phone and <b>pay by card</b> with your own Stripe (the money goes straight to you), or by cash, check or Zelle, which you mark as paid. Your iPhone buzzes when a card payment comes in.'],
     reviews: ['check', 'More 5-star reviews', 'Ask people who just bought or donated for a review. Press <b>Ask</b> to email them, or text it from your phone. The link takes them straight to your review page, and you can see who opened it. Each person is asked at most once every 90 days.'],
@@ -110,6 +111,7 @@
     { tab: 'appointments', ico: 'appointments', title: 'Appointments', text: 'Calls people booked with you show up here, and your iPhone buzzes when a new one comes in.' },
     { tab: 'payments', ico: 'email', title: 'Payments', text: 'Send invoices. People pay by card with your own Stripe, or by cash, check or Zelle.' },
     { tab: 'sites', ico: 'forms', title: 'Sites', text: 'Make a simple one-page website with your booking page and forms on it. No coding.' },
+    { tab: 'courses', ico: 'check', title: 'Courses', text: 'Teach what you know. Add lessons, share the course page, and members watch in their private portal.' },
     { tab: 'reports', ico: 'pipeline', title: 'Reports', text: 'Your month in numbers. Email it to yourself or a client, by hand or every month by itself.' },
     { tab: 'forms', ico: 'forms', title: 'Forms', text: 'Build any form by dragging questions around: sign-ups, RSVPs, surveys, quotes. Each response is saved and becomes a contact by itself.', tryIt: 'Try it: pick a ready-made form, press <b>Save</b>, then <b>Share</b>.' },
     { tab: 'templates', ico: 'templates', title: 'Message templates', text: 'Messages you send often, written once. {first_name} fills in each person\'s name for you.' },
@@ -119,7 +121,7 @@
     { tab: 'settings', ico: 'people', title: 'Settings', text: 'Add your businesses here, with their phone, email, website and color. Each one keeps its own people and pipeline.' },
     { tab: 'dashboard', ico: 'party', title: 'You\'re all set!', text: 'Each tab has a short tip at the top if you forget what it\'s for. You can replay this tour any time with <b>How it works</b> at the top.' },
   ];
-  const TABS = ['launchpad', 'dashboard', 'conversations', 'list', 'pipeline', 'tasks', 'appointments', 'payments', 'forms', 'templates', 'automations', 'email', 'reviews', 'sites', 'reports', 'settings'];
+  const TABS = ['launchpad', 'dashboard', 'conversations', 'list', 'pipeline', 'tasks', 'appointments', 'payments', 'forms', 'templates', 'automations', 'email', 'reviews', 'sites', 'courses', 'reports', 'settings'];
   // #contacts on its own opens the Dashboard; #contacts/people (or the old #contacts/list) is People.
   const tabFor = (sub) => (sub === 'people' || sub === 'list' ? 'list' : TABS.includes(sub) ? sub : 'dashboard');
   window.crmTabFor = tabFor;
@@ -195,6 +197,7 @@
     automations: ['Automations', 'Your helper that works while you\'re busy.'],
     payments: ['Payments', 'Quotes people sign online, and invoices they pay by card, cash, check or Zelle.'],
     sites: ['Sites', 'Simple one-page websites for your businesses and events.'],
+    courses: ['Courses', 'Lessons people watch in their private members area.'],
     reports: ['Reports', 'Your month in numbers, ready to email.'],
     reviews: ['Reviews', 'Ask happy customers for a review, and see who opened the link.'],
     settings: ['Settings', 'Your businesses, custom fields, payments and team.'],
@@ -212,7 +215,7 @@
     q$('#crm-title').textContent = title;
     q$('#crm-sub').innerHTML = `${biz ? `<span class="biz-dot" style="--c:${h(biz.color)}"></span><b>${h(biz.name)}</b> · ` : ''}${sub2}`;
     // The number tiles belong to the people pages; Launchpad, Dashboard and Settings have their own.
-    q$('#crm-tiles').style.display = ['launchpad', 'dashboard', 'settings', 'conversations', 'payments', 'reviews', 'sites', 'reports', 'appointments'].includes(tab) ? 'none' : '';
+    q$('#crm-tiles').style.display = ['launchpad', 'dashboard', 'settings', 'conversations', 'payments', 'reviews', 'sites', 'courses', 'reports', 'appointments'].includes(tab) ? 'none' : '';
     meta = await call('/meta');
     buildStageColors(meta.pipelines);
     const fill = (sel, items, label) => {
@@ -229,7 +232,7 @@
     ].map(([l, v, ico, c]) => `<div class="tile"><div class="tile-ico" style="--c:${c}">${svg(ico)}</div><div><div class="label">${l}</div><div class="value">${v ?? 0}</div></div></div>`).join('');
     renderTip(tab);
     if (!store.get('tour-done', false) && tourAt < 0) setTimeout(() => showTour(0), 400);
-    await ({ launchpad: () => window.VTHome.renderLaunchpad(), dashboard: () => window.VTHome.renderDashboard(), conversations: () => window.VTInbox.render({ openContact }), payments: () => window.VTMore.renderPayments(), reviews: () => window.VTMore.renderReviews(), sites: () => window.VTExtra.renderSites(), reports: () => window.VTExtra.renderReports(), settings: () => window.VTHome.renderSettings(meta), list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
+    await ({ launchpad: () => window.VTHome.renderLaunchpad(), dashboard: () => window.VTHome.renderDashboard(), conversations: () => window.VTInbox.render({ openContact }), payments: () => window.VTMore.renderPayments(), reviews: () => window.VTMore.renderReviews(), sites: () => window.VTExtra.renderSites(), courses: () => window.VTExtra2.renderCourses(), reports: () => window.VTExtra.renderReports(), settings: () => window.VTHome.renderSettings(meta), list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
   }
   window.renderContacts = renderContacts;
   window.addEventListener('load', () => setTimeout(() => window.VTInbox.badge(), 500));
@@ -696,7 +699,7 @@
     const cPipe = meta.pipelines.find((x) => x.id === (c.pipeline || c.pipeline_id)) || (id ? meta.pipelines[0] : curPipe()) || meta.pipelines[0];
     if (!id) c.stage = cPipe.stages[0].name;
     dlg.innerHTML = `<form method="dialog" id="contact-form">
-      <header class="view-head"><h1>${id ? h(c.name) : 'New contact'}</h1><div class="row c-actions">${id && c.email ? '<button class="btn ghost" type="button" id="c-emails" title="Read and answer their emails">Emails</button>' : ''}${id ? '<button class="btn ghost" type="button" id="c-quote" title="Send them a quote to sign">Quote</button><button class="btn ghost" type="button" id="c-invoice" title="Make an invoice for them">Invoice</button><button class="btn ghost" type="button" id="c-book" title="Add an appointment with them">Book</button><button class="btn ghost" type="button" id="c-review" title="Ask them for a review">Review</button>' : ''}<button class="btn ghost" value="cancel" formnovalidate>Close</button></div></header>
+      <header class="view-head"><h1>${id ? h(c.name) : 'New contact'}</h1><div class="row c-actions">${id && c.email ? '<button class="btn ghost" type="button" id="c-emails" title="Read and answer their emails">Emails</button>' : ''}${id ? '<button class="btn ghost" type="button" id="c-quote" title="Send them a quote to sign">Quote</button><button class="btn ghost" type="button" id="c-invoice" title="Make an invoice for them">Invoice</button><button class="btn ghost" type="button" id="c-book" title="Add an appointment with them">Book</button><button class="btn ghost" type="button" id="c-review" title="Ask them for a review">Review</button><button class="btn ghost" type="button" id="c-portal" title="Their private page with invoices, quotes, appointments and courses">Portal</button>' : ''}<button class="btn ghost" value="cancel" formnovalidate>Close</button></div></header>
       ${id && !c.do_not_contact && usable.length ? `<div class="send-row"><select id="send-tpl">${usable.map((t) => `<option value="${t.id}">${t.channel === 'text' ? 'Text' : 'Email'}: ${h(t.name)}</option>`).join('')}</select>
         <button class="btn" type="button" id="send-go">Open in Mail / Messages</button><span class="muted small" style="margin:0">Opens a filled-in message for just this person. You press Send.</span></div>` : ''}
       <div class="form-grid">
@@ -744,6 +747,8 @@
     if (cq) cq.onclick = () => { dlg.close(); window.VTExtra.editQuote(null, id); };
     if (cb) cb.onclick = () => { dlg.close(); window.VTExtra.addAppointment({ contactId: id, onChange: refresh }); };
     if (cr) cr.onclick = () => { dlg.close(); window.VTMore.askReview(id, () => openContact(id)); };
+    const cp = q$('#c-portal', dlg);
+    if (cp) cp.onclick = () => { dlg.close(); window.VTExtra2.portalLink(id, c.name); };
     const cfe = q$('[data-cf-edit]', dlg);
     if (cfe) cfe.onclick = () => dlg.close();
     const em = q$('#c-emails', dlg);

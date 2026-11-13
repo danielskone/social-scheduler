@@ -68,6 +68,7 @@
           <div class="ib-tools">
             <label class="ib-search">${svg('search')}<input type="search" id="ib-q" placeholder="Search people" aria-label="Search people"></label>
             <button class="btn ghost ib-icon" id="ib-check" title="Check for new emails now" aria-label="Check for new emails now">${svg('refresh')}</button>
+            <button class="btn ghost ib-chatset" id="ib-chat" title="Chat bubble for your website">${svg('chat')}<span>Chat bubble</span></button>
           </div>
           <div class="ib-filter" role="tablist"><button type="button" data-u="0">All</button><button type="button" data-u="1">Unread</button></div>
           <div id="ib-note"></div>
@@ -78,6 +79,7 @@
       let t;
       q$('#ib-q').oninput = (e) => { clearTimeout(t); t = setTimeout(() => { filter.q = e.target.value.trim(); list(); }, 250); };
       root.querySelectorAll('.ib-filter button').forEach((b) => (b.onclick = () => { filter.unread = b.dataset.u === '1'; list(); }));
+      q$('#ib-chat').onclick = () => window.VTExtra2.chatSettings();
       q$('#ib-check').onclick = async (e) => {
         const btn = e.currentTarget; btn.classList.add('spin'); btn.disabled = true;
         try {
@@ -109,7 +111,7 @@
     rows.innerHTML = d.conversations.map((c) => `<li><button type="button" class="ib-row${c.id === picked ? ' on' : ''}${c.unread ? ' unread' : ''}" data-id="${c.id}">
         ${avatar(c.name)}
         <span class="ib-main"><span class="ib-top"><b>${h(c.name)}</b><time>${when(c.sent_at)}</time></span>
-          <span class="ib-subj">${c.direction === 'out' ? '<span class="muted">You: </span>' : ''}${h(c.subject)}</span>
+          <span class="ib-subj">${c.channel === 'chat' ? '<span class="ib-chip">Chat</span> ' : ''}${c.direction === 'out' ? '<span class="muted">You: </span>' : ''}${h(c.channel === 'chat' ? '' : c.subject)}</span>
           <span class="ib-snip">${h(c.snippet)}</span></span>
         ${c.unread ? `<span class="ib-count" title="${c.unread} unread">${c.unread}</span>` : ''}
       </button></li>`).join('')
@@ -133,10 +135,13 @@
     const msgHtml = (m) => (m.kind === 'auto'
       ? `<div class="ib-auto">${svg('bolt')}<span><b>${h(m.via)}</b> sent "${h(m.subject)}" · ${when(m.sent_at, true)}</span></div>`
       : `<div class="ib-msg ${m.direction}">
-          <div class="ib-meta">${m.direction === 'in' ? h(c.name) : 'You'} · ${when(m.sent_at, true)}</div>
-          <div class="ib-bubble"><div class="ib-s">${h(m.subject)}</div><div class="ib-b">${h(m.body)}</div>
+          <div class="ib-meta">${m.direction === 'in' ? h(c.name) : 'You'} · ${m.channel === 'chat' ? 'Chat · ' : ''}${when(m.sent_at, true)}</div>
+          <div class="ib-bubble${m.channel === 'chat' ? ' chat' : ''}">${m.channel === 'chat' ? '' : `<div class="ib-s">${h(m.subject)}</div>`}<div class="ib-b">${h(m.body)}</div>
           ${m.more ? `<button type="button" class="ib-more" data-mid="${m.id}">Show the whole email</button>` : ''}</div>
         </div>`);
+    const chatMode = Boolean(d.chat && d.chat.last);
+    shown = { id: c.id, n: d.messages.length, chat: Boolean(d.chat) };
+    const canWrite = chatMode || (st.canSend && c.email);
     box.innerHTML = `<header class="ib-head">
         <button class="btn ghost ib-icon ib-back" type="button" aria-label="Back to the list">${svg('back')}</button>
         ${avatar(c.name)}<div class="ib-who"><b>${h(c.name)}</b><span class="muted small">${h(c.email || 'No email address')}${c.company ? ` · ${h(c.company)}` : ''}</span></div>
@@ -146,10 +151,10 @@
       <div class="ib-msgs" id="ib-msgs">${d.messages.map(msgHtml).join('') || '<p class="muted ib-first">No emails with this person yet. Write the first one below.</p>'}</div>
       ${c.do_not_contact ? '<p class="ib-dnc">Marked "Do not contact". You can still answer them for 30 days after they write to you.</p>' : ''}
       <form class="ib-reply" id="ib-reply">
-        ${!st.canSend ? '<p class="muted small">Set up email on <a href="#contacts/launchpad">Launchpad</a> to answer from here.</p>' : ''}
-        <textarea name="text" rows="3" placeholder="${c.email ? `Write to ${h(String(c.name).split(' ')[0])}...` : 'Add an email address on their card first'}" ${!st.canSend || !c.email ? 'disabled' : ''}>${h(store.get(draftKey, ''))}</textarea>
-        <div class="ib-send-row"><span class="muted small">Sent from ${h(st.from || 'your email')}, under their last email.</span>
-          <button class="btn primary" ${!st.canSend || !c.email ? 'disabled' : ''}>${svg('send')}<span>Send</span></button></div>
+        ${!st.canSend && !chatMode ? '<p class="muted small">Set up email on <a href="#contacts/launchpad">Launchpad</a> to answer from here.</p>' : ''}
+        <textarea name="text" rows="3" placeholder="${chatMode || c.email ? `Write to ${h(String(c.name).split(' ')[0])}...` : 'Add an email address on their card first'}" ${canWrite ? '' : 'disabled'}>${h(store.get(draftKey, ''))}</textarea>
+        <div class="ib-send-row"><span class="muted small">${chatMode ? (d.chat.online ? '<span class="ib-online"></span>On your website now. Your answer shows in their chat.' : `They left the chat.${c.email ? ' Your answer is also emailed to them.' : ' They gave no email, so they see it if they come back.'}`) : `Sent from ${h(st.from || 'your email')}, under their last email.`}</span>
+          <button class="btn primary" ${canWrite ? '' : 'disabled'}>${svg('send')}<span>Send</span></button></div>
       </form>`;
     q$('.ib').classList.add('show-thread');
     const msgs = q$('#ib-msgs');
@@ -170,7 +175,10 @@
       const btn = q$('button', form);
       btn.disabled = true;
       try {
-        await call(`/${c.id}/reply`, { method: 'POST', json: { text: ta.value } });
+        if (chatMode) {
+          const r = await fetch(`/api/crm/chat/${c.id}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: ta.value }) });
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not send');
+        } else await call(`/${c.id}/reply`, { method: 'POST', json: { text: ta.value } });
         store.set(draftKey, '');
         say('Sent.'); setTimeout(() => say(''), 2500);
         await open(c.id); await list();
@@ -186,5 +194,17 @@
   function show(contactId) { picked = Number(contactId); location.hash = '#contacts/conversations'; }
 
   setInterval(() => { if (document.visibilityState === 'visible') badge(); }, 60000);
+  // An open chat updates by itself while you look at it.
+  let shown = null;
+  setInterval(async () => {
+    const panel = q$('.crm-panel[data-panel="conversations"]');
+    if (document.visibilityState !== 'visible' || !panel || panel.hidden || !shown || !shown.chat || shown.id !== picked) return;
+    const d = await call(`/${picked}`).catch(() => null);
+    if (!d || d.messages.length === shown.n) return;
+    const ta = q$('#ib-reply textarea'), focused = ta && document.activeElement === ta;
+    await open(picked);
+    if (focused) { const t = q$('#ib-reply textarea'); if (t) { t.focus(); t.selectionStart = t.value.length; } }
+    list();
+  }, 5000);
   window.VTInbox = { render, badge, show };
 })();
