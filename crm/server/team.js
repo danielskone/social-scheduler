@@ -84,6 +84,8 @@ const ADMIN_ONLY = [
   [/^\/api\/crm\/contacts\/\d+$/, 'DELETE'],
   [/^\/api\/crm\/fields/, 'POST|PUT|DELETE'],
   [/^\/api\/crm\/pipelines/, 'POST|PUT|DELETE'],
+  [/^\/api\/crm\/reports\/settings/, 'PUT'],
+  [/^\/api\/crm\/sites\/\d+$/, 'DELETE'],
 ];
 function allowed(member, req) {
   if (!member || member.role === 'admin') return true;

@@ -210,6 +210,10 @@ function startCrm() {
   // Google Calendar bookings (the website's "Book a free call" page) -> Contacts + Appointments.
   cron.schedule('*/5 * * * *', () => gcal.check().catch((e) => console.error(e)));
   gcal.check().catch(() => {});
+  // Appointment reminder emails (a set number of hours before), every 15 minutes.
+  cron.schedule('3-59/15 * * * *', () => require('../crm/server/booking').sendReminders().catch((e) => console.error(e)));
+  // Monthly reports: on the 1st at 8am, last month's numbers go to each business that asked for them.
+  cron.schedule('0 8 1 * *', () => require('../crm/server/reports').sendMonthly().catch((e) => console.error(e)), { timezone: process.env.BOOKING_TIMEZONE || 'America/New_York' });
 }
 
 module.exports = { start, startCrm, publishDue, refreshStats, headsUp };

@@ -44,11 +44,21 @@
   const LABEL = { draft: ['Draft', '#6b7280'], sent: ['Waiting', '#2563eb'], overdue: ['Overdue', '#dc2626'], paid: ['Paid', '#16a34a'], void: ['Cancelled', '#9ca3af'] };
   const pill = (l) => `<span class="pay-pill" style="--c:${LABEL[l][1]}">${LABEL[l][0]}</span>`;
   let payFilter = '';
+  let payMode = store.get('pay-mode', 'invoices');
+  const modeBar = () => `<div class="seg pay-seg" role="group" aria-label="Show"><button type="button" data-mode="invoices" class="${payMode === 'invoices' ? 'on' : ''}">Invoices</button><button type="button" data-mode="quotes" class="${payMode === 'quotes' ? 'on' : ''}">Quotes</button></div>`;
   async function renderPayments(opts = {}) {
     const root = q$('#pay-root');
+    const switchMode = (e) => { const m = e.target.closest('[data-mode]'); if (!m) return false; payMode = m.dataset.mode; store.set('pay-mode', payMode); renderPayments(); return true; };
+    if (opts.quoteFor) { payMode = 'quotes'; store.set('pay-mode', payMode); }
+    if (payMode === 'quotes') {
+      const handle = await window.VTExtra.renderQuotes(root, modeBar());
+      root.onclick = (e) => { if (!switchMode(e)) handle(e); };
+      if (opts.quoteFor) window.VTExtra.editQuote(null, opts.quoteFor);
+      return;
+    }
     const d = await call(`/invoices${payFilter ? `?status=${payFilter}` : ''}`);
     const t = d.totals, st = d.settings;
-    root.innerHTML = `<div class="tiles pay-tiles">${tile('Waiting to be paid', money(t.unpaid), 'clock', '#2563eb')}${tile('Overdue', money(t.overdue), 'alert', '#dc2626')}
+    root.innerHTML = `${modeBar()}<div class="tiles pay-tiles">${tile('Waiting to be paid', money(t.unpaid), 'clock', '#2563eb')}${tile('Overdue', money(t.overdue), 'alert', '#dc2626')}
         ${tile('Paid, last 30 days', money(t.paid30), 'money', '#16a34a')}${tile('Drafts', t.drafts, 'doc', '#6b7280')}</div>
       ${!st.stripe ? `<div class="pay-setup">${svg('money')}<div><b>Get paid by card</b><span>Connect your own Stripe account and every invoice gets a <b>Pay with card</b> button. The money goes straight to you.${isAdmin() ? '' : ' Ask the owner to set it up.'}</span></div>${isAdmin() ? '<button class="btn" data-stripe>Set up</button>' : ''}</div>` : ''}
       <div class="row crm-filters"><button class="btn primary" data-new>+ New invoice</button>
@@ -61,6 +71,7 @@
       </tbody></table></div>` : `<div class="db-empty center pay-empty">${svg('doc')}<b>No invoices${payFilter ? ' here' : ' yet'}</b><span>Press <b>+ New invoice</b>, or open a person's card and press <b>Invoice</b>.</span></div>`}`;
     q$('#pay-filter', root).onchange = (e) => { payFilter = e.target.value; renderPayments(); };
     root.onclick = (e) => {
+      if (switchMode(e)) return;
       if (e.target.closest('[data-new]')) return editInvoice(null, null);
       if (e.target.closest('[data-stripe]')) return paySettings();
       const row = e.target.closest('tr[data-id]');

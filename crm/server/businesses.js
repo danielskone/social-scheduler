@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS crm_businesses (
 
 // The link where customers leave a review (Google, Facebook, Yelp...), for review requests.
 if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_businesses') WHERE name='review_url'").get()) db.exec('ALTER TABLE crm_businesses ADD COLUMN review_url TEXT');
+// Where the monthly report goes (empty = no email).
+if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_businesses') WHERE name='report_email'").get()) db.exec('ALTER TABLE crm_businesses ADD COLUMN report_email TEXT');
 
 const COLORS = ['#4f46e5', '#dc2626', '#0d9488', '#d97706', '#db2777', '#2563eb', '#16a34a', '#9333ea'];
 
