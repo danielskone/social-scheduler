@@ -220,6 +220,8 @@ function startCrm() {
   cron.schedule('3-59/15 * * * *', () => require('../crm/server/booking').sendReminders().catch((e) => console.error(e)));
   // Team tasks: at 7am each person gets one email with their tasks due today or late.
   cron.schedule('0 7 * * *', () => require('../crm/server/tasks').sendDaily().catch((e) => console.error(e)), { timezone: process.env.BOOKING_TIMEZONE || 'America/New_York' });
+  // Backups: a full copy every night at 2:30 (the last 14 are kept), and old activity history is cleared.
+  cron.schedule('30 2 * * *', () => { require('../crm/server/backups').nightly().catch((e) => console.error(e)); try { require('../crm/server/audit').prune(); } catch (e) { console.error(e); } }, { timezone: process.env.BOOKING_TIMEZONE || 'America/New_York' });
   // Monthly reports: on the 1st at 8am, last month's numbers go to each business that asked for them.
   cron.schedule('0 8 1 * *', () => require('../crm/server/reports').sendMonthly().catch((e) => console.error(e)), { timezone: process.env.BOOKING_TIMEZONE || 'America/New_York' });
 }

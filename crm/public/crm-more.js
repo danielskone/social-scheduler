@@ -335,6 +335,9 @@
         <label class="check"><input type="radio" name="role" value="admin"${m && m.role === 'admin' ? ' checked' : ''}> <b>Admin</b>: everything, like you.</label></div>
       ${bizes.length > 1 ? `<div class="field" id="tm-biz"><span>Which businesses can a helper see?</span><p class="muted small" style="margin:0 0 6px">Tick none for all of them.</p>
         <div class="biz-groups">${bizes.map((b) => `<label class="bg-row"><input type="checkbox" name="biz" value="${b.id}"${m && m.businesses.includes(b.id) ? ' checked' : ''}><span>${h(b.name)}</span></label>`).join('')}</div></div>` : ''}
+      <div class="field"><span>Booking hours <small class="muted">(for booking pages that take turns; leave empty to use each page's hours)</small></span>
+        <div class="row">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((n, i) => `<label class="check"><input type="checkbox" name="hday" value="${i}"${m && m.hours_days && m.hours_days.split(',').includes(String(i)) ? ' checked' : ''}> ${n}</label>`).join('')}</div>
+        <div class="row"><label class="field"><span>From</span><input type="time" name="hours_start" value="${h(m && m.hours_start || '')}"></label><label class="field"><span>To</span><input type="time" name="hours_end" value="${h(m && m.hours_end || '')}"></label></div></div>
       <div class="row"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button>
         ${m ? '<button class="btn ghost danger" type="button" data-del style="margin-left:auto">Remove from team</button>' : ''}</div><p class="muted" id="tm-msg"></p></form>`;
     if (!d.open) d.showModal();
@@ -345,7 +348,8 @@
     form.onsubmit = async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
-      const body = { name: fd.get('name'), email: fd.get('email'), role: fd.get('role'), businesses: fd.getAll('biz').map(Number) };
+      const body = { name: fd.get('name'), email: fd.get('email'), role: fd.get('role'), businesses: fd.getAll('biz').map(Number),
+        hours_days: fd.getAll('hday').join(','), hours_start: fd.get('hours_start') || '', hours_end: fd.get('hours_end') || '' };
       if (fd.get('password')) body.password = fd.get('password');
       try { await call(m ? `/team/${m.id}` : '/team', { method: m ? 'PUT' : 'POST', json: body, noBiz: true }); d.close(); say(m ? 'Saved.' : `${body.name} can now sign in.`); refresh(); }
       catch (err) { q$('#tm-msg', d).textContent = err.message; }

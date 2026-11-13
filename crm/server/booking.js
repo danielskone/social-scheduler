@@ -58,6 +58,16 @@ addCol('crm_booking_pages', 'remind_hours', 'INTEGER NOT NULL DEFAULT 24');
 addCol('crm_appointments', 'token', 'TEXT');
 addCol('crm_appointments', 'reminded_at', 'TEXT');
 addCol('crm_appointments', 'location', 'TEXT');
+// Team booking: a page can take turns between people on the team (0 = you, the owner).
+addCol('crm_booking_pages', 'team', 'TEXT');
+addCol('crm_appointments', 'staff_id', 'INTEGER');
+require('./team'); // makes crm_team
+addCol('crm_team', 'hours_days', 'TEXT');
+addCol('crm_team', 'hours_start', 'TEXT');
+addCol('crm_team', 'hours_end', 'TEXT');
+const teamOf = (pg) => { try { const t = JSON.parse(pg.team || '[]'); return Array.isArray(t) ? t.map(Number).filter((n) => Number.isInteger(n) && n >= 0) : []; } catch { return []; } };
+const member = (id) => (id ? db.prepare('SELECT id, name, email, hours_days, hours_start, hours_end FROM crm_team WHERE id=?').get(Number(id)) : null);
+const staffName = (id) => (id ? (member(id) || {}).name || null : null);
 
 // ---------- Time helpers (wall-clock time in TZ <-> UTC) ----------
 function parts(date, tz = TZ()) {
@@ -104,6 +114,11 @@ function savePage(body, id) {
     buffer_minutes: Math.round(Number(pick('buffer_minutes', 0)) || 0),
     max_per_day: Math.round(Number(pick('max_per_day', 0)) || 0),
     remind_hours: Math.round(Number(pick('remind_hours', 24))),
+    team: (() => {
+      const t = body.team !== undefined ? body.team : old ? teamOf(old) : [];
+      const ids = [...new Set((Array.isArray(t) ? t : String(t || '').split(',')).filter((x) => String(x).trim() !== '').map(Number))].filter((n) => n === 0 || member(n));
+      return ids.length > 1 || (ids.length === 1 && ids[0] !== 0) ? JSON.stringify(ids) : null;
+    })(),
   };
   if (!p.title) throw err400('Give the booking page a title.');
   if (!(p.minutes >= 5 && p.minutes <= 480)) throw err400('Appointment length must be between 5 and 480 minutes.');
@@ -118,10 +133,10 @@ function savePage(body, id) {
   if (old) {
     db.prepare(`UPDATE crm_booking_pages SET title=@title, intro=@intro, location=@location, group_name=@group_name, minutes=@minutes, days=@days,
       start_time=@start_time, end_time=@end_time, days_ahead=@days_ahead, notice_hours=@notice_hours, email_checkbox=@email_checkbox, active=@active,
-      buffer_minutes=@buffer_minutes, max_per_day=@max_per_day, remind_hours=@remind_hours WHERE id=@id`).run({ ...p, id });
+      buffer_minutes=@buffer_minutes, max_per_day=@max_per_day, remind_hours=@remind_hours, team=@team WHERE id=@id`).run({ ...p, id });
   } else {
-    id = db.prepare(`INSERT INTO crm_booking_pages (slug, title, intro, location, group_name, minutes, days, start_time, end_time, days_ahead, notice_hours, email_checkbox, active, buffer_minutes, max_per_day, remind_hours)
-      VALUES (@slug,@title,@intro,@location,@group_name,@minutes,@days,@start_time,@end_time,@days_ahead,@notice_hours,@email_checkbox,@active,@buffer_minutes,@max_per_day,@remind_hours)`)
+    id = db.prepare(`INSERT INTO crm_booking_pages (slug, title, intro, location, group_name, minutes, days, start_time, end_time, days_ahead, notice_hours, email_checkbox, active, buffer_minutes, max_per_day, remind_hours, team)
+      VALUES (@slug,@title,@intro,@location,@group_name,@minutes,@days,@start_time,@end_time,@days_ahead,@notice_hours,@email_checkbox,@active,@buffer_minutes,@max_per_day,@remind_hours,@team)`)
       .run({ ...p, slug: crypto.randomBytes(6).toString('hex') }).lastInsertRowid;
   }
   return db.prepare('SELECT * FROM crm_booking_pages WHERE id=?').get(id);
@@ -139,18 +154,35 @@ if (config.ownerStarters && !db.prepare("SELECT 1 FROM crm_flags WHERE name='sta
 
 // ---------- Open times ----------
 // ignore: an appointment id to leave out (when someone moves their own appointment).
-function slotsFor(pg, now = new Date(), { ignore } = {}) {
-  const [sh, sm] = hm(pg.start_time), [eh, em] = hm(pg.end_time);
-  const open = pg.days.split(',').map(Number);
+// A team page shows a time when anyone on its team is free; staff: only that person's times.
+function slotsFor(pg, now = new Date(), { ignore, staff } = {}) {
+  const team = teamOf(pg);
+  if (!team.length) return staffSlots(pg, null, now, ignore);
+  let who = staff != null ? [Number(staff)] : team;
+  if (staff == null && ignore) { const a = getAppt(ignore); if (a) who = [Number(a.staff_id || 0)]; }
+  return [...new Set(who.flatMap((s) => staffSlots(pg, s, now, ignore)))].sort();
+}
+// One person's open times. staff null = the owner on a normal page (busy with every appointment that has no team member).
+function staffSlots(pg, staff, now = new Date(), ignore) {
+  const m = staff ? member(staff) : null;
+  if (staff && !m) return [];
+  let [sh, sm] = hm(pg.start_time), [eh, em] = hm(pg.end_time);
+  let open = pg.days.split(',').map(Number);
+  // A team member's own hours narrow the page's hours.
+  if (m && m.hours_days) open = open.filter((d) => m.hours_days.split(',').map(Number).includes(d));
+  if (m && hm(m.hours_start)) { const [h2, m2] = hm(m.hours_start); if (h2 * 60 + m2 > sh * 60 + sm) [sh, sm] = [h2, m2]; }
+  if (m && hm(m.hours_end)) { const [h2, m2] = hm(m.hours_end); if (h2 * 60 + m2 < eh * 60 + em) [eh, em] = [h2, m2]; }
   const gap = (pg.buffer_minutes || 0) * 60e3;
   const earliest = now.getTime() + pg.notice_hours * 3600e3;
   const until = now.getTime() + (pg.days_ahead + 1) * 864e5;
-  const appts = db.prepare("SELECT id, page_id, starts_at, ends_at FROM crm_appointments WHERE status='booked' AND ends_at > ? AND starts_at < ? AND id != ?")
+  const appts = db.prepare("SELECT id, page_id, starts_at, ends_at, staff_id FROM crm_appointments WHERE status='booked' AND ends_at > ? AND starts_at < ? AND id != ?")
     .all(new Date(earliest - 864e5).toISOString(), new Date(until + 864e5).toISOString(), Number(ignore) || 0);
-  const busy = appts.map((a) => [Date.parse(a.starts_at) - gap, Date.parse(a.ends_at) + gap])
-    .concat(db.prepare('SELECT starts_at, ends_at FROM crm_time_off WHERE ends_at > ? AND starts_at < ?').all(new Date(earliest).toISOString(), new Date(until).toISOString())
+  const mine = appts.filter((a) => Number(a.staff_id || 0) === Number(staff || 0));
+  const busy = mine.map((a) => [Date.parse(a.starts_at) - gap, Date.parse(a.ends_at) + gap])
+    // Your time off is yours; team members have their own hours.
+    .concat(staff ? [] : db.prepare('SELECT starts_at, ends_at FROM crm_time_off WHERE ends_at > ? AND starts_at < ?').all(new Date(earliest).toISOString(), new Date(until).toISOString())
       .map((t) => [Date.parse(t.starts_at), Date.parse(t.ends_at)]));
-  // Daily limit: count this page's bookings per local day.
+  // Daily limit: count this page's bookings per local day (for the whole page).
   const perDay = new Map();
   const dayKey = (ms) => { const p = parts(new Date(ms)); return `${p.y}-${p.m}-${p.d}`; };
   if (pg.max_per_day) for (const a of appts) if (a.page_id === pg.id) { const k = dayKey(Date.parse(a.starts_at)); perDay.set(k, (perDay.get(k) || 0) + 1); }
@@ -171,6 +203,20 @@ function slotsFor(pg, now = new Date(), { ignore } = {}) {
   }
   return out;
 }
+// Taking turns: of the people free at that time, the one with the fewest bookings from this page
+// in the last 30 days (then the one who had one longest ago).
+function pickStaff(pg, when, now = new Date()) {
+  const team = teamOf(pg);
+  if (!team.length) return null;
+  const free = team.filter((s) => staffSlots(pg, s, now).includes(when));
+  if (!free.length) return undefined;
+  const since = new Date(now.getTime() - 30 * 864e5).toISOString();
+  const score = (s) => {
+    const r = db.prepare("SELECT COUNT(*) AS n, MAX(created_at) AS last FROM crm_appointments WHERE page_id=? AND status='booked' AND COALESCE(staff_id,0)=? AND created_at >= ?").get(pg.id, s, since.replace('T', ' ').slice(0, 19));
+    return [r.n, r.last || ''];
+  };
+  return free.map((s) => ({ s, sc: score(s) })).sort((a, b) => a.sc[0] - b.sc[0] || a.sc[1].localeCompare(b.sc[1]) || team.indexOf(a.s) - team.indexOf(b.s))[0].s;
+}
 
 // ---------- Booking ----------
 const newToken = () => crypto.randomBytes(15).toString('base64url');
@@ -182,6 +228,8 @@ function book(pg, body, now = new Date()) {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw err400('That email address does not look right.');
   const out = db.transaction(() => {
     if (!slotsFor(pg, now).includes(when)) throw err400('Sorry, that time was just taken. Please pick another time.');
+    const staff = pickStaff(pg, when, now);
+    if (staff === undefined) throw err400('Sorry, that time was just taken. Please pick another time.');
     const digits = phone.replace(/\D/g, '').slice(-10);
     let c = email ? db.prepare('SELECT * FROM contacts WHERE lower(email)=?').get(email) : null;
     if (!c && digits.length === 10) c = db.prepare('SELECT * FROM contacts').all().find((x) => String(x.phone || '').replace(/\D/g, '').slice(-10) === digits);
@@ -197,20 +245,21 @@ function book(pg, body, now = new Date()) {
       c = crm.createContact({ name, email, phone, group_name: pg.group_name, stage: 'New', email_ok: optIn, email_ok_source: optIn ? source : null }, { source: 'booking' });
     }
     const ends = new Date(Date.parse(when) + pg.minutes * 60e3).toISOString();
-    const id = db.prepare('INSERT INTO crm_appointments (page_id, contact_id, title, starts_at, ends_at, note, token, location) VALUES (?,?,?,?,?,?,?,?)')
-      .run(pg.id, c.id, pg.title, when, ends, note || null, newToken(), pg.location || null).lastInsertRowid;
-    crm.logActivity(c.id, { kind: 'Meeting', note: `Booked "${pg.title}" for ${niceWhen(when)}${note ? `:\n${note}` : ''}` });
+    const id = db.prepare('INSERT INTO crm_appointments (page_id, contact_id, title, starts_at, ends_at, note, token, location, staff_id) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(pg.id, c.id, pg.title, when, ends, note || null, newToken(), pg.location || null, staff || null).lastInsertRowid;
+    crm.logActivity(c.id, { kind: 'Meeting', note: `Booked "${pg.title}" for ${niceWhen(when)}${staff ? ` with ${staffName(staff)}` : ''}${note ? `:\n${note}` : ''}` });
     return { appointment: db.prepare('SELECT * FROM crm_appointments WHERE id=?').get(id), contact: c };
   })();
   crm.emit('appointment_booked', { contact: crm.getContact(out.contact.id), form: out.appointment.title, when: niceWhen(out.appointment.starts_at) });
+  if (out.appointment.staff_id) tellStaff(out.appointment).catch(() => {});
   return { ...out, contact: crm.getContact(out.contact.id) };
 }
 
 function listAppointments({ past, biz } = {}) {
   const now = new Date().toISOString();
   const bf = require('./businesses').filter(biz, 'c.group_name');
-  return db.prepare(`SELECT a.*, c.name AS contact_name, c.phone, c.email, p.location FROM crm_appointments a
-    LEFT JOIN contacts c ON c.id=a.contact_id LEFT JOIN crm_booking_pages p ON p.id=a.page_id
+  return db.prepare(`SELECT a.*, c.name AS contact_name, c.phone, c.email, p.location, t.name AS staff_name FROM crm_appointments a
+    LEFT JOIN contacts c ON c.id=a.contact_id LEFT JOIN crm_booking_pages p ON p.id=a.page_id LEFT JOIN crm_team t ON t.id=a.staff_id
     WHERE ${past ? 'a.ends_at < ?' : "a.ends_at >= ? AND a.status='booked'"}${bf.sql ? ` AND (a.contact_id IS NULL OR ${bf.sql})` : ''}
     ORDER BY a.starts_at ${past ? 'DESC LIMIT 100' : ''}`).all(now, ...bf.args);
 }
@@ -250,10 +299,12 @@ function addAppointment(body = {}) {
   const starts = localToIso(body.date, body.time);
   const ends = new Date(Date.parse(starts) + minutes * 60e3).toISOString();
   const title = String(body.title || (pg ? pg.title : '') || 'Appointment').trim().slice(0, 120);
-  const clash = db.prepare("SELECT a.*, c.name FROM crm_appointments a LEFT JOIN contacts c ON c.id=a.contact_id WHERE a.status='booked' AND a.starts_at < ? AND a.ends_at > ?").get(ends, starts);
+  const staff = body.staff_id ? Number(body.staff_id) : null;
+  if (staff && !member(staff)) throw err400('That team member was not found.');
+  const clash = db.prepare("SELECT a.*, c.name FROM crm_appointments a LEFT JOIN contacts c ON c.id=a.contact_id WHERE a.status='booked' AND a.starts_at < ? AND a.ends_at > ? AND COALESCE(a.staff_id,0)=?").get(ends, starts, staff || 0);
   if (clash && !body.force) throw Object.assign(err400(`That overlaps ${clash.name || 'another appointment'} at ${fmt(clash.starts_at, { hour: 'numeric', minute: '2-digit' })}.`), { clash: true });
-  const id = db.prepare('INSERT INTO crm_appointments (page_id, contact_id, title, starts_at, ends_at, note, token, location) VALUES (?,?,?,?,?,?,?,?)')
-    .run(pg ? pg.id : null, c.id, title, starts, ends, String(body.note || '').trim().slice(0, 1000) || null, newToken(), String(body.location || (pg && pg.location) || '').trim() || null).lastInsertRowid;
+  const id = db.prepare('INSERT INTO crm_appointments (page_id, contact_id, title, starts_at, ends_at, note, token, location, staff_id) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(pg ? pg.id : null, c.id, title, starts, ends, String(body.note || '').trim().slice(0, 1000) || null, newToken(), String(body.location || (pg && pg.location) || '').trim() || null, staff).lastInsertRowid;
   crm.logActivity(c.id, { kind: 'Meeting', note: `Appointment "${title}" set for ${niceWhen(starts)}` });
   return getAppt(id);
 }
@@ -266,6 +317,17 @@ function moveAppointment(id, startsIso, { by = 'you' } = {}) {
   db.prepare('UPDATE crm_appointments SET starts_at=?, ends_at=?, reminded_at=NULL WHERE id=?').run(startsIso, ends, a.id);
   if (a.contact_id) crm.logActivity(a.contact_id, { kind: 'Meeting', note: `${by === 'them' ? 'They moved' : 'Moved'} "${a.title}" from ${niceWhen(a.starts_at)} to ${niceWhen(startsIso)}` });
   return getAppt(a.id);
+}
+
+// A team member gets an email when a booking lands on their calendar.
+async function tellStaff(a, opts = {}) {
+  const m = member(a.staff_id), email = require('./email');
+  if (!m || !m.email || !email.provider()) return false;
+  const c = a.contact_id ? db.prepare('SELECT name, email, phone FROM contacts WHERE id=?').get(a.contact_id) : null;
+  await email.sendDirect({ to: m.email, toName: m.name, subject: `New booking: ${c ? c.name : 'someone'}, ${fmt(a.starts_at, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`,
+    text: [`Hi ${String(m.name).split(' ')[0]},`, '', `${c ? c.name : 'Someone'} booked "${a.title}" with you:`, `${niceWhen(a.starts_at)} (${tzLabel()})`,
+      ...(c && c.phone ? [`Phone: ${c.phone}`] : []), ...(c && c.email ? [`Email: ${c.email}`] : []), ...(a.note ? ['', a.note] : [])].join('\n') }, opts);
+  return true;
 }
 
 // ---------- Emails to the person: confirmation and reminder ----------
@@ -293,7 +355,8 @@ async function emailPerson(a, kind, opts = {}) {
     remind: [`Hi ${first},`, '', `A reminder about your appointment: ${a.title}`, niceWhen(a.starts_at) + ` (${tzLabel()})`],
     moved: [`Hi ${first},`, '', `Your appointment "${a.title}" is now:`, niceWhen(a.starts_at) + ` (${tzLabel()})`],
   }[kind];
-  const text = [...lines, ...(where ? [`Where: ${where}`] : []), '', 'Need to change it? Pick a new time or cancel here:', manageLink(a), '',
+  const withWho = staffName(a.staff_id);
+  const text = [...lines, ...(withWho ? [`With: ${withWho}`] : []), ...(where ? [`Where: ${where}`] : []), '', 'Need to change it? Pick a new time or cancel here:', manageLink(a), '',
     'Add it to your calendar:', `${manageLink(a)}/invite.ics`, '', `See you then!${b ? `\n${b.name}${b.phone ? `, ${b.phone}` : ''}` : ''}`].join('\n');
   const subject = { confirm: `Booked: ${a.title}`, remind: `Reminder: ${a.title}, ${fmt(a.starts_at, { weekday: 'long', hour: 'numeric', minute: '2-digit' })}`, moved: `New time: ${a.title}` }[kind];
   await email.sendDirect({ to: c.email, toName: c.name, subject, text }, opts);
@@ -339,8 +402,8 @@ const listTimeOff = () => db.prepare('SELECT * FROM crm_time_off WHERE ends_at >
 function calendar({ from, to, biz } = {}) {
   const f = Date.parse(from) || Date.now(), t = Date.parse(to) || f + 7 * 864e5;
   const bf = require('./businesses').filter(biz, 'c.group_name');
-  const appts = db.prepare(`SELECT a.*, c.name AS contact_name, c.phone, c.email, c.group_name FROM crm_appointments a LEFT JOIN contacts c ON c.id=a.contact_id
-    WHERE a.status='booked' AND a.ends_at > ? AND a.starts_at < ?${bf.sql ? ` AND (a.contact_id IS NULL OR ${bf.sql})` : ''} ORDER BY a.starts_at`)
+  const appts = db.prepare(`SELECT a.*, c.name AS contact_name, c.phone, c.email, c.group_name, t.name AS staff_name FROM crm_appointments a LEFT JOIN contacts c ON c.id=a.contact_id
+    LEFT JOIN crm_team t ON t.id=a.staff_id WHERE a.status='booked' AND a.ends_at > ? AND a.starts_at < ?${bf.sql ? ` AND (a.contact_id IS NULL OR ${bf.sql})` : ''} ORDER BY a.starts_at`)
     .all(new Date(f).toISOString(), new Date(t).toISOString(), ...bf.args);
   const off = db.prepare('SELECT * FROM crm_time_off WHERE ends_at > ? AND starts_at < ? ORDER BY starts_at').all(new Date(f).toISOString(), new Date(t).toISOString());
   return { appointments: appts, timeOff: off, timezone: TZ() };
@@ -507,4 +570,4 @@ router.get('/time-off', wrap((req, res) => res.json(listTimeOff())));
 router.post('/time-off', wrap((req, res) => res.json(addTimeOff(req.body || {}))));
 router.delete('/time-off/:id', wrap((req, res) => { db.prepare('DELETE FROM crm_time_off WHERE id=?').run(Number(req.params.id)); res.json({ ok: true }); }));
 
-module.exports = { router, publicBooking, savePage, slotsFor, book, cancel, listAppointments, todaysLines, zoned, parts, niceWhen, addAppointment, moveAppointment, sendReminders, emailPerson, ics, addTimeOff, listTimeOff, calendar, localToIso };
+module.exports = { router, publicBooking, savePage, slotsFor, staffSlots, pickStaff, tellStaff, teamOf, book, cancel, listAppointments, todaysLines, zoned, parts, niceWhen, addAppointment, moveAppointment, sendReminders, emailPerson, ics, addTimeOff, listTimeOff, calendar, localToIso };

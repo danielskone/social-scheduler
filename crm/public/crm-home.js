@@ -239,10 +239,16 @@
         <button class="btn ghost" data-edit>Edit</button></div>`).join('')}</div>
       <div id="set-templates"></div>
       <div id="set-more"></div>
+      <div id="set-backups"></div>
+      <div id="set-audit"></div>
       <h2 style="margin-top:26px">Connections</h2>
       <p class="muted">Phone alerts, your email, Google Calendar and website forms are all on the <a href="#contacts/launchpad">Launchpad</a>, with a button for each one.</p>`;
     window.VTMore.settingsSections(meta, () => renderSettings(meta)).catch((e) => say(e.message, true));
     if (window.VTExtra7) window.VTExtra7.templatesSection(q$('#set-templates'), () => { onSwitch(); }).catch((e) => say(e.message, true));
+    if (window.VTExtra8) {
+      window.VTExtra8.backupsSection(q$('#set-backups')).catch((e) => say(e.message, true));
+      window.VTExtra8.auditSection(q$('#set-audit')).catch((e) => say(e.message, true));
+    }
     root.onclick = (e) => {
       if (e.target.closest('[data-new]')) return editBusiness(null, allGroups);
       const row = e.target.closest('.set-biz');
