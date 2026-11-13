@@ -20,7 +20,10 @@ function emit(event, data) {
   try { events.emit('crm', { event, ...data }); } catch (e) { console.error(`[crm] automation error: ${e.message}`); }
 }
 
-const GROUPS = ['Parade sponsor', 'Donor', 'Parade entry', 'Volunteer', 'Vendor', 'Viral Attraction lead', 'Auto customer', 'Other'];
+// Daniel's own copy starts with his groups; a customer's copy starts with everyday ones.
+const GROUPS = config.ownerStarters
+  ? ['Parade sponsor', 'Donor', 'Parade entry', 'Volunteer', 'Vendor', 'Viral Attraction lead', 'Auto customer', 'Other']
+  : ['Lead', 'Customer', 'Partner', 'Vendor', 'Other'];
 const STAGES = ['New', 'Contacted', 'Interested', 'Committed', 'Paid / Done', 'Not this year'];
 const FIELDS = ['name', 'company', 'email', 'phone', 'website', 'address', 'group_name', 'stage', 'amount',
   'next_follow_up', 'email_ok', 'email_ok_source', 'do_not_contact', 'notes'];
@@ -119,6 +122,8 @@ if (config.ownerStarters && !db.prepare('SELECT 1 FROM crm_templates LIMIT 1').g
     `Hi {first_name}, reminder from the Fuquay-Varina Christmas Parade: please make sure your entry registration is complete at ${site}. Thank you!`);
 }
 
+const biz = () => require('./businesses');
+
 const today = (d = new Date()) => {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
@@ -180,8 +185,10 @@ function getContact(id) {
   return c;
 }
 
-function listContacts({ q, group, stage, due } = {}) {
+function listContacts({ q, group, stage, due, biz: b } = {}) {
   const where = [], args = {};
+  const bf = biz().filter(b);
+  if (bf.sql) { let n = 0; where.push(bf.sql.replace(/\?/g, () => `@bg${n++}`)); bf.args.forEach((g, i) => { args[`bg${i}`] = g; }); }
   if (q) { where.push(`(name LIKE @q OR company LIKE @q OR email LIKE @q OR phone LIKE @q OR notes LIKE @q)`); args.q = `%${q}%`; }
   if (group) { where.push('group_name=@group'); args.group = group; }
   if (stage) { where.push('stage=@stage'); args.stage = stage; }
@@ -199,16 +206,20 @@ function logActivity(contactId, { kind = 'Note', note, happened_on } = {}) {
   db.prepare("UPDATE contacts SET updated_at=datetime('now') WHERE id=?").run(contactId);
 }
 
-function summary() {
+function summary(b) {
   const t = today();
+  const bf = biz().filter(b);
+  const W = bf.sql ? `WHERE ${bf.sql}` : '';
   const row = db.prepare(`SELECT COUNT(*) AS total,
-      SUM(CASE WHEN next_follow_up IS NOT NULL AND next_follow_up <= @t THEN 1 ELSE 0 END) AS due,
+      SUM(CASE WHEN next_follow_up IS NOT NULL AND next_follow_up <= ? THEN 1 ELSE 0 END) AS due,
       SUM(CASE WHEN email_ok=1 AND do_not_contact=0 THEN 1 ELSE 0 END) AS emailable,
       SUM(CASE WHEN stage='Committed' THEN COALESCE(amount,0) ELSE 0 END) AS pledged,
       SUM(CASE WHEN stage='Paid / Done' THEN COALESCE(amount,0) ELSE 0 END) AS paid
-    FROM contacts`).get({ t });
-  const byGroup = db.prepare(`SELECT group_name, COUNT(*) AS n, SUM(COALESCE(amount,0)) AS amount FROM contacts GROUP BY group_name ORDER BY n DESC`).all();
-  const tasksDue = db.prepare('SELECT COUNT(*) AS n FROM crm_tasks WHERE done_at IS NULL AND due_on IS NOT NULL AND due_on <= ?').get(t).n;
+    FROM contacts ${W}`).get(t, ...bf.args);
+  const byGroup = db.prepare(`SELECT group_name, COUNT(*) AS n, SUM(COALESCE(amount,0)) AS amount FROM contacts ${W} GROUP BY group_name ORDER BY n DESC`).all(...bf.args);
+  const tf = biz().filter(b, 'c.group_name');
+  const tasksDue = db.prepare(`SELECT COUNT(*) AS n FROM crm_tasks t LEFT JOIN contacts c ON c.id=t.contact_id
+    WHERE t.done_at IS NULL AND t.due_on IS NOT NULL AND t.due_on <= ?${tf.sql ? ` AND (t.contact_id IS NULL OR ${tf.sql})` : ''}`).get(t, ...tf.args).n;
   return { ...row, tasksDue, due: row.due || 0, emailable: row.emailable || 0, pledged: row.pledged || 0, paid: row.paid || 0, byGroup };
 }
 
@@ -316,8 +327,10 @@ async function sendFollowUpReminder(now = new Date()) {
 const err400 = (m) => Object.assign(new Error(m), { status: 400 });
 const ymdOrNull = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null);
 
-function listTasks({ open, contact_id } = {}) {
+function listTasks({ open, contact_id, biz: b } = {}) {
   const where = [], args = {};
+  const bf = biz().filter(b, 'c.group_name');
+  if (bf.sql) { let n = 0; where.push(`(t.contact_id IS NULL OR ${bf.sql.replace(/\?/g, () => `@bg${n++}`)})`); bf.args.forEach((g, i) => { args[`bg${i}`] = g; }); }
   if (open) where.push('t.done_at IS NULL');
   if (contact_id) { where.push('t.contact_id=@cid'); args.cid = Number(contact_id); }
   return db.prepare(`SELECT t.*, c.name AS contact_name, (SELECT name FROM crm_templates WHERE id=t.template_id) AS template_name
@@ -494,16 +507,20 @@ const wrap = (fn) => (req, res) => {
 };
 router.get('/meta', (req, res) => {
   const used = db.prepare('SELECT DISTINCT group_name FROM contacts').all().map((r) => r.group_name);
-  res.json({ groups: [...new Set([...GROUPS, ...used])], stages: STAGES, summary: summary() });
+  const every = [...new Set([...GROUPS, ...used])];
+  const b = req.query.biz;
+  // With a business picked, only its groups are offered.
+  const groups = b && b !== 'all' ? (biz().groupsOf(b, GROUPS) || every) : every;
+  res.json({ groups, stages: STAGES, summary: summary(b) });
 });
 router.get('/contacts', wrap((req, res) => res.json(listContacts(req.query))));
-router.post('/contacts', wrap((req, res) => res.json(createContact(req.body || {}))));
+router.post('/contacts', wrap((req, res) => { biz().claim(req.query.biz, (req.body || {}).group_name); res.json(createContact(req.body || {})); }));
 router.get('/contacts/:id', wrap((req, res) => {
   const c = getContact(req.params.id);
   if (!c) return res.status(404).json({ error: 'Contact not found' });
   res.json(c);
 }));
-router.put('/contacts/:id', wrap((req, res) => res.json(updateContact(req.params.id, req.body || {}))));
+router.put('/contacts/:id', wrap((req, res) => { biz().claim(req.query.biz, (req.body || {}).group_name); res.json(updateContact(req.params.id, req.body || {})); }));
 router.delete('/contacts/:id', wrap((req, res) => {
   db.prepare('DELETE FROM contacts WHERE id=?').run(req.params.id);
   res.json({ ok: true });

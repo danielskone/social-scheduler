@@ -60,9 +60,12 @@ function buildAppMenu() {
   const nav = $('.sidebar nav');
   // The scheduler's menu is in the page. The other apps show their own sections instead.
   if (THIS_APP.key === 'crm') {
+    // Like GoHighLevel: the business switcher on top, then the sections, with Settings at the bottom.
+    nav.insertAdjacentHTML('beforebegin', '<div id="biz-slot" class="biz-slot"></div>');
     nav.innerHTML = [...document.querySelectorAll('#crm-tabs a')].map((a) => {
       const svgEl = a.querySelector('svg');
-      return `<a href="${a.getAttribute('href')}" data-tab="${a.dataset.tab}"><span class="nav-ico">${svgEl ? svgEl.outerHTML : ''}</span><span>${esc(a.textContent.trim())}</span></a>`;
+      const cls = [a.dataset.sep ? 'sep' : '', a.dataset.bottom ? 'bottom' : ''].filter(Boolean).join(' ');
+      return `<a href="${a.getAttribute('href')}" data-tab="${a.dataset.tab}"${cls ? ` class="${cls}"` : ''}><span class="nav-ico">${svgEl ? svgEl.outerHTML : ''}</span><span>${esc(a.textContent.trim())}</span></a>`;
     }).join('');
   } else if (THIS_APP.key === 'clips') {
     nav.innerHTML = '<a href="#clips" data-view="clips"><span class="nav-ico"><svg viewBox="0 0 24 24"><circle cx="6.5" cy="6.5" r="2.8"/><circle cx="6.5" cy="17.5" r="2.8"/><path d="M8.6 8.3 20 18M8.6 15.7 20 6"/></svg></span><span>Make clips</span></a>';
@@ -101,7 +104,7 @@ async function route() {
   const params = new URLSearchParams(query);
   banner(params.get('error') ? `Couldn't connect: ${params.get('error')}` : params.get('connected') ? `Connected ${params.get('connected')} account(s).` : '', Boolean(params.get('error')));
   document.querySelectorAll('.view').forEach((v) => (v.hidden = v.id !== `view-${view}`));
-  const crmTab = ['pipeline', 'tasks', 'appointments', 'forms', 'templates', 'automations', 'email'].includes(sub) ? sub : 'list';
+  const crmTab = window.crmTabFor ? window.crmTabFor(sub) : 'list';
   document.querySelectorAll('.sidebar nav a').forEach((a) => a.classList.toggle('active',
     a.dataset.tab ? a.dataset.tab === crmTab : a.dataset.view === view));
   const acctLoad = api('/accounts').then((a) => (accounts = a));

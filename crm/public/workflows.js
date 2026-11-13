@@ -7,7 +7,8 @@
   const h = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   async function call(p, opts = {}) {
     if (opts.json) { opts.body = JSON.stringify(opts.json); opts.headers = { 'Content-Type': 'application/json' }; delete opts.json; }
-    const res = await fetch(`/api/crm${p}`, opts);
+    const bizQ = (u) => { let b = ''; try { b = JSON.parse(localStorage.getItem('vtcrm-biz') || '""'); } catch { /* private mode */ } return b ? `${u}${u.includes('?') ? '&' : '?'}biz=${encodeURIComponent(b)}` : u; }; // the business picked in the switcher
+    const res = await fetch(bizQ(`/api/crm${p}`), opts);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
     return data;

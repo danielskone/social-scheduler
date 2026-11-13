@@ -8,7 +8,8 @@
   const dueClass = (d) => (!d ? '' : d < todayStr() ? 'overdue' : d === todayStr() ? 'due-today' : '');
   async function call(path, opts = {}) {
     if (opts.json) { opts.body = JSON.stringify(opts.json); opts.headers = { 'Content-Type': 'application/json' }; delete opts.json; }
-    const res = await fetch(`/api/crm${path}`, opts);
+    const bizQ = (u) => { let b = ''; try { b = JSON.parse(localStorage.getItem('vtcrm-biz') || '""'); } catch { /* private mode */ } return b ? `${u}${u.includes('?') ? '&' : '?'}biz=${encodeURIComponent(b)}` : u; }; // the business picked in the switcher
+    const res = await fetch(bizQ(`/api/crm${path}`), opts);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
     return data;
@@ -49,10 +50,13 @@
 
   // ---------- Friendly tips (one per tab) ----------
   const TIPS = {
-    list: ['people', 'Your address book', 'Everyone you work with lives here: sponsors, parade entries, volunteers and Viral Attraction leads. <b>Click a name</b> to see their notes, history and next follow-up. Use the search box and the group and stage menus to find people fast.',
+    launchpad: ['check', 'Start here', 'A short list of things to set up once. <b>Green means done.</b> Press the button next to anything that isn\'t done yet.'],
+    dashboard: ['pipeline', 'How things are going', 'Your numbers at a glance: new people, money still open, money won and what\'s coming up. Pick a date range at the top right. Use the <b>business switcher</b> at the top of the menu to see one business or all of them.'],
+    settings: ['check', 'Your businesses', 'Add each business you run, like an agency and a nonprofit. Each one gets its own people, pipeline and forms. Switch between them at the top of the menu.'],
+    list: ['people', 'Your address book', 'Everyone you work with lives here: leads, customers, partners and more. <b>Click a name</b> to see their notes, history and next follow-up. Use the search box and the group and stage menus to find people fast.',
       'This app never bulk-sends texts, so your accounts can\'t get flagged for spam. Tick "OK to email" only when someone said yes.'],
     pipeline: ['pipeline', 'Where every deal stands', 'Each column is a step, from <b>New</b> to <b>Paid / Done</b>. <b>Drag a card</b> to the next column as things move along. The total under each column adds up the money at that step.',
-      'Moving a card can start an automation, like a thank-you task when a sponsor reaches "Paid / Done".'],
+      'Moving a card can start an automation, like a thank-you task when someone reaches "Paid / Done".'],
     tasks: ['tasks', 'Your to-do list', 'Start each day here. <b>Tick the circle</b> when something is done. Red dates are late, orange ones are due today. When a task has a <b>Write</b> button, it opens a ready-made message in your Mail or Messages app, and you just press Send.'],
     appointments: ['appointments', 'Calls and meetings people booked', 'When someone books a time with you (from your Google booking page or a booking page made here), it shows up here, they\'re added to People, and <b>your iPhone buzzes</b>. Share a booking link below in a post, your bio or a text.'],
     forms: ['forms', 'Your own form builder', 'Make any form: sign-ups, RSVPs, surveys, quotes, releases with a signature. <b>Describe it</b> or pick a ready-made one, then drag questions around. Share it as a link, a QR code or website code. Every response is saved, people become contacts, and your iPhone gets a ping.'],
@@ -78,18 +82,25 @@
 
   // ---------- Guided tour ----------
   const TOUR = [
-    { tab: 'list', ico: 'wave', title: 'Welcome to Viral Touch CRM', text: 'This is where you keep track of everyone you work with and what to do next with each of them. This quick tour shows you each part. It takes about a minute.', tryIt: 'Use <b>Next</b> to move along. You can stop any time.' },
+    { tab: 'dashboard', ico: 'wave', title: 'Welcome to Viral Touch CRM', text: 'This is where you keep track of everyone you work with and what to do next with each of them. This quick tour shows you each part. It takes about a minute.', tryIt: 'Use <b>Next</b> to move along. You can stop any time.' },
+    { tab: 'launchpad', ico: 'check', title: 'Launchpad', text: 'Start here. It lists the few things to set up once, like phone alerts and your email. Green means done.' },
+    { tab: 'dashboard', ico: 'pipeline', title: 'Dashboard', text: 'Your numbers at a glance: new people, money still open, money won and what\'s coming up.', tryIt: 'The <b>business switcher</b> at the top of the menu picks which business you\'re looking at.' },
     { tab: 'list', ico: 'people', title: 'People', text: 'Your address book. Click anyone to open their card with notes, history and their next follow-up date.', tryIt: 'Try it: press <b>+ Add contact</b> at the top right to add someone new.' },
-    { tab: 'pipeline', ico: 'pipeline', title: 'Pipeline', text: 'See where every deal stands, from New to Paid / Done. Drag a card to the next column when things move along.', tryIt: 'Try it: drag a sponsor from "Committed" to "Paid / Done" once they pay.' },
+    { tab: 'pipeline', ico: 'pipeline', title: 'Pipeline', text: 'See where every deal stands, from New to Paid / Done. Drag a card to the next column when things move along.', tryIt: 'Try it: drag someone from "Committed" to "Paid / Done" once they pay.' },
     { tab: 'tasks', ico: 'tasks', title: 'Tasks', text: 'Your to-do list. Many tasks are made for you by automations. Tick the circle when one is done.', tryIt: 'Good habit: check this tab first thing every morning.' },
     { tab: 'appointments', ico: 'appointments', title: 'Appointments', text: 'Calls people booked with you show up here, and your iPhone buzzes when a new one comes in.' },
     { tab: 'forms', ico: 'forms', title: 'Forms', text: 'Build any form by dragging questions around: sign-ups, RSVPs, surveys, quotes. Each response is saved and becomes a contact by itself.', tryIt: 'Try it: pick a ready-made form, press <b>Save</b>, then <b>Share</b>.' },
     { tab: 'templates', ico: 'templates', title: 'Message templates', text: 'Messages you send often, written once. {first_name} fills in each person\'s name for you.' },
     { tab: 'email', ico: 'email', title: 'Email marketing', text: 'Send a newsletter to everyone who said yes to email. Pick a design, pick who gets it, then press Send or pick a time.' },
     { tab: 'automations', ico: 'automations', title: 'Automations', text: 'Your helper. When a new lead comes in, it can make a task, buzz your phone or send a welcome email, all by itself. These are already switched on for you.' },
-    { tab: 'list', ico: 'party', title: 'You\'re all set!', text: 'Each tab has a short tip at the top if you forget what it\'s for. You can replay this tour any time with <b>How it works</b> at the top.' },
+    { tab: 'settings', ico: 'people', title: 'Settings', text: 'Add your businesses here, with their phone, email, website and color. Each one keeps its own people and pipeline.' },
+    { tab: 'dashboard', ico: 'party', title: 'You\'re all set!', text: 'Each tab has a short tip at the top if you forget what it\'s for. You can replay this tour any time with <b>How it works</b> at the top.' },
   ];
-  const TAB_ROUTE = (t) => (t === 'list' ? '#contacts' : `#contacts/${t}`);
+  const TABS = ['launchpad', 'dashboard', 'list', 'pipeline', 'tasks', 'appointments', 'forms', 'templates', 'automations', 'email', 'settings'];
+  // #contacts on its own opens the Dashboard; #contacts/people (or the old #contacts/list) is People.
+  const tabFor = (sub) => (sub === 'people' || sub === 'list' ? 'list' : TABS.includes(sub) ? sub : 'dashboard');
+  window.crmTabFor = tabFor;
+  const TAB_ROUTE = (t) => (t === 'list' ? '#contacts/people' : `#contacts/${t}`);
   let tourAt = -1;
   function showTour(i) {
     tourAt = i;
@@ -97,7 +108,7 @@
     document.querySelectorAll('#crm-tabs a, .sidebar nav a').forEach((a) => a.classList.remove('tour-glow'));
     if (i < 0 || i >= TOUR.length) { box.hidden = true; tourAt = -1; store.set('tour-done', true); return; }
     const st = TOUR[i];
-    if (location.hash !== TAB_ROUTE(st.tab) && !(st.tab === 'list' && location.hash === '#contacts/list')) location.hash = TAB_ROUTE(st.tab);
+    if (tabFor((location.hash.split('/')[1] || '').split('?')[0]) !== st.tab) location.hash = TAB_ROUTE(st.tab);
     // The CRM's own app shows its sections in the side menu on a Mac and as tabs on an iPhone.
     const side = q$(`.sidebar nav a[data-tab="${st.tab}"]`);
     const link = side && side.offsetParent && getComputedStyle(q$('#crm-tabs')).display === 'none' ? side : q$(`#crm-tabs a[data-tab="${st.tab}"]`);
@@ -145,13 +156,35 @@
   }
 
   let meta = { groups: [], stages: [] };
-  let tab = 'list';
+  let tab = 'dashboard';
+  let homeReady = null;
+  const HEADS = {
+    launchpad: ['Launchpad', 'Set these up once and the CRM works by itself.'],
+    dashboard: ['Dashboard', 'How things are going, at a glance.'],
+    list: ['People', 'Everyone you work with, what\'s next with each of them, and who to follow up with today.'],
+    pipeline: ['Pipeline', 'Where every deal stands. Drag a card to move it along.'],
+    tasks: ['Tasks', 'Your to-do list. Tick things off as you go.'],
+    appointments: ['Appointments', 'Calls and meetings people booked with you.'],
+    forms: ['Forms', 'Sign-up forms, surveys and more, shared as a link or QR code.'],
+    templates: ['Templates', 'Messages you send a lot, written once.'],
+    email: ['Email', 'Newsletters and email blasts to people who said yes.'],
+    automations: ['Automations', 'Your helper that works while you\'re busy.'],
+    settings: ['Settings', 'Your businesses and how everything is connected.'],
+  };
   let timer;
 
   async function renderContacts(sub) {
-    tab = ['pipeline', 'tasks', 'appointments', 'forms', 'templates', 'automations', 'email'].includes(sub) ? sub : 'list';
+    tab = tabFor(sub);
     document.querySelectorAll('#crm-tabs a').forEach((a) => a.classList.toggle('active', a.dataset.tab === tab));
     document.querySelectorAll('.crm-panel').forEach((p) => (p.hidden = p.dataset.panel !== tab));
+    if (!homeReady) { homeReady = window.VTHome.init(refresh); }
+    await homeReady;
+    const [title, sub2] = HEADS[tab];
+    const biz = window.VTHome.current();
+    q$('#crm-title').textContent = title;
+    q$('#crm-sub').innerHTML = `${biz ? `<span class="biz-dot" style="--c:${h(biz.color)}"></span><b>${h(biz.name)}</b> · ` : ''}${sub2}`;
+    // The number tiles belong to the people pages; Launchpad, Dashboard and Settings have their own.
+    q$('#crm-tiles').style.display = ['launchpad', 'dashboard', 'settings'].includes(tab) ? 'none' : '';
     meta = await call('/meta');
     const fill = (sel, items, label) => {
       const el = q$(sel), cur = el.value;
@@ -167,7 +200,7 @@
     ].map(([l, v, ico, c]) => `<div class="tile"><div class="tile-ico" style="--c:${c}">${svg(ico)}</div><div><div class="label">${l}</div><div class="value">${v ?? 0}</div></div></div>`).join('');
     renderTip(tab);
     if (!store.get('tour-done', false) && tourAt < 0) setTimeout(() => showTour(0), 400);
-    await ({ list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
+    await ({ launchpad: () => window.VTHome.renderLaunchpad(), dashboard: () => window.VTHome.renderDashboard(), settings: () => window.VTHome.renderSettings(meta), list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
   }
   window.renderContacts = renderContacts;
   const refresh = () => renderContacts(tab);
@@ -270,7 +303,7 @@
     const people = await call('/contacts');
     const dlg = q$('#crm-edit-dialog');
     dlg.innerHTML = `<form id="task-form"><h1>${t.id ? 'Edit task' : 'New task'}</h1>
-      <label class="field"><span>To do</span><input name="title" required value="${h(t.title)}" placeholder="e.g. Call about sponsor invoice" style="width:100%"></label>
+      <label class="field"><span>To do</span><input name="title" required value="${h(t.title)}" placeholder="e.g. Call about their invoice" style="width:100%"></label>
       <label class="field"><span>Due</span><input type="date" name="due_on" value="${h(t.due_on || todayStr())}"></label>
       <label class="field"><span>For</span><select name="contact_id" style="width:100%"><option value="">(nobody in particular)</option>
         ${people.map((p) => `<option value="${p.id}"${p.id === t.contact_id ? ' selected' : ''}>${h(p.name)}${p.company && p.company !== p.name ? ` (${h(p.company)})` : ''}</option>`).join('')}</select></label>
@@ -534,7 +567,7 @@
   // ---------- One contact ----------
   window.crmOpenContact = (id) => openContact(id);
   async function openContact(id) {
-    const c = id ? await call(`/contacts/${id}`) : { group_name: q$('#crm-group').value || 'Parade sponsor', stage: 'New', activities: [], tasks: [] };
+    const c = id ? await call(`/contacts/${id}`) : { group_name: q$('#crm-group').value || meta.groups[0] || 'Other', stage: 'New', activities: [], tasks: [] };
     const templates = id ? await call('/templates') : [];
     const dlg = q$('#contact-dialog');
     const field = (name, label, type = 'text', extra = '') => `<label class="field"><span>${label}</span><input type="${type}" name="${name}" value="${h(c[name])}" ${extra}></label>`;
@@ -557,7 +590,7 @@
         <label class="field full"><span>Notes</span><textarea name="notes" rows="3">${h(c.notes)}</textarea></label>
         <div class="consent full">
           <label class="check"><input type="checkbox" name="email_ok" ${c.email_ok ? 'checked' : ''}> <b>OK to email</b> <small class="muted">only if they said yes</small></label>
-          <input type="text" name="email_ok_source" placeholder="How they said yes, e.g. signed up on parade website" value="${h(c.email_ok_source)}" style="width:100%;margin-top:8px">
+          <input type="text" name="email_ok_source" placeholder="How they said yes, e.g. signed up on my website" value="${h(c.email_ok_source)}" style="width:100%;margin-top:8px">
           ${c.email_ok_at ? `<div class="muted small" style="margin-top:6px">Agreed on ${new Date(c.email_ok_at).toLocaleDateString()}</div>` : ''}
           <label class="check" style="margin-top:8px"><input type="checkbox" name="do_not_contact" ${c.do_not_contact ? 'checked' : ''}> Do not contact <small class="muted">(asked to be left alone or unsubscribed)</small></label>
         </div>
