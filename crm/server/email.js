@@ -174,6 +174,32 @@ async function unsubscribeReplies(since, { client } = {}) {
   return [...found];
 }
 
+// A one-to-one email typed in the Conversations inbox (a reply to someone who wrote to you).
+// Plain text with your name under it, threaded under their message. Returns the Message-ID.
+async function sendDirect({ to, toName, subject, text, inReplyTo }, { fetchImpl = fetch } = {}) {
+  const s = settings();
+  if (!provider() || !s.from) throw Object.assign(new Error('Set up email first (Launchpad, Email).'), { status: 400 });
+  const body = `${text}\n\n--\n${s.fromName || s.from}`;
+  const domain = s.from.split('@')[1] || 'localhost';
+  const messageId = `<vt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}@${domain}>`;
+  const thread = inReplyTo ? { 'In-Reply-To': inReplyTo, References: inReplyTo } : {};
+  if (provider() === 'mailbox') {
+    try {
+      await mailbox().sendMail({ from: { name: s.fromName, address: s.from }, to: toName ? { name: toName, address: to } : to, subject, text: body,
+        messageId, ...(inReplyTo ? { inReplyTo, references: inReplyTo } : {}) });
+    } catch (e) { throw Object.assign(new Error(friendlySmtp(e)), { status: 502 }); }
+    return messageId;
+  }
+  const res = await fetchImpl(`${s.api}/v3/smtp/email`, {
+    method: 'POST', headers: { 'api-key': s.key, 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ sender: { email: s.from, name: s.fromName }, to: [{ email: to, ...(toName ? { name: toName } : {}) }],
+      replyTo: { email: s.from, name: s.fromName }, subject, textContent: body, headers: { 'Message-ID': messageId, ...thread } }),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!res.ok) { const b = await res.json().catch(() => ({})); throw Object.assign(new Error(b.message || `Brevo error ${res.status}`), { status: 502 }); }
+  return messageId;
+}
+
 // Checks that the mailbox password works, for npm run email-setup.
 async function verify() {
   if (provider() !== 'mailbox') return { ok: true };
@@ -186,4 +212,4 @@ function status() {
     recent: db.prepare('SELECT e.*, c.name AS contact_name FROM crm_emails_sent e LEFT JOIN contacts c ON c.id=e.contact_id ORDER BY e.id DESC LIMIT 10').all() };
 }
 
-module.exports = { ready, provider, unsubscribeReplies, verify, claim, deliver, sendTest, status, footer, footerHtml, settings };
+module.exports = { ready, provider, unsubscribeReplies, sendDirect, verify, claim, deliver, sendTest, status, footer, footerHtml, settings };

@@ -203,6 +203,8 @@ function startCrm() {
   cron.schedule('41 * * * *', () => campaigns.hourly().catch((e) => console.error(e)));
   // Campaigns sent from your own mailbox go out a few at a time (and pick up again after a restart).
   cron.schedule('* * * * *', () => campaigns.runMailboxCampaigns().catch((e) => console.error(e)));
+  // Conversations: new emails from people in the CRM, every 2 minutes.
+  cron.schedule('*/2 * * * *', () => require('../crm/server/inbox').check().catch((e) => console.error(e)));
   // Google Calendar bookings (the website's "Book a free call" page) -> Contacts + Appointments.
   cron.schedule('*/5 * * * *', () => gcal.check().catch((e) => console.error(e)));
   gcal.check().catch(() => {});
