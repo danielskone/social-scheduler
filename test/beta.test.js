@@ -27,11 +27,12 @@ test.after(() => { g.tenants.stopAll(); server.close(); });
 
 function browser() {
   let cookie = '';
-  return async (p, { method = 'GET', form, headers = {} } = {}) => {
+  return async (p, { method = 'GET', form, json, headers = {} } = {}) => {
     const h = { Accept: method === 'GET' ? 'text/html' : 'application/json', ...headers };
     if (cookie) h.Cookie = cookie;
     let body;
     if (form) { body = new URLSearchParams(form).toString(); h['Content-Type'] = 'application/x-www-form-urlencoded'; }
+    if (json) { body = JSON.stringify(json); h['Content-Type'] = 'application/json'; h.Accept = 'application/json'; h.Origin = base; }
     const res = await fetch(base + p, { method, headers: h, body, redirect: 'manual' });
     const set = res.headers.get('set-cookie');
     if (set) { const m = set.match(/vps=([^;]*)/); if (m) cookie = m[1] ? `vps=${m[1]}` : ''; }
@@ -87,6 +88,16 @@ test('owner adds a tester; tester sets a password from the link and gets a priva
   assert.strictEqual(status.youtubeConfigured, false);
   assert.strictEqual(status.tiktokConfigured, false);
   assert.ok(fs.existsSync(path.join(dir, 'tenants', String(t.id), 'scheduler.db')));
+  // The first-time tutorial starts fresh in every tester's copy and explains the Meta Tester step.
+  const asJson = { headers: { Accept: 'application/json' } };
+  assert.deepStrictEqual((await tess('/api/tutorial', asJson)).data, { saas: true, metaTestersOnly: true, youtube: false, tiktok: false, done: {} });
+  assert.strictEqual(status.metaTestersOnly, true);
+  const saved = await tess('/api/tutorial', { method: 'POST', json: { key: 'scheduler-tour' } });
+  assert.strictEqual(saved.status, 200, saved.text);
+  assert.strictEqual((await tess('/api/tutorial', { method: 'POST', json: { key: 'bad-key' } })).status, 400);
+  assert.ok((await tess('/api/tutorial', asJson)).data.done['scheduler-tour']);
+  // The owner's own copy has its own, untouched tutorial.
+  assert.deepStrictEqual((await owner('/api/tutorial', asJson)).data.done, {});
   // Testers can't see the tester list.
   assert.strictEqual((await tess('/admin')).status, 404);
   assert.strictEqual((await tess('/admin/invite', { method: 'POST', form: { email: 'x@example.com' } })).status, 404);

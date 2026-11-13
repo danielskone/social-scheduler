@@ -22,6 +22,15 @@
 #crm-tabs a:hover { background: var(--panel-2); color: var(--text); }
 #crm-tabs a.active { background: var(--accent-soft); color: var(--accent); }
 #crm-tabs a.tour-glow { box-shadow: 0 0 0 2px var(--accent); animation: crm-pulse 1.6s ease-in-out infinite; }
+/* The same glow for Viral Post's and Viral Clips' tour (menu links, Your apps, the video box) */
+.sidebar nav a.tour-glow, #app-switch.tour-glow, #app-switch-btn.tour-glow, #clip-drop.tour-glow { box-shadow: 0 0 0 2px var(--accent); animation: crm-pulse 1.6s ease-in-out infinite; border-radius: 12px; }
+#home-screen-dlg { max-width: 460px; }
+.vp-help-top { color: var(--accent) !important; }
+@media (max-width: 800px) {
+  .view-head > .vp-help-btn, .view-head .row > .vp-help-btn { display: none; }
+  .vp-help-top { display: inline-flex !important; margin-left: auto; width: 40px; height: 40px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); cursor: pointer; padding: 0; }
+  .app-switch-btn:not([hidden]) + .vp-help-top { margin-left: 8px; }
+}
 @keyframes crm-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 25%, transparent); } }
 
 /* Summary tiles with icon bubbles */
@@ -154,5 +163,5 @@
   .crm-act span { max-width: 120px; }
   .tile-ico { display: none; }
 }
-@media (prefers-reduced-motion: reduce) { #crm-tabs a.tour-glow, .crm-coach { animation: none; } }
+@media (prefers-reduced-motion: reduce) { #crm-tabs a.tour-glow, .tour-glow, .crm-coach { animation: none; } }
 #view-contacts .cards .item > .pill { align-self: flex-start; }

@@ -298,6 +298,7 @@ api.get('/status', (req, res) => {
   res.json({
     metaConfigured: Boolean(config.metaAppId && config.metaAppSecret),
     saas: Boolean(config.tenantKey), // a customer's copy: show Account / Sign out
+    metaTestersOnly: Boolean(config.tenantKey) && process.env.META_TESTERS_ONLY === '1',
     publicBaseUrl: config.publicBaseUrl,
     instagramReady: config.publicBaseUrl.startsWith('https://'),
     redirectUri: meta.redirectUri(),
@@ -307,6 +308,25 @@ api.get('/status', (req, res) => {
     tiktokRedirectUri: tiktok.redirectUri(),
     tiktokMode: tiktok.mode(),
   });
+});
+
+// First-time tutorial (tour + Get started list) for Viral Post and Viral Clips. What each
+// person has finished is saved in their own data folder, so every tester's private copy starts
+// fresh, even when several testers use the same browser.
+const tutorialFile = path.join(config.dataDir, 'tutorial.json');
+const TUTORIAL_KEYS = /^(scheduler|clips)-(tour|start-hidden|home-screen)$/;
+const readTutorial = () => { try { return JSON.parse(fs.readFileSync(tutorialFile, 'utf8')) || {}; } catch { return {}; } };
+api.get('/tutorial', (req, res) => {
+  res.json({ saas: Boolean(config.tenantKey), metaTestersOnly: Boolean(config.tenantKey) && process.env.META_TESTERS_ONLY === '1', youtube: youtube.configured(), tiktok: tiktok.configured(), done: readTutorial() });
+});
+api.post('/tutorial', (req, res) => {
+  const key = String(req.body?.key || '');
+  if (!TUTORIAL_KEYS.test(key)) return res.status(400).json({ error: 'Unknown step.' });
+  const done = readTutorial();
+  if (req.body.value === false) delete done[key]; else done[key] = new Date().toISOString();
+  fs.mkdirSync(config.dataDir, { recursive: true });
+  fs.writeFileSync(tutorialFile, JSON.stringify(done, null, 2));
+  res.json({ ok: true, done });
 });
 
 api.get('/accounts', (req, res) => {
