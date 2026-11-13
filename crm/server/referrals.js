@@ -48,6 +48,7 @@ function landingChoices() {
   db.prepare('SELECT title, slug FROM crm_sites WHERE published=1 ORDER BY id DESC').all().forEach((s) => out.push({ path: `/s/${s.slug}`, name: `Page: ${s.title}` }));
   try { db.prepare('SELECT name, token FROM crm_products WHERE active=1 ORDER BY name').all().forEach((p) => out.push({ path: `/pay/${p.token}`, name: `Buy now: ${p.name}` })); } catch {}
   try { db.prepare('SELECT title, slug FROM crm_courses WHERE active=1 ORDER BY id DESC').all().forEach((c) => out.push({ path: `/learn/${c.slug}`, name: `Course: ${c.title}` })); } catch {}
+  try { db.prepare("SELECT title, slug FROM crm_events WHERE active=1 AND COALESCE(ends_at, starts_at) >= ? ORDER BY starts_at").all(new Date().toISOString().slice(0, 10)).forEach((e) => out.push({ path: `/e/${e.slug}`, name: `Event: ${e.title}` })); } catch {}
   return out;
 }
 function saveSettings(body = {}) {

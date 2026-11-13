@@ -29,6 +29,7 @@ const TRIGGERS = {
   plan_started: 'Someone starts a monthly plan',
   contract_signed: 'Someone signs a contract',
   quote_signed: 'Someone signs a quote',
+  event_registered: 'Someone gets tickets to an event',
 };
 const STEPS = ['alert', 'email', 'text', 'task', 'stage', 'group', 'follow_up', 'note', 'wait'];
 
@@ -287,7 +288,7 @@ function handle(event, data) {
     for (const a of list()) {
       if (!a.active || !matches(a, event, data)) continue;
       // They reached out themselves (form, website, booking): a reply email is welcome.
-      const reached_out = ['form_filled', 'appointment_booked', 'plan_started', 'contract_signed', 'quote_signed'].includes(event) || (event === 'contact_added' && ['form', 'booking'].includes(data.source));
+      const reached_out = ['form_filled', 'appointment_booked', 'plan_started', 'contract_signed', 'quote_signed', 'event_registered'].includes(event) || (event === 'contact_added' && ['form', 'booking'].includes(data.source));
       try { start(a, data.contact.id, { form: data.form, when: data.when, reached_out }); }
       catch (e) { console.error(`[automation] "${a.name}" failed: ${e.message}`); try { log(a, data.contact.id, `Problem: ${e.message}`); } catch {} }
     }

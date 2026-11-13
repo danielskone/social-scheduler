@@ -718,3 +718,17 @@ textarea.k-body { font: 15px/1.6 ui-sans-serif, -apple-system, sans-serif; min-h
   .blog-row > img, .blog-noimg { width: 84px; height: 56px; }
 }
 .k-tpl input { width: auto; flex: none; margin: 0; }
+
+/* ===== Events and tickets ===== */
+.ev-card{overflow:hidden}
+.ev-cover{width:calc(100% + 2*var(--pad,16px));margin:calc(-1*var(--pad,16px)) calc(-1*var(--pad,16px)) 10px;aspect-ratio:16/7;object-fit:cover;display:block}
+.ev-nums{display:flex;flex-wrap:wrap;gap:6px 14px;color:var(--muted);font-size:.9rem;margin:6px 0}
+.ev-nums b{color:var(--text)}
+.ev-h{margin:22px 0 10px;font-size:1.05rem}
+.ev-thumb{width:120px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;display:block}
+.ev-types input{min-width:70px}
+.ev-types td:first-child input{min-width:140px}
+.ev-door p{margin:0;color:var(--muted)}
+.ev-in{color:#16a34a;font-weight:700}
+tr.off td{opacity:.55}
+#ev-form .field > input:not([type=checkbox]){width:100%}
