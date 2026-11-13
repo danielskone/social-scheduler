@@ -613,3 +613,41 @@ body[data-app="crm"] .sidebar .biz-btn small, body[data-app="crm"] .sidebar .biz
 .site-color { gap: 10px; align-items: center; flex-wrap: nowrap; }
 .site-color .check { margin: 0; font-size: .86rem; }
 .site-color input[type=color] { flex: none; width: 44px; height: 36px; padding: 2px; }
+
+/* ===== Website chat, products, customer portal, courses ===== */
+.ib-chip { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: .72rem; font-weight: 700; background: color-mix(in srgb, #16a34a 16%, var(--panel)); color: #15803d; vertical-align: 1px; }
+.ib-bubble.chat { border-radius: 18px; border-top-left-radius: 6px; }
+.ib-msg.out .ib-bubble.chat { border-radius: 18px; border-top-right-radius: 6px; }
+.ib-online { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #16a34a; margin-right: 6px; box-shadow: 0 0 0 3px color-mix(in srgb, #16a34a 25%, transparent); }
+.ib-chatset svg { width: 18px; height: 18px; }
+.chat-set h1 svg, .portal-box h1 svg { width: 24px; height: 24px; vertical-align: -4px; }
+.chat-set h2 { margin-top: 22px; }
+.check.big { font-size: 1.05rem; padding: 12px 14px; border-radius: 12px; background: var(--panel-2); display: flex; gap: 10px; align-items: center; }
+.prod-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+.prod-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.prod-card.off { opacity: .7; }
+.prod-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.prod-top > div:first-child { min-width: 0; }
+.prod-price { font-size: 1.25rem; font-weight: 800; white-space: nowrap; }
+.course-card .prod-price { color: var(--accent); }
+.prod-pick { margin-left: 8px; max-width: 260px; }
+.course-ed { display: flex; flex-direction: column; gap: 14px; }
+.card-box { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 18px; }
+.card-box h2 { margin: 0 0 8px; font-size: 1.1rem; }
+.lesson-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.lesson-list li { display: flex; align-items: center; gap: 8px; padding: 10px 4px; border-bottom: 1px solid var(--line); }
+.lesson-list li:last-child { border-bottom: 0; }
+.lesson-n { width: 28px; height: 28px; flex: none; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: .85rem; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); color: var(--accent); }
+.lesson-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.lesson-t b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn.icon { padding: 6px; line-height: 0; }
+.btn.icon svg { width: 18px; height: 18px; }
+.mini-prog { width: 110px; height: 7px; border-radius: 9px; background: var(--panel-2); overflow: hidden; }
+.mini-prog i { display: block; height: 100%; background: #16a34a; }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+#lesson-prog { width: 100%; margin-top: 8px; }
+@media (max-width: 640px) {
+  .lesson-list li { flex-wrap: wrap; }
+  .lesson-t { flex-basis: calc(100% - 40px); }
+  .prod-pick { margin: 8px 0 0; max-width: none; width: 100%; }
+}

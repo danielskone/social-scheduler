@@ -141,7 +141,7 @@ function conversations({ biz, q, unread } = {}) {
   return db.prepare(`
     WITH x AS (SELECT contact_id, SUM(direction='in' AND is_read=0) AS unread,
       (SELECT id FROM crm_messages l WHERE l.contact_id=g.contact_id ORDER BY l.sent_at DESC, l.id DESC LIMIT 1) AS last_id FROM crm_messages g GROUP BY contact_id)
-    SELECT c.id, c.name, c.company, c.email, c.group_name, x.unread, m.subject, m.body, m.direction, m.sent_at
+    SELECT c.id, c.name, c.company, c.email, c.group_name, x.unread, m.subject, m.body, m.direction, m.sent_at, m.channel
     FROM x JOIN contacts c ON c.id=x.contact_id JOIN crm_messages m ON m.id=x.last_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY m.sent_at DESC, m.id DESC LIMIT 200`).all(...args)
@@ -157,7 +157,7 @@ function thread(contactId, { markRead = true } = {}) {
   const c = db.prepare('SELECT id, name, company, email, phone, group_name, do_not_contact FROM contacts WHERE id=?').get(Number(contactId));
   if (!c) throw err('Person not found', 404);
   if (markRead) db.prepare("UPDATE crm_messages SET is_read=1 WHERE contact_id=? AND direction='in' AND is_read=0").run(c.id);
-  const msgs = db.prepare('SELECT id, direction, subject, body, full_text, sent_at, message_id FROM crm_messages WHERE contact_id=?').all(c.id)
+  const msgs = db.prepare('SELECT id, direction, subject, body, full_text, sent_at, message_id, channel FROM crm_messages WHERE contact_id=?').all(c.id)
     .map((m) => ({ ...m, kind: 'message', more: m.full_text && m.full_text.trim() !== String(m.body).trim() }));
   const auto = db.prepare(`SELECT e.id, e.subject, e.sent_at, e.status, a.name AS automation, k.name AS campaign FROM crm_emails_sent e
     LEFT JOIN crm_automations a ON a.id=e.automation_id LEFT JOIN crm_campaigns k ON k.id=e.campaign_id
@@ -166,7 +166,10 @@ function thread(contactId, { markRead = true } = {}) {
       sent_at: new Date(`${e.sent_at.replace(' ', 'T')}Z`).toISOString() }));
   const all = [...msgs, ...auto].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at)));
   for (const m of all) delete m.full_text;
-  return { contact: c, messages: all, status: status() };
+  // Website chats live here too: answer by chat while they are on the page.
+  const lastIn = [...msgs].reverse().find((m) => m.direction === 'in');
+  const chat = msgs.some((m) => m.channel === 'chat') ? { online: require('./chat').isOnline(c.id), last: Boolean(lastIn && lastIn.channel === 'chat') } : null;
+  return { contact: c, messages: all, status: status(), chat };
 }
 function fullText(messageId) {
   const m = db.prepare('SELECT full_text FROM crm_messages WHERE id=?').get(Number(messageId));

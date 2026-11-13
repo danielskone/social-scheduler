@@ -106,6 +106,7 @@
     };
     sum();
     f.oninput = sum;
+    if (window.VTExtra2) window.VTExtra2.productButton(d, '#q-lines', row, sum);
     f.onclick = (e) => {
       if (e.target.closest('[data-close]')) d.close();
       if (e.target.closest('[data-add]')) { q$('#q-lines', d).insertAdjacentHTML('beforeend', row({ what: '', qty: 1, price: '' })); q$('#q-lines .inv-line:last-child input', d).focus(); }
@@ -398,6 +399,7 @@
             <label class="field"><span>Background</span><select id="site-look"><option value="light"${s.look === 'light' ? ' selected' : ''}>Light</option><option value="dark"${s.look === 'dark' ? ' selected' : ''}>Dark</option></select></label></div>
           <div class="biz-two">${businesses.length > 1 ? `<label class="field"><span>Business <small class="muted">(name, color, phone)</small></span><select id="site-biz">${businesses.map((b) => `<option value="${b.id}"${b.id === s.business_id ? ' selected' : ''}>${h(b.name)}</option>`).join('')}</select></label>` : ''}
             <div class="field"><span>Color</span><div class="row site-color"><input type="color" id="site-color" aria-label="Color" value="${h(s.color || (businesses.find((b) => b.id === s.business_id) || {}).color || '#4f46e5')}"><label class="check"><input type="checkbox" id="site-own-color" ${s.color ? 'checked' : ''}> Use this color instead of the business color</label></div></div></div>
+          <label class="check"><input type="checkbox" id="site-chat" ${s.chat ? 'checked' : ''}> Chat bubble on this page <small class="muted">(chats land in Conversations)</small></label>
         </div></details>
         <div id="site-blocks">${sections.map(blockHtml).join('')}</div>
         <div class="row site-add"><select id="site-new-type" aria-label="Block to add">${Object.entries(siteData.blocks).map(([k, v]) => `<option value="${k}">${h(v)}</option>`).join('')}</select><button class="btn" data-add-blk>+ Add block</button></div>
@@ -408,7 +410,7 @@
     const prev = q$('#site-prev', root);
     const state = () => ({ title: q$('#site-title', root).value, description: q$('#site-desc', root).value, slug: q$('#site-slug', root).value, font: q$('#site-font', root).value, look: q$('#site-look', root).value,
       color: q$('#site-own-color', root).checked ? q$('#site-color', root).value : '', ...(q$('#site-biz', root) ? { business_id: Number(q$('#site-biz', root).value) } : {}),
-      sections: sections.map(({ _open, ...b }) => b), published: q$('#site-pub', root).checked });
+      sections: sections.map(({ _open, ...b }) => b), published: q$('#site-pub', root).checked, chat: q$('#site-chat', root).checked });
     const preview = () => {
       clearTimeout(previewTimer);
       previewTimer = setTimeout(async () => {

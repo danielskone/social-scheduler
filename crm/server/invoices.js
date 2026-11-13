@@ -174,6 +174,7 @@ function markPaid(id, how = 'Cash or check', { quiet } = {}) {
   if (inv.status === 'paid') return inv;
   if (inv.status === 'void') throw err('This invoice was cancelled.');
   db.prepare("UPDATE crm_invoices SET status='paid', paid_at=?, paid_how=? WHERE id=?").run(new Date().toISOString(), String(how).slice(0, 60), inv.id);
+  try { require('./courses').onPaid(inv.id); } catch (e) { console.error(`[invoices] ${e.message}`); }
   if (inv.contact) {
     crm().logActivity(inv.contact.id, { kind: 'Payment', note: `Paid invoice #${inv.number}: ${money(inv.total)} (${how})` });
     if (!quiet) notify.send('Invoice paid', `${inv.contact.name} paid ${money(inv.total)} (invoice #${inv.number}, ${how}).`, { tags: 'moneybag' }).catch(() => {});
@@ -269,6 +270,7 @@ ${inv.items.map((i) => `<tr><td>${esc(i.what)}</td><td class="n">${i.qty}</td><t
 </tbody></table><div class="sum">${inv.tax ? `<div><span>Subtotal</span><span>${money(inv.subtotal)}</span></div><div><span>Tax (${inv.tax_rate}%)</span><span>${money(inv.tax)}</span></div>` : ''}
 <div class="total"><span>Total</span><span>${money(inv.total)}</span></div></div>
 ${inv.note ? `<div class="note">${nl(inv.note)}</div>` : ''}
+${(() => { try { return require('./courses').invoiceExtra(inv); } catch { return ''; } })()}
 ${['sent', 'overdue'].includes(inv.label) && st ? `<form method="post" action="${esc(inv.token)}/pay"><button class="pay">Pay ${money(inv.total)} with card</button></form>` : ''}
 ${['sent', 'overdue'].includes(inv.label) && note ? `<div class="note"><b>Other ways to pay</b><br>${nl(note)}</div>` : ''}
 </div><footer class="muted small">Questions? Reply to the email this came in${b.phone ? ` or call ${esc(b.phone)}` : ''}.</footer></div></body></html>`;

@@ -49,7 +49,8 @@ app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next
 const viaTunnel = (req) => Boolean(req.headers['cf-connecting-ip']);
 app.use((req, res, next) => {
   if (viaTunnel(req) && !req.path.startsWith('/media/') && !req.path.startsWith('/f/') && !req.path.startsWith('/book/')
-    && !req.path.startsWith('/invoice/') && !req.path.startsWith('/r/') && !req.path.startsWith('/quote/') && !req.path.startsWith('/s/')) return res.status(404).send('Not found');
+    && !req.path.startsWith('/invoice/') && !req.path.startsWith('/r/') && !req.path.startsWith('/quote/') && !req.path.startsWith('/s/')
+    && !['/chat/', '/pay/', '/portal', '/learn/'].some((x) => req.path.startsWith(x))) return res.status(404).send('Not found');
   next();
 });
 
@@ -72,6 +73,10 @@ const quotes = require('../crm/server/quotes');
 const sites = require('../crm/server/sites');
 app.use('/quote', quotes.publicRouter());
 app.use('/s', sites.publicRouter());
+app.use('/chat', require('../crm/server/chat').publicRouter());
+app.use('/pay', require('../crm/server/products').publicRouter());
+app.use('/portal', require('../crm/server/portal').publicRouter());
+app.use('/learn', require('../crm/server/courses').publicRouter());
 
 // ---------- Password protection ----------
 // On this Mac (localhost) the password is optional. From a phone or any other device a
@@ -568,6 +573,10 @@ app.use('/api/crm/reviews', reviews.router);
 app.use('/api/crm/quotes', quotes.router);
 app.use('/api/crm/sites', sites.router);
 app.use('/api/crm/reports', require('../crm/server/reports').router);
+app.use('/api/crm/chat', require('../crm/server/chat').router);
+app.use('/api/crm/products', require('../crm/server/products').router);
+app.use('/api/crm/portal', require('../crm/server/portal').router);
+app.use('/api/crm/courses', require('../crm/server/courses').router);
 app.use('/api/crm', crmDashboard.router);
 app.use('/api/crm/forms', forms.router);
 app.use('/api/crm/booking', booking.router);

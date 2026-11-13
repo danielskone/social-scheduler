@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS crm_sites (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_sites') WHERE name='chat'").get()) db.exec('ALTER TABLE crm_sites ADD COLUMN chat INTEGER NOT NULL DEFAULT 0');
 const MEDIA = path.join(config.dataDir, 'site-media');
 const businesses = () => require('./businesses');
 const err = (m, status = 400) => Object.assign(new Error(m), { status });
@@ -129,9 +130,10 @@ function save(id, body = {}) {
     font: ['modern', 'classic', 'friendly'].includes(body.font) ? body.font : old.font,
     look: ['light', 'dark'].includes(body.look) ? body.look : old.look,
     published: 'published' in body ? (body.published ? 1 : 0) : old.published,
+    chat: 'chat' in body ? (body.chat ? 1 : 0) : old.chat,
     business_id: 'business_id' in body && businesses().get(body.business_id) ? Number(body.business_id) : old.business_id };
   db.prepare(`UPDATE crm_sites SET title=@title, slug=@slug, sections=@sections, color=@color, description=@description, font=@font, look=@look,
-    published=@published, business_id=@business_id, updated_at=datetime('now') WHERE id=@id`).run(row);
+    published=@published, chat=@chat, business_id=@business_id, updated_at=datetime('now') WHERE id=@id`).run(row);
   return withLink(get(old.id));
 }
 function list(biz) {
@@ -227,6 +229,7 @@ footer{padding:28px 0;text-align:center;color:var(--muted);font-size:.85rem;bord
 </style></head><body>
 ${blocks}
 <footer><div class="in">© ${new Date().getFullYear()} ${esc(b.name || site.title)}</div></footer>
+${site.chat && !preview ? (() => { let c = null; try { c = require('./chat').settingsFor(b.id); } catch { /* no business */ } return c && c.enabled ? `<script src="../chat/widget.js?k=${esc(c.key)}" async></script>` : ''; })() : ''}
 </body></html>`;
 }
 
@@ -257,7 +260,7 @@ router.post('/:id/preview', (req, res) => {
   const b = req.body || {};
   let sections = s.sections;
   try { if (b.sections) sections = cleanSections(b.sections); } catch { /* show the saved version */ }
-  const draft = { ...s, ...Object.fromEntries(['title', 'description', 'font', 'look', 'color', 'business_id'].filter((k) => k in b).map((k) => [k, b[k]])), sections, published: 0 };
+  const draft = { ...s, ...Object.fromEntries(['title', 'description', 'font', 'look', 'color', 'business_id', 'chat'].filter((k) => k in b).map((k) => [k, b[k]])), sections, published: 0 };
   if (!/^#[0-9a-f]{6}$/i.test(draft.color || '')) draft.color = null;
   res.type('html').send(render(draft, { preview: true, base: String(b.base || '/') }));
 });
