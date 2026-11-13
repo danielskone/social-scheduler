@@ -178,6 +178,7 @@ test('team logins: a helper signs in with email, only reaches the CRM, and can b
   assert.deepStrictEqual(names, ['Amy Wu']);
   // Helpers can't change the team or payment settings, or delete people.
   assert.strictEqual((await j('/api/crm/team', { headers: as })).status, 403);
+  assert.strictEqual((await j('/api/crm/lists/bulk/delete', { method: 'POST', headers: as, json: { ids: [1], confirm: 'DELETE' } })).status, 403);
   assert.strictEqual((await j('/api/crm/invoices/settings', { method: 'PUT', headers: as, json: { payNote: 'x' } })).status, 403);
   const amy = (await j('/api/crm/contacts', { headers: as })).body[0];
   assert.strictEqual((await j(`/api/crm/contacts/${amy.id}`, { method: 'DELETE', headers: as })).status, 403);

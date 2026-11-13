@@ -585,6 +585,7 @@ app.use('/api/crm/products', require('../crm/server/products').router);
 app.use('/api/crm/portal', require('../crm/server/portal').router);
 app.use('/api/crm/courses', require('../crm/server/courses').router);
 app.use('/api/crm/events', require('../crm/server/events').router);
+app.use('/api/crm/lists', require('../crm/server/lists').router);
 app.use('/api/crm/funnels', require('../crm/server/funnels').router);
 app.use('/api/crm/coupons', require('../crm/server/coupons').router);
 app.use('/api/crm/referrals', require('../crm/server/referrals').router);

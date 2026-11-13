@@ -250,10 +250,13 @@
       <div class="crm-panel" data-panel="settings" hidden><div id="set-root"></div></div>
 
       <div class="crm-panel" data-panel="list" hidden>
+        <div class="sl-row" id="crm-lists" aria-label="Smart lists"></div>
         <div class="row crm-filters">
           <input type="search" id="crm-q" placeholder="Search name, company, email, phone, notes">
           <select id="crm-group"><option value="">All groups</option></select>
           <select id="crm-stage"><option value="">All stages</option></select>
+          <select id="crm-tag" aria-label="Tag" hidden><option value="">All tags</option></select>
+          <select id="crm-show" aria-label="Show"><option value="">Show: everyone</option><option value="email_ok">Said yes to email</option><option value="no_email">No email address</option><option value="has_phone">Has a phone number</option><option value="new30">Added in the last 30 days</option><option value="quiet60">Quiet for 60+ days</option><option value="no_follow_up">No follow-up date</option><option value="dnc">Do not contact</option></select>
           <label class="check"><input type="checkbox" id="crm-due"> Follow-ups due</label>
           <label class="btn ghost" title="Add contacts from a spreadsheet saved as CSV">Import CSV
             <input type="file" id="crm-import" accept=".csv,text/csv" hidden>
@@ -263,9 +266,10 @@
         </div>
         <div id="crm-start"></div>
         <div class="table-wrap"><table class="table crm-table" id="crm-table">
-          <thead><tr><th>Name</th><th>Group</th><th>Stage</th><th>Amount</th><th>Contact</th><th>Next follow-up</th></tr></thead>
+          <thead><tr><th class="sel"><input type="checkbox" id="crm-all" aria-label="Pick everyone shown"></th><th>Name</th><th>Group</th><th>Stage</th><th>Amount</th><th>Contact</th><th>Next follow-up</th></tr></thead>
           <tbody></tbody>
         </table></div>
+        <div class="bulk-bar" id="crm-bulk" hidden></div>
       </div>
 
       <div class="crm-panel" data-panel="pipeline" hidden>
@@ -367,6 +371,7 @@
   <script src="/crm-extra3.js"></script>
   <script src="/crm-extra4.js"></script>
   <script src="/crm-extra5.js"></script>
+  <script src="/crm-lists.js"></script>
   <script src="/crm.js"></script>
   <script src="/app.js"></script>
   <script src="/clips.js"></script>
