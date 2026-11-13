@@ -47,9 +47,10 @@ const BLOCKS = {
   form: { name: 'Sign-up form', fields: ['heading', 'text', 'form'] },
   faq: { name: 'Questions and answers', fields: ['heading'], list: ['q', 'a'] },
   cta: { name: 'Call to action', fields: ['heading', 'text', 'button_text', 'button_link'] },
+  buy: { name: 'Buy button (a product)', fields: ['heading', 'text', 'product', 'button_text'] },
   contact: { name: 'Contact details', fields: ['heading', 'text', 'show_map'] },
 };
-const LIMITS = { heading: 120, text: 2000, button_text: 40, button_link: 500, image: 500, title: 120, price: 40, caption: 160, quote: 600, name: 80, q: 200, a: 1500, booking: 20, form: 40, show_map: 5 };
+const LIMITS = { heading: 120, text: 2000, button_text: 40, button_link: 500, image: 500, title: 120, price: 40, caption: 160, quote: 600, name: 80, q: 200, a: 1500, booking: 20, form: 40, show_map: 5, product: 20 };
 
 function cleanSections(list) {
   if (!Array.isArray(list)) throw err('Something went wrong with the blocks. Reload and try again.');
@@ -158,7 +159,8 @@ function upload(buf, type) {
 function choices() {
   const pages = db.prepare('SELECT id, title, slug, active FROM crm_booking_pages ORDER BY id').all();
   const forms = db.prepare('SELECT slug, title, active FROM crm_forms ORDER BY id DESC').all();
-  return { pages, forms, blocks: Object.fromEntries(Object.entries(BLOCKS).map(([k, v]) => [k, v.name])),
+  const products = db.prepare("SELECT id, name, price, active FROM crm_products ORDER BY name").all();
+  return { pages, forms, products, blocks: Object.fromEntries(Object.entries(BLOCKS).map(([k, v]) => [k, v.name])),
     templates: Object.fromEntries(Object.entries(TEMPLATES).map(([k, v]) => [k, { name: v.name, about: v.about }])) };
 }
 
@@ -178,9 +180,11 @@ function render(site, { preview = false, base = '' } = {}) {
   const img = (u) => (/^media\//.test(u) ? `${preview ? `${base}s/` : ''}${u}` : u);
   const pages = db.prepare('SELECT id, slug, active FROM crm_booking_pages').all();
   const bookUrl = (id) => { const p = pages.find((x) => String(x.id) === String(id)) || pages.find((x) => x.active); return p ? `${up}book/${p.slug}` : null; };
-  const href = (u) => esc(u === '#book' && !site.sections.some((s) => s.type === 'booking') ? (bookUrl() || '#') : u);
+  const nextSlug = (() => { try { return require('./funnels').nextSlug(site.id); } catch { return null; } })();
+  const nextUrl = nextSlug ? (preview ? '#' : `${up}s/${nextSlug}`) : null;
+  const href = (u) => (u === '#next' ? esc(nextUrl || '#') : null) || esc(u === '#book' && !site.sections.some((s) => s.type === 'booking') ? (bookUrl() || '#') : u);
   const head = (s) => (s.heading ? `<h2>${esc(s.heading)}</h2>` : '');
-  const sec = (s, inner, cls = '') => `<section class="blk ${s.type} ${cls}" id="${{ booking: 'book', form: 'signup', contact: 'contact' }[s.type] || `b-${s.id}`}"><div class="in">${inner}</div></section>`;
+  const sec = (s, inner, cls = '') => `<section class="blk ${s.type} ${cls}" id="${{ booking: 'book', form: 'signup', contact: 'contact', buy: 'buy' }[s.type] || `b-${s.id}`}"><div class="in">${inner}</div></section>`;
   const blocks = site.sections.map((s) => {
     switch (s.type) {
       case 'hero': return `<header class="hero${s.image ? ' has-img' : ''}"${s.image ? ` style="--img:url('${esc(img(s.image))}')"` : ''}><div class="in"><h1>${esc(s.heading)}</h1>${s.text ? `<p class="lead">${nl(s.text)}</p>` : ''}
@@ -192,6 +196,10 @@ function render(site, { preview = false, base = '' } = {}) {
       case 'booking': { const u = bookUrl(s.booking); return sec(s, `${head(s)}${s.text ? `<p class="sub">${nl(s.text)}</p>` : ''}${u ? `<a class="btn" href="${esc(u)}">See open times</a>` : '<p class="sub">Make a booking page in Appointments first, then pick it here.</p>'}`, 'center alt'); }
       case 'form': { const fm = s.form && db.prepare('SELECT slug FROM crm_forms WHERE slug=? AND active=1').get(s.form);
         return sec(s, `${head(s)}${s.text ? `<p class="sub">${nl(s.text)}</p>` : ''}${fm ? `<iframe class="form" src="${esc(`${up}f/${fm.slug}`)}" title="${esc(s.heading || 'Sign-up form')}" loading="lazy"></iframe>` : '<p class="sub">Pick a form in the editor.</p>'}`, 'center'); }
+      case 'buy': { const pr = s.product && db.prepare('SELECT * FROM crm_products WHERE id=? AND active=1').get(Number(s.product));
+        const money = (n) => Number(n || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+        return sec(s, `${head(s)}${s.text ? `<p class="sub">${nl(s.text)}</p>` : ''}${pr ? `<div class="price big">${money(pr.price)}</div><a class="btn" href="${esc(`${up}pay/${pr.token}`)}">${esc(s.button_text || `Buy now`)}</a>`
+          : '<p class="sub">Pick a product in the editor.</p>'}`, 'center'); }
       case 'faq': return sec(s, `${head(s)}<div class="faq">${s.items.map((i) => `<details><summary>${esc(i.q)}</summary><p>${nl(i.a)}</p></details>`).join('')}</div>`);
       case 'cta': return sec(s, `${head(s)}${s.text ? `<p class="sub">${nl(s.text)}</p>` : ''}${s.button_text ? `<a class="btn light" href="${href(s.button_link || '#contact')}">${esc(s.button_text)}</a>` : ''}`, 'center band');
       case 'contact': return sec(s, `${head(s)}${s.text ? `<p class="sub">${nl(s.text)}</p>` : ''}<div class="contact">
@@ -217,12 +225,12 @@ h1,h2,h3{font-family:${f.head};line-height:1.15;margin:0 0 12px}h1{font-size:cla
 .btn{display:inline-block;padding:15px 30px;border-radius:999px;background:var(--c);color:#fff;font-weight:700;text-decoration:none;box-shadow:0 6px 20px color-mix(in srgb,var(--c) 35%,transparent)}
 .hero .btn,.band .btn{background:#fff;color:var(--c);box-shadow:0 6px 20px rgb(0 0 0/.2)}.btn:hover{filter:brightness(1.06)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:22px}.tile{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;margin:0;text-align:left}
-.tile p{color:var(--muted);margin:0 0 10px}.price{font-weight:800;color:var(--c);font-size:1.1rem}.stars{color:#f59e0b;letter-spacing:2px;margin-bottom:6px}cite{font-style:normal;font-weight:700}
+.tile p{color:var(--muted);margin:0 0 10px}.price{font-weight:800;color:var(--c);font-size:1.1rem}.price.big{font-size:2.2rem;margin:6px 0 18px}.stars{color:#f59e0b;letter-spacing:2px;margin-bottom:6px}cite{font-style:normal;font-weight:700}
 .split{display:grid;grid-template-columns:1.2fr 1fr;gap:36px;align-items:center}.split.one{grid-template-columns:1fr;max-width:760px}.split img{width:100%;border-radius:18px;object-fit:cover;max-height:420px}
 .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:20px}figure{margin:0}.photos img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:14px;display:block}figcaption{color:var(--muted);font-size:.9rem;margin-top:6px}
-.faq{max-width:760px;margin-top:16px}details{border-bottom:1px solid var(--line);padding:14px 0}summary{cursor:pointer;font-weight:700;font-size:1.05rem}details p{color:var(--muted);margin:10px 0 0}
+div.faq{max-width:760px;margin-top:16px}details{border-bottom:1px solid var(--line);padding:14px 0}summary{cursor:pointer;font-weight:700;font-size:1.05rem}details p{color:var(--muted);margin:10px 0 0}
 .band{background:var(--c);color:#fff}.band .sub{color:#fff;opacity:.9}
-.contact{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}.contact a{padding:12px 18px;border:1px solid var(--line);border-radius:999px;color:var(--text);text-decoration:none;background:var(--card)}
+div.contact{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}div.contact a{padding:12px 18px;border:1px solid var(--line);border-radius:999px;color:var(--text);text-decoration:none;background:var(--card)}
 iframe.form{width:100%;max-width:620px;height:760px;border:0;border-radius:18px;background:var(--card);display:block;margin:0 auto}iframe.map{width:100%;max-width:760px;height:300px;border:0;border-radius:18px;margin-top:22px}
 footer{padding:28px 0;text-align:center;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line)}
 @media (max-width:720px){.blk{padding:48px 0}.hero{padding:72px 0 64px}.split{grid-template-columns:1fr}}
@@ -230,6 +238,7 @@ footer{padding:28px 0;text-align:center;color:var(--muted);font-size:.85rem;bord
 ${blocks}
 <footer><div class="in">© ${new Date().getFullYear()} ${esc(b.name || site.title)}</div></footer>
 ${site.chat && !preview ? (() => { let c = null; try { c = require('./chat').settingsFor(b.id); } catch { /* no business */ } return c && c.enabled ? `<script src="../chat/widget.js?k=${esc(c.key)}" async></script>` : ''; })() : ''}
+${nextUrl && !preview ? `<script>addEventListener('message',function(e){if(e.data==='vtf-done')setTimeout(function(){location.href=${JSON.stringify(nextUrl)}},1500)})</script>` : ''}
 </body></html>`;
 }
 

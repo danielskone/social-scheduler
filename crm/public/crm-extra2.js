@@ -189,12 +189,14 @@
           <button class="btn ghost icon" data-up ${i ? '' : 'disabled'} aria-label="Move up">${svg('up')}</button><button class="btn ghost icon" data-down ${i < c.lessons.length - 1 ? '' : 'disabled'} aria-label="Move down">${svg('down')}</button>
           <button class="btn" data-edit-lesson>Edit</button><button class="btn ghost icon danger" data-del-lesson aria-label="Delete lesson">${svg('trash')}</button></li>`).join('')}</ol>`
           : '<p class="muted">No lessons yet. Press <b>+ Add a lesson</b>.</p>'}</div>
+      <div class="card-box" id="course-talk"></div>
       <div class="card-box"><div class="row" style="justify-content:space-between"><h2>Members (${c.members.length})</h2></div>
         <form id="member-form" class="row"><input name="who" list="course-people" placeholder="Give someone this course: type a name" autocomplete="off" style="flex:1;min-width:200px"><datalist id="course-people"></datalist><button class="btn">Give access</button></form>
         ${c.members.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Name</th><th>How</th><th>Progress</th><th></th></tr></thead><tbody>${c.members.map((m) => `<tr data-member="${m.id}"><td><b>${h(m.name)}</b><br><span class="muted small">${h(m.email || '')}</span></td><td>${h(m.via || '')}</td>
           <td><div class="mini-prog"><i style="width:${done(m)}%"></i></div><span class="muted small">${m.done} of ${c.lessons.length}</span></td><td class="pay-act"><button class="btn ghost" data-portal>Their link</button><button class="btn ghost danger" data-remove>Remove</button></td></tr>`).join('')}</tbody></table></div>`
           : '<p class="muted">Nobody yet. Share the sales page, or give someone access above.</p>'}</div></div>`;
     const reload = () => courseEditor(root, id);
+    if (window.VTExtra3) window.VTExtra3.communityBox(q$('#course-talk', root), id, ((window.VTHome && window.VTHome.list && window.VTHome.list()) || []).find((b) => b.id === c.business_id)?.name).catch(() => {});
     const f = q$('#course-form', root);
     f.onsubmit = async (e) => {
       e.preventDefault();

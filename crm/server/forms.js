@@ -418,7 +418,7 @@ html{min-height:100%;background:${(THEMES[style.theme] || THEMES.clean).bg}}body
 
 function renderPage(form, opts = {}) { return shell(form.title, form.style, formInner(form, opts)); }
 function thanksPage(form) {
-  return shell(form.title, form.style, `<div class="vpf-card vpf-thanks"><div class="ok">✓</div><h1>Thank you!</h1><p class="vpf-intro">${nl(form.thank_you || "We got your answers and we'll be in touch soon.")}</p></div>`);
+  return shell(form.title, form.style, `<div class="vpf-card vpf-thanks"><div class="ok">✓</div><h1>Thank you!</h1><p class="vpf-intro">${nl(form.thank_you || "We got your answers and we'll be in touch soon.")}</p></div><script>if(parent!==window)parent.postMessage('vtf-done','*')</script>`);
 }
 function notFound() { return shell('Not found', cleanStyle({}), '<div class="vpf-card"><h1>This form is not available.</h1></div>'); }
 
@@ -594,7 +594,9 @@ publicForms.post('/:slug', (req, res, next) => {
     const used = new Set(files.filter((x) => x.upload).map((x) => x.upload.path));
     uploads.filter((u) => !used.has(u.path)).forEach((u) => fs.rm(u.path, { force: true }, () => {}));
     if (!answers.length) return res.status(400).send(renderPage(f, { error: 'Please answer at least one question.', values: req.body }));
-    record(f, answers, saveFiles(f, files));
+    const rec = record(f, answers, saveFiles(f, files));
+    const ref = require('./referrals').fromReq(req);
+    if (ref && rec.contact) { try { require('./referrals').attach(rec.contact, ref); } catch (e) { console.error(`[forms] ${e.message}`); } }
     res.send(thanksPage(f));
   } catch (e) {
     cleanup();

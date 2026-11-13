@@ -309,12 +309,12 @@
   // ======================= Sites (simple website pages) =======================
   const FIELD = {
     heading: ['Heading', 'text'], text: ['Text', 'area'], button_text: ['Button words', 'text', 'Book a time'], button_link: ['Button goes to', 'link'], image: ['Picture', 'image'],
-    booking: ['Booking page', 'booking'], form: ['Form', 'form'], show_map: ['Show a map of the address', 'check'],
+    booking: ['Booking page', 'booking'], form: ['Form', 'form'], show_map: ['Show a map of the address', 'check'], product: ['Product to sell', 'product'],
     title: ['Name', 'text'], price: ['Price', 'text', '$49 or Free'], caption: ['Caption', 'text'], quote: ['What they said', 'area'], name: ['Who said it', 'text'], q: ['Question', 'text'], a: ['Answer', 'area'],
   };
   const LISTS = { services: ['title', 'text', 'price'], gallery: ['image', 'caption'], reviews: ['quote', 'name'], faq: ['q', 'a'] };
   const FIELDS = { hero: ['heading', 'text', 'button_text', 'button_link', 'image'], text: ['heading', 'text', 'image'], services: ['heading', 'text'], gallery: ['heading'], reviews: ['heading'],
-    booking: ['heading', 'text', 'booking'], form: ['heading', 'text', 'form'], faq: ['heading'], cta: ['heading', 'text', 'button_text', 'button_link'], contact: ['heading', 'text', 'show_map'] };
+    booking: ['heading', 'text', 'booking'], form: ['heading', 'text', 'form'], faq: ['heading'], cta: ['heading', 'text', 'button_text', 'button_link'], contact: ['heading', 'text', 'show_map'], buy: ['heading', 'text', 'product', 'button_text'] };
   const ITEM_NAME = { services: 'service', gallery: 'photo', reviews: 'review', faq: 'question' };
   let siteData = null, editing = null, previewTimer = null, dirty = false;
 
@@ -375,6 +375,7 @@
       if (kind === 'check') return `<label class="check"><input type="checkbox" ${at} ${v ? 'checked' : ''}> ${label}</label>`;
       if (kind === 'booking') return `<label class="field"><span>${label}</span><select ${at}><option value="">The first booking page</option>${siteData.pages.map((p) => `<option value="${p.id}"${String(p.id) === String(v) ? ' selected' : ''}>${h(p.title)}${p.active ? '' : ' (off)'}</option>`).join('')}</select></label>`;
       if (kind === 'form') return `<label class="field"><span>${label}</span><select ${at}><option value="">Pick a form</option>${siteData.forms.map((f) => `<option value="${h(f.slug)}"${f.slug === v ? ' selected' : ''}>${h(f.title)}${f.active ? '' : ' (off)'}</option>`).join('')}</select></label>`;
+      if (kind === 'product') return `<label class="field"><span>${label}</span><select ${at}><option value="">Pick a product</option>${(siteData.products || []).map((p) => `<option value="${p.id}"${String(p.id) === String(v) ? ' selected' : ''}>${h(p.name)} · ${money(p.price)}${p.active ? '' : ' (hidden)'}</option>`).join('')}</select>${(siteData.products || []).length ? '' : '<small class="muted">Add products in Payments, Products first.</small>'}</label>`;
       if (kind === 'link') return `<label class="field"><span>${label}</span><input list="site-links" ${at} value="${h(v)}" placeholder="#book, #signup, #contact or a web address"></label>`;
       if (kind === 'image') return `<div class="field"><span>${label} <small class="muted">(optional)</small></span><div class="site-img">${v ? `<img src="${h(/^media\//.test(v) ? `${basePath()}s/${v}` : v)}" alt="">` : `<span class="site-noimg">${svg('image')}</span>`}
         <input ${at} value="${h(v)}" placeholder="Paste a picture link, or upload"><label class="btn ghost">Upload<input type="file" accept="image/*" hidden data-upload="${path}" data-uk="${k}"></label>${v ? `<button type="button" class="btn ghost" data-clear-img="${path}" data-uk="${k}">Remove</button>` : ''}</div></div>`;
@@ -403,7 +404,7 @@
         </div></details>
         <div id="site-blocks">${sections.map(blockHtml).join('')}</div>
         <div class="row site-add"><select id="site-new-type" aria-label="Block to add">${Object.entries(siteData.blocks).map(([k, v]) => `<option value="${k}">${h(v)}</option>`).join('')}</select><button class="btn" data-add-blk>+ Add block</button></div>
-        <datalist id="site-links"><option value="#book">The booking block</option><option value="#signup">The form block</option><option value="#contact">Contact details</option></datalist>
+        <datalist id="site-links"><option value="#book">The booking block</option><option value="#signup">The form block</option><option value="#contact">Contact details</option><option value="#buy">The Buy button block</option><option value="#next">The next page of the funnel</option></datalist>
       </div>
       <div class="site-ed-right"><div class="site-frame desk"><iframe id="site-prev" title="Preview of your page"></iframe></div></div></div>
       <p class="muted" id="site-msg"></p></div>`;
@@ -449,7 +450,7 @@
     };
     root.onclick = async (e) => {
       const t = e.target;
-      if (t.closest('[data-back]')) { if (dirty && !confirm('Leave without saving your changes?')) return; editing = null; return renderSites(); }
+      if (t.closest('[data-back]')) { if (dirty && !confirm('Leave without saving your changes?')) return; editing = null; return window.VTExtra3 ? window.VTExtra3.renderSitesTab() : renderSites(); }
       if (t.closest('[data-save]')) return save();
       if (t.closest('[data-copy]')) return copy(s.link);
       const v = t.closest('[data-view]');
@@ -545,5 +546,5 @@
       <line x1="${padL}" x2="${W - padL}" y1="${H - padB}" y2="${H - padB}" stroke="var(--line)"/>${bars}</svg></figure>`;
   }
 
-  window.VTExtra = { renderQuotes, editQuote, openQuote, renderCalendar, addAppointment, renderSites, renderReports, resetSites: () => { editing = null; } };
+  window.VTExtra = { renderQuotes, editQuote, openQuote, renderCalendar, addAppointment, renderSites, renderReports, resetSites: () => { editing = null; }, editSite: (id) => { editing = id; siteData = null; const m = q$('#site-mode'); if (m) m.hidden = true; return renderSites(); }, isEditing: () => Boolean(editing) };
 })();
