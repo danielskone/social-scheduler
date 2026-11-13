@@ -68,8 +68,11 @@ function buildAppMenu() {
     nav.innerHTML = '<a href="#clips" data-view="clips"><span class="nav-ico"><svg viewBox="0 0 24 24"><circle cx="6.5" cy="6.5" r="2.8"/><circle cx="6.5" cy="17.5" r="2.8"/><path d="M8.6 8.3 20 18M8.6 15.7 20 6"/></svg></span><span>Make clips</span></a>';
   }
   // Switching between apps: a list at the bottom of the menu (Mac) and a button at the top (iPhone).
-  if (VP.apps.length < 2) return;
-  const list = VP.apps.map((a) => `<a href="${appHref(a)}#${a.home}" class="${a.key === THIS_APP.key ? 'on' : ''}"${a.key === THIS_APP.key ? ' aria-current="page"' : ''}><img src="${appIcon(a)}" alt=""><span>${esc(a.name)}</span></a>`).join('');
+  // Viral Touch CRM is kept apart: it isn't listed in the other apps and doesn't list them.
+  if (THIS_APP.standalone) return;
+  const linked = VP.apps.filter((a) => !a.standalone);
+  if (linked.length < 2) return;
+  const list = linked.map((a) => `<a href="${appHref(a)}#${a.home}" class="${a.key === THIS_APP.key ? 'on' : ''}"${a.key === THIS_APP.key ? ' aria-current="page"' : ''}><img src="${appIcon(a)}" alt=""><span>${esc(a.name)}</span></a>`).join('');
   const box = $('#app-switch');
   box.innerHTML = `<div class="app-switch-title">Your apps</div>${list}`;
   box.hidden = false;
