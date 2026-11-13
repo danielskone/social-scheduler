@@ -48,12 +48,14 @@ const err400 = (m) => Object.assign(new Error(m), { status: 400 });
 const FREE_DAILY = () => Number(process.env.BREVO_DAILY_CAP || 300);
 
 // ---------- Segments ----------
+if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_segments') WHERE name='tag'").get()) db.exec('ALTER TABLE crm_segments ADD COLUMN tag TEXT');
 const parseSeg = (s) => s && { ...s, groups: JSON.parse(s.groups_json), stages: JSON.parse(s.stages_json), groups_json: undefined, stages_json: undefined };
 
 function members(seg) {
   const where = ['email_ok=1', 'do_not_contact=0', "email IS NOT NULL AND email != ''"], args = {};
   if (seg?.groups?.length) { where.push(`group_name IN (${seg.groups.map((_, i) => `@g${i}`).join(',')})`); seg.groups.forEach((g, i) => (args[`g${i}`] = g)); }
   if (seg?.stages?.length) { where.push(`stage IN (${seg.stages.map((_, i) => `@s${i}`).join(',')})`); seg.stages.forEach((g, i) => (args[`s${i}`] = g)); }
+  if (seg?.tag) { where.push(crm.TAG_SQL); args.tag = seg.tag; }
   if (seg?.joined_days) { where.push("email_ok_at >= @since"); args.since = new Date(Date.now() - seg.joined_days * 86400e3).toISOString(); }
   return db.prepare(`SELECT * FROM contacts WHERE ${where.join(' AND ')} ORDER BY name COLLATE NOCASE`).all(args);
 }
@@ -65,9 +67,9 @@ function saveSegment(body, id) {
   if (!name) throw err400('Give the segment a name.');
   const list = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map((x) => String(x).trim()).filter(Boolean).slice(0, 30);
   const row = { name, groups_json: JSON.stringify(list(body.groups)), stages_json: JSON.stringify(list(body.stages).filter((s) => crm.STAGES.includes(s))),
-    joined_days: Number(body.joined_days) > 0 ? Math.min(Math.round(Number(body.joined_days)), 3650) : null };
-  if (old) db.prepare('UPDATE crm_segments SET name=@name, groups_json=@groups_json, stages_json=@stages_json, joined_days=@joined_days WHERE id=@id').run({ ...row, id });
-  else id = db.prepare('INSERT INTO crm_segments (name, groups_json, stages_json, joined_days) VALUES (@name,@groups_json,@stages_json,@joined_days)').run(row).lastInsertRowid;
+    joined_days: Number(body.joined_days) > 0 ? Math.min(Math.round(Number(body.joined_days)), 3650) : null, tag: String(body.tag || '').trim().slice(0, 30) || null };
+  if (old) db.prepare('UPDATE crm_segments SET name=@name, groups_json=@groups_json, stages_json=@stages_json, joined_days=@joined_days, tag=@tag WHERE id=@id').run({ ...row, id });
+  else id = db.prepare('INSERT INTO crm_segments (name, groups_json, stages_json, joined_days, tag) VALUES (@name,@groups_json,@stages_json,@joined_days,@tag)').run(row).lastInsertRowid;
   return parseSeg(db.prepare('SELECT * FROM crm_segments WHERE id=?').get(id));
 }
 const listSegments = () => db.prepare('SELECT * FROM crm_segments ORDER BY id').all().map(parseSeg).map((s) => ({ ...s, count: members(s).length }));

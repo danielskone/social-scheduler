@@ -28,7 +28,7 @@ const GROUPS = config.ownerStarters
 const pipes = () => require('./pipelines');
 const fieldsMod = () => require('./fields'); // custom fields (contacts.custom)
 const FIELDS = ['name', 'company', 'email', 'phone', 'website', 'address', 'group_name', 'stage', 'amount',
-  'next_follow_up', 'email_ok', 'email_ok_source', 'do_not_contact', 'notes', 'pipeline_id'];
+  'next_follow_up', 'email_ok', 'email_ok_source', 'do_not_contact', 'notes', 'pipeline_id', 'tags'];
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS contacts (
@@ -126,6 +126,18 @@ if (config.ownerStarters && !db.prepare('SELECT 1 FROM crm_templates LIMIT 1').g
 }
 
 const biz = () => require('./businesses');
+// Tags: short labels like "VIP" or "2026 sponsor". Saved as "VIP,2026 sponsor" (no spaces around commas).
+if (!db.prepare("SELECT 1 FROM pragma_table_info('contacts') WHERE name='tags'").get()) db.exec('ALTER TABLE contacts ADD COLUMN tags TEXT');
+function cleanTags(v) {
+  const out = [];
+  for (const t of (Array.isArray(v) ? v : String(v || '').split(','))) {
+    const x = String(t).replace(/[,\n\r]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30);
+    if (x && !out.some((o) => o.toLowerCase() === x.toLowerCase())) out.push(x);
+  }
+  return out.slice(0, 20).join(',') || null;
+}
+const tagList = (s) => String(s || '').split(',').filter(Boolean);
+const TAG_SQL = "(',' || lower(COALESCE(tags,'')) || ',') LIKE ('%,' || lower(@tag) || ',%')";
 
 const today = (d = new Date()) => {
   const p = (n) => String(n).padStart(2, '0');
@@ -138,6 +150,7 @@ function clean(body, existing = {}) {
   const str = (v) => (v == null ? null : String(v).trim() || null);
   for (const f of ['name', 'company', 'email', 'phone', 'website', 'address', 'email_ok_source', 'notes']) c[f] = str(c[f]);
   if (!c.name) c.name = c.company;
+  c.tags = cleanTags(c.tags);
   if (!c.name) throw Object.assign(new Error('Add a name or a company.'), { status: 400 });
   c.group_name = str(c.group_name) || 'Other';
   c.pipeline_id = c.pipeline_id === '' || c.pipeline_id == null ? null : Number(c.pipeline_id);
@@ -190,12 +203,23 @@ function getContact(id) {
   if (!c) return null;
   c.pipeline = pipes().ofContact(c).id;
   c.custom = fieldsMod().readCustom(c.custom);
+  c.tag_list = tagList(c.tags);
   c.activities = db.prepare('SELECT * FROM contact_activities WHERE contact_id=? ORDER BY happened_on DESC, id DESC').all(id);
   c.tasks = db.prepare('SELECT t.*, (SELECT name FROM crm_templates WHERE id=t.template_id) AS template_name FROM crm_tasks t WHERE contact_id=? ORDER BY (done_at IS NOT NULL), (due_on IS NULL), due_on, id').all(id);
   return c;
 }
 
-function listContacts({ q, group, stage, due, biz: b, pipeline } = {}) {
+// "show" narrows the list further: the quick picks next to the search box, also used by smart lists.
+const SHOWS = {
+  email_ok: 'email_ok=1 AND do_not_contact=0',
+  no_email: "(email IS NULL OR email='')",
+  has_phone: "phone IS NOT NULL AND phone<>''",
+  new30: "created_at >= datetime('now','-30 days')",
+  quiet60: "NOT EXISTS (SELECT 1 FROM contact_activities a WHERE a.contact_id=contacts.id AND a.happened_on >= date('now','-60 days')) AND created_at < datetime('now','-60 days')",
+  no_follow_up: 'next_follow_up IS NULL AND do_not_contact=0',
+  dnc: 'do_not_contact=1',
+};
+function listContacts({ q, group, stage, due, biz: b, pipeline, tag, show } = {}) {
   const where = [], args = {};
   const bf = biz().filter(b);
   if (bf.sql) { let n = 0; where.push(bf.sql.replace(/\?/g, () => `@bg${n++}`)); bf.args.forEach((g, i) => { args[`bg${i}`] = g; }); }
@@ -203,10 +227,12 @@ function listContacts({ q, group, stage, due, biz: b, pipeline } = {}) {
   if (group) { where.push('group_name=@group'); args.group = group; }
   if (stage) { where.push('stage=@stage'); args.stage = stage; }
   if (due) { where.push('next_follow_up IS NOT NULL AND next_follow_up <= @today'); args.today = today(); }
+  if (tag) { where.push(TAG_SQL); args.tag = String(tag); }
+  if (show && SHOWS[show]) where.push(SHOWS[show]);
   const rows = db.prepare(`SELECT * FROM contacts ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY (next_follow_up IS NULL), next_follow_up, name COLLATE NOCASE`).all(args);
   // Which pipeline each person is in (people with none are in their business's first pipeline).
-  for (const r of rows) { const p = pipes().ofContact(r); r.pipeline = p.id; r.stage_kind = pipes().kindOf(p, r.stage); }
+  for (const r of rows) { const p = pipes().ofContact(r); r.pipeline = p.id; r.stage_kind = pipes().kindOf(p, r.stage); r.tag_list = tagList(r.tags); }
   return pipeline ? rows.filter((r) => r.pipeline === Number(pipeline)) : rows;
 }
 
@@ -274,7 +300,7 @@ const HEADER_MAP = {
   group: 'group_name', type: 'group_name', category: 'group_name',
   stage: 'stage', status: 'stage', amount: 'amount', 'amount ($)': 'amount',
   'next follow-up': 'next_follow_up', 'follow up': 'next_follow_up', 'follow-up': 'next_follow_up',
-  notes: 'notes', note: 'notes',
+  notes: 'notes', note: 'notes', tags: 'tags', tag: 'tags', labels: 'tags',
   'ok to email': 'email_ok', 'how they agreed to email': 'email_ok_source', 'do not contact': 'do_not_contact',
 };
 const yes = (v) => /^(y|yes|true|1|x)$/i.test(String(v || '').trim());
@@ -304,13 +330,14 @@ function importCsv(text) {
 const EXPORT_HEADERS = [['Name', 'name'], ['Company', 'company'], ['Email', 'email'], ['Phone', 'phone'], ['Website', 'website'],
   ['Address', 'address'], ['Group', 'group_name'], ['Stage', 'stage'], ['Amount', 'amount'], ['Next follow-up', 'next_follow_up'],
   ['OK to email', 'email_ok_yes'], ['How they agreed to email', 'email_ok_source'], ['Date agreed', 'email_ok_at'],
-  ['Do not contact', 'dnc_yes'], ['Notes', 'notes']];
+  ['Do not contact', 'dnc_yes'], ['Tags', 'tags_out'], ['Notes', 'notes']];
 
-function exportCsv({ emailList = false } = {}) {
-  const rows = emailList
+function exportCsv({ emailList = false, ids } = {}) {
+  const pick = Array.isArray(ids) && ids.length ? ids.map(Number).filter(Boolean).slice(0, 20000) : null;
+  const rows = pick ? db.prepare(`SELECT * FROM contacts WHERE id IN (SELECT value FROM json_each(?)) ORDER BY name COLLATE NOCASE`).all(JSON.stringify(pick)) : emailList
     ? db.prepare("SELECT * FROM contacts WHERE email_ok=1 AND do_not_contact=0 AND email IS NOT NULL ORDER BY name COLLATE NOCASE").all()
     : db.prepare('SELECT * FROM contacts ORDER BY name COLLATE NOCASE').all();
-  rows.forEach((r) => { r.email_ok_yes = r.email_ok ? 'Yes' : ''; r.dnc_yes = r.do_not_contact ? 'Yes' : ''; });
+  rows.forEach((r) => { r.email_ok_yes = r.email_ok ? 'Yes' : ''; r.dnc_yes = r.do_not_contact ? 'Yes' : ''; r.tags_out = tagList(r.tags).join(', '); });
   if (emailList) {
     const first = (n) => String(n || '').split(/\s+/)[0];
     const last = (n) => String(n || '').split(/\s+/).slice(1).join(' ');
@@ -569,5 +596,5 @@ router.get('/export.csv', wrap((req, res) => {
   res.send('﻿' + exportCsv({ emailList }));
 }));
 
-module.exports = { events, emit, html: { page, esc, nl }, router, listTasks, saveTask, saveTemplate, fillTemplate, prepareMessage, saveForm, submitForm, tooMany, createContact, updateContact, getContact, listContacts, logActivity, importCsv, exportCsv, parseCsv, summary, sendFollowUpReminder, GROUPS,
+module.exports = { events, emit, html: { page, esc, nl }, router, listTasks, saveTask, saveTemplate, fillTemplate, prepareMessage, saveForm, submitForm, tooMany, createContact, updateContact, getContact, listContacts, logActivity, cleanTags, tagList, TAG_SQL, SHOWS, importCsv, exportCsv, parseCsv, summary, sendFollowUpReminder, GROUPS,
   get STAGES() { return pipes().allStageNames(); } };

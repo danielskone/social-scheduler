@@ -73,7 +73,7 @@
     payments: ['email', 'Get paid', 'Send a <b>quote</b> people sign on their phone, then an <b>invoice</b> they pay by card. Make an invoice, then <b>email it</b> or copy its link. People open it on their phone and <b>pay by card</b> with your own Stripe (the money goes straight to you), or by cash, check or Zelle, which you mark as paid. Your iPhone buzzes when a card payment comes in.'],
     reviews: ['check', 'More 5-star reviews', 'Ask people who just bought or donated for a review. Press <b>Ask</b> to email them, or text it from your phone. The link takes them straight to your review page, and you can see who opened it. Each person is asked at most once every 90 days.'],
     settings: ['check', 'Your businesses', 'Add each business you run, like an agency and a nonprofit. Each one gets its own people, pipeline and forms. Switch between them at the top of the menu.'],
-    list: ['people', 'Your address book', 'Everyone you work with lives here: leads, customers, partners and more. <b>Click a name</b> to see their notes, history and next follow-up. Use the search box and the group and stage menus to find people fast.',
+    list: ['people', 'Your address book', 'Everyone you work with lives here: leads, customers, partners and more. <b>Click a name</b> to see their notes, history and next follow-up. Use the search box and menus to find people. <b>Save as smart list</b> keeps a search one tap away. <b>Tick the boxes</b> to tag, move or update many people at once.',
       'This app never bulk-sends texts, so your accounts can\'t get flagged for spam. Tick "OK to email" only when someone said yes.'],
     pipeline: ['pipeline', 'Where every deal stands', 'Each column is a step, from <b>New</b> to <b>Paid / Done</b>. <b>Drag a card</b> to the next column as things move along. The total under each column adds up the money at that step.',
       'Moving a card can start an automation, like a thank-you task when someone reaches "Paid / Done".'],
@@ -243,25 +243,22 @@
 
   // ---------- People ----------
   async function renderList() {
-    const p = new URLSearchParams();
-    if (q$('#crm-q').value.trim()) p.set('q', q$('#crm-q').value.trim());
-    if (q$('#crm-group').value) p.set('group', q$('#crm-group').value);
-    if (q$('#crm-stage').value) p.set('stage', q$('#crm-stage').value);
-    if (q$('#crm-due').checked) p.set('due', '1');
-    const rows = await call(`/contacts?${p}`);
+    const rows = await call(`/contacts?${window.VTLists.params()}`);
     q$('#crm-table tbody').innerHTML = rows.map((c) => `<tr data-id="${c.id}">
-      <td><div class="crm-person">${avatar(c.name)}<div class="who"><b>${h(c.name)}</b>${c.company && c.company !== c.name ? `<div class="muted">${h(c.company)}</div>` : ''}${c.do_not_contact ? '<div><span class="pill off">Do not contact</span></div>' : ''}</div></div></td>
+      <td class="sel"><input type="checkbox" data-sel aria-label="Pick ${h(c.name)}"></td>
+      <td><div class="crm-person">${avatar(c.name)}<div class="who"><b>${h(c.name)}</b>${c.company && c.company !== c.name ? `<div class="muted">${h(c.company)}</div>` : ''}${c.do_not_contact || (c.tag_list || []).length ? `<div class="tag-row">${c.do_not_contact ? '<span class="pill off">Do not contact</span>' : ''}${(c.tag_list || []).map((t) => `<span class="tag">${h(t)}</span>`).join('')}</div>` : ''}</div></div></td>
       <td>${groupPill(c.group_name)}</td>
       <td>${stageBadge(c.stage)}</td>
       <td><b>${money(c.amount)}</b></td>
       <td><div class="crm-acts">${c.phone ? `<a class="crm-act" href="tel:${h(c.phone)}" title="Call ${h(c.phone)}">${svg('phone')}<span>${h(c.phone)}</span></a>` : ''}${c.email ? `<a class="crm-act" href="mailto:${h(c.email)}" title="${c.email_ok ? 'Said yes to email' : 'Email'}">${svg('email')}<span>${h(c.email)}</span>${c.email_ok ? '<span class="ok">✓</span>' : ''}</a>` : ''}</div></td>
       <td><span class="due ${dueClass(c.next_follow_up)}">${c.next_follow_up ? (dueClass(c.next_follow_up) === 'overdue' ? 'Late · ' : dueClass(c.next_follow_up) === 'due-today' ? 'Today · ' : '') + niceDate(c.next_follow_up) : '<span class="muted">—</span>'}</span></td>
-    </tr>`).join('') || `<tr><td colspan="6" class="crm-empty muted">${meta.summary.total ? '<span class="big">🔍</span>Nobody matches that search. Try fewer words or pick "All groups".' : '<span class="big">👋</span><b>No contacts yet.</b><br>Press "+ Add contact", bring in a spreadsheet with "Import CSV", or share a sign-up form.'}</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="7" class="crm-empty muted">${meta.summary.total ? '<span class="big">🔍</span>Nobody matches that search. Try fewer words or pick "All groups".' : '<span class="big">👋</span><b>No contacts yet.</b><br>Press "+ Add contact", bring in a spreadsheet with "Import CSV", or share a sign-up form.'}</td></tr>`;
     renderStart();
+    window.VTLists.after(rows, { render: renderList });
   }
   q$('#crm-q').oninput = () => { clearTimeout(timer); timer = setTimeout(renderList, 200); };
-  ['#crm-group', '#crm-stage', '#crm-due'].forEach((s) => (q$(s).onchange = renderList));
-  q$('#crm-table tbody').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr && !e.target.closest('a')) openContact(Number(tr.dataset.id)); };
+  ['#crm-group', '#crm-stage', '#crm-due', '#crm-tag', '#crm-show'].forEach((s) => (q$(s).onchange = renderList));
+  q$('#crm-table tbody').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr && !e.target.closest('a') && !e.target.closest('td.sel')) openContact(Number(tr.dataset.id)); };
   q$('#crm-add').onclick = () => openContact(null);
   q$('#crm-task-add').onclick = () => editTask({});
 
@@ -589,7 +586,7 @@
       <ol style="margin:6px 0 0 18px;padding:0">${a.steps.filter((s) => s.type === 'email' || s.type === 'wait').map((s) => `<li class="small">${s.type === 'wait' ? `wait ${s.amount} ${s.unit}` : h((tpls.find((t) => t.id === s.template_id) || {}).subject || 'email')}</li>`).join('')}</ol></div>`).join('')
       || '<p class="muted">No email flows yet.</p>';
     q$('#em-segments').innerHTML = d.segments.map((s) => `<div class="item" data-seg="${s.id}"><b>${h(s.name)}</b> <span class="pill">${s.count} ${s.count === 1 ? 'person' : 'people'}</span>
-      <div class="muted small">${s.groups.length ? `Groups: ${h(s.groups.join(', '))}` : 'All groups'}${s.stages.length ? ` · Stages: ${h(s.stages.join(', '))}` : ''}${s.joined_days ? ` · Said yes in the last ${s.joined_days} days` : ''}</div>
+      <div class="muted small">${s.groups.length ? `Groups: ${h(s.groups.join(', '))}` : 'All groups'}${s.stages.length ? ` · Stages: ${h(s.stages.join(', '))}` : ''}${s.tag ? ` · Tag: ${h(s.tag)}` : ''}${s.joined_days ? ` · Said yes in the last ${s.joined_days} days` : ''}</div>
       <div class="row"><button class="btn ghost" data-people>See who</button><button class="btn ghost" data-edit>Edit</button><button class="btn danger" data-del>Delete</button></div><div data-list></div></div>`).join('');
     q$('#em-designs').innerHTML = emailTpls.map((t) => `<div class="item" data-tpl="${t.id}"><b>${h(t.name)}</b><div class="muted small">Subject: ${h(t.subject || t.name)}</div>
       <iframe loading="lazy" src="/api/crm/email/preview/${t.id}" title="Preview" style="width:100%;height:220px;border:1px solid var(--line);border-radius:8px;pointer-events:none;background:#f3f4f8"></iframe>
@@ -656,13 +653,14 @@
       <label class="field"><span>Name</span><input name="name" required value="${h(s.name)}" style="width:100%"></label>
       <div class="field"><span>Groups <small>(none ticked = all groups)</small></span><div class="row">${groups.map((g) => `<label class="check"><input type="checkbox" name="g" value="${h(g)}" ${s.groups.includes(g) ? 'checked' : ''}> ${h(g)}</label>`).join('')}</div></div>
       <div class="field"><span>Stages <small>(none ticked = all stages)</small></span><div class="row">${d.stages.map((g) => `<label class="check"><input type="checkbox" name="st" value="${h(g)}" ${s.stages.includes(g) ? 'checked' : ''}> ${h(g)}</label>`).join('')}</div></div>
+      <label class="field"><span>Only people with this tag <small>(optional)</small></span><input name="tag" maxlength="30" value="${h(s.tag || '')}" style="width:200px"></label>
       <label class="field"><span>Only people who said yes in the last … days <small>(optional)</small></span><input type="number" name="joined_days" min="1" value="${h(s.joined_days || '')}" style="width:110px"></label>
       <div class="row"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="seg-msg"></span></div></form>`;
     q$('[data-close]', dlg).onclick = () => dlg.close();
     q$('#seg-form', dlg).onsubmit = async (e) => {
       e.preventDefault();
       const f = e.target;
-      const json = { name: q$('[name=name]', f).value, joined_days: q$('[name=joined_days]', f).value,
+      const json = { name: q$('[name=name]', f).value, joined_days: q$('[name=joined_days]', f).value, tag: q$('[name=tag]', f).value,
         groups: [...f.querySelectorAll('[name=g]:checked')].map((x) => x.value), stages: [...f.querySelectorAll('[name=st]:checked')].map((x) => x.value) };
       try { await call(s.id ? `/email/segments/${s.id}` : '/email/segments', { method: s.id ? 'PUT' : 'POST', json }); dlg.close(); refresh(); }
       catch (err) { q$('#seg-msg', dlg).textContent = err.message; }
@@ -718,6 +716,7 @@
         ${field('amount', 'Amount ($) <small>pledged, paid or spent</small>', 'text', 'inputmode="decimal"')}
         ${field('next_follow_up', 'Next follow-up', 'date')}
         <label class="field full"><span>Notes</span><textarea name="notes" rows="3">${h(c.notes)}</textarea></label>
+        <label class="field full"><span>Tags <small>separate with commas, like VIP, 2026 sponsor</small></span><input name="tags" maxlength="400" value="${h((c.tag_list || []).join(', '))}" placeholder="VIP, 2026 sponsor"></label>
         ${customFieldsHtml(c)}
         <div class="consent full">
           <label class="check"><input type="checkbox" name="email_ok" ${c.email_ok ? 'checked' : ''}> <b>OK to email</b> <small class="muted">only if they said yes</small></label>
