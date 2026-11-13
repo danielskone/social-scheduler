@@ -38,6 +38,8 @@ const fromGateway = (req) => Boolean(config.tenantKey) && same(req.headers['x-vp
 if (config.tenantKey) {
   app.use((req, res, next) => (fromGateway(req) ? next() : res.status(404).send('Not found')));
 }
+// Business template files can be bigger than a normal form.
+app.use('/api/crm/biztemplates/upload', express.json({ limit: '4mb' }));
 app.use(express.json());
 // Private app: ask search engines never to list it.
 app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next(); });
@@ -597,6 +599,9 @@ app.use('/api/crm/plans', require('../crm/server/plans').router);
 app.use('/api/crm/checkouts', require('../crm/server/checkouts').router);
 app.use('/api/crm/contracts', require('../crm/server/contracts').router);
 app.use('/api/crm/blog', require('../crm/server/blog').router);
+app.use('/api/crm/social', require('../crm/server/social').router);
+app.use('/api/crm/taskboard', require('../crm/server/tasks').router);
+app.use('/api/crm/biztemplates', require('../crm/server/snapshots').router);
 app.use('/api/crm', crmDashboard.router);
 app.use('/api/crm/forms', forms.router);
 app.use('/api/crm/booking', booking.router);

@@ -32,6 +32,10 @@
     dot: '<circle cx="12" cy="12" r="4"/>',
   };
   const svg = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true">${I[n] || ''}</svg>`;
+  I.social = '<circle cx="12" cy="12" r="8.5"/><path d="M13.2 20.4v-6.2h2.3l.4-2.7h-2.7V9.8c0-.8.3-1.3 1.4-1.3h1.4V6.1c-.3 0-1.1-.1-2.1-.1-2.1 0-3.4 1.2-3.4 3.5v2h-2.3v2.7h2.3v6.2"/>';
+  // Where a message came from: email (no chip), website chat, Facebook Messenger or Instagram.
+  const CH = { chat: 'Chat', facebook: 'Facebook', instagram: 'Instagram' };
+  const chip = (ch) => (CH[ch] ? `<span class="ib-chip ${ch}">${CH[ch]}</span> ` : '');
   // "2:15 PM" today, "Yesterday", "Tue", or "Nov 3".
   function when(iso, long) {
     const d = new Date(iso), now = new Date();
@@ -68,7 +72,10 @@
           <div class="ib-tools">
             <label class="ib-search">${svg('search')}<input type="search" id="ib-q" placeholder="Search people" aria-label="Search people"></label>
             <button class="btn ghost ib-icon" id="ib-check" title="Check for new emails now" aria-label="Check for new emails now">${svg('refresh')}</button>
+          </div>
+          <div class="ib-tools ib-tools2">
             <button class="btn ghost ib-chatset" id="ib-chat" title="Chat bubble for your website">${svg('chat')}<span>Chat bubble</span></button>
+            <button class="btn ghost ib-chatset" id="ib-social" title="Facebook and Instagram messages">${svg('social')}<span>Facebook &amp; Instagram</span></button>
           </div>
           <div class="ib-filter" role="tablist"><button type="button" data-u="0">All</button><button type="button" data-u="1">Unread</button></div>
           <div id="ib-note"></div>
@@ -80,11 +87,13 @@
       q$('#ib-q').oninput = (e) => { clearTimeout(t); t = setTimeout(() => { filter.q = e.target.value.trim(); list(); }, 250); };
       root.querySelectorAll('.ib-filter button').forEach((b) => (b.onclick = () => { filter.unread = b.dataset.u === '1'; list(); }));
       q$('#ib-chat').onclick = () => window.VTExtra2.chatSettings();
+      q$('#ib-social').onclick = () => window.VTExtra7.socialSettings(() => list());
       q$('#ib-check').onclick = async (e) => {
         const btn = e.currentTarget; btn.classList.add('spin'); btn.disabled = true;
         try {
-          const r = await call('/check', { method: 'POST' });
-          say(r.ok ? (r.added ? `${r.added} new ${r.added === 1 ? 'email' : 'emails'}.` : 'No new emails.') : r.error, !r.ok);
+          const [r, s] = await Promise.all([call('/check', { method: 'POST' }), fetch('/api/crm/social/check', { method: 'POST' }).then((x) => x.json()).catch(() => ({ added: 0 }))]);
+          if (s.added) r.added = (r.added || 0) + s.added;
+          say(r.ok || r.added ? (r.added ? `${r.added} new ${r.added === 1 ? 'message' : 'messages'}.` : 'No new messages.') : r.error, !r.ok && !r.added);
           setTimeout(() => say(''), 4000);
         } catch (err) { say(err.message, true); }
         btn.classList.remove('spin'); btn.disabled = false;
@@ -111,11 +120,11 @@
     rows.innerHTML = d.conversations.map((c) => `<li><button type="button" class="ib-row${c.id === picked ? ' on' : ''}${c.unread ? ' unread' : ''}" data-id="${c.id}">
         ${avatar(c.name)}
         <span class="ib-main"><span class="ib-top"><b>${h(c.name)}</b><time>${when(c.sent_at)}</time></span>
-          <span class="ib-subj">${c.channel === 'chat' ? '<span class="ib-chip">Chat</span> ' : ''}${c.direction === 'out' ? '<span class="muted">You: </span>' : ''}${h(c.channel === 'chat' ? '' : c.subject)}</span>
+          <span class="ib-subj">${chip(c.channel)}${c.direction === 'out' ? '<span class="muted">You: </span>' : ''}${h(c.channel && c.channel !== 'email' ? '' : c.subject)}</span>
           <span class="ib-snip">${h(c.snippet)}</span></span>
         ${c.unread ? `<span class="ib-count" title="${c.unread} unread">${c.unread}</span>` : ''}
       </button></li>`).join('')
-      || `<li class="ib-none">${svg('chat')}<b>${filter.q || filter.unread ? 'Nothing matches.' : 'No emails yet'}</b>${filter.q || filter.unread ? '' : 'When someone in your CRM emails you, it shows up here and your iPhone buzzes.'}</li>`;
+      || `<li class="ib-none">${svg('chat')}<b>${filter.q || filter.unread ? 'Nothing matches.' : 'No messages yet'}</b>${filter.q || filter.unread ? '' : 'Emails, website chats and Facebook and Instagram messages show up here, and your iPhone buzzes.'}</li>`;
     rows.querySelectorAll('.ib-row').forEach((b) => (b.onclick = () => open(Number(b.dataset.id))));
     badge();
   }
@@ -135,13 +144,15 @@
     const msgHtml = (m) => (m.kind === 'auto'
       ? `<div class="ib-auto">${svg('bolt')}<span><b>${h(m.via)}</b> sent "${h(m.subject)}" · ${when(m.sent_at, true)}</span></div>`
       : `<div class="ib-msg ${m.direction}">
-          <div class="ib-meta">${m.direction === 'in' ? h(c.name) : 'You'} · ${m.channel === 'chat' ? 'Chat · ' : ''}${when(m.sent_at, true)}</div>
-          <div class="ib-bubble${m.channel === 'chat' ? ' chat' : ''}">${m.channel === 'chat' ? '' : `<div class="ib-s">${h(m.subject)}</div>`}<div class="ib-b">${h(m.body)}</div>
+          <div class="ib-meta">${m.direction === 'in' ? h(c.name) : m.subject === 'Answer bot' ? 'Answer bot' : 'You'} · ${CH[m.channel] ? `${CH[m.channel]} · ` : ''}${when(m.sent_at, true)}</div>
+          <div class="ib-bubble${CH[m.channel] ? ` chat ${m.channel}` : ''}">${CH[m.channel] ? '' : `<div class="ib-s">${h(m.subject)}</div>`}<div class="ib-b">${h(m.body)}</div>
           ${m.more ? `<button type="button" class="ib-more" data-mid="${m.id}">Show the whole email</button>` : ''}</div>
         </div>`);
-    const chatMode = Boolean(d.chat && d.chat.last);
-    shown = { id: c.id, n: d.messages.length, chat: Boolean(d.chat) };
-    const canWrite = chatMode || (st.canSend && c.email);
+    const social = d.social;
+    const chatMode = !social && Boolean(d.chat && d.chat.last);
+    shown = { id: c.id, n: d.messages.length, chat: Boolean(d.chat || social) };
+    const canWrite = social ? social.open && social.connected : chatMode || (st.canSend && c.email);
+    const socialName = social ? CH[social.channel] : '';
     box.innerHTML = `<header class="ib-head">
         <button class="btn ghost ib-icon ib-back" type="button" aria-label="Back to the list">${svg('back')}</button>
         ${avatar(c.name)}<div class="ib-who"><b>${h(c.name)}</b><span class="muted small">${h(c.email || 'No email address')}${c.company ? ` · ${h(c.company)}` : ''}</span></div>
@@ -151,9 +162,10 @@
       <div class="ib-msgs" id="ib-msgs">${d.messages.map(msgHtml).join('') || '<p class="muted ib-first">No emails with this person yet. Write the first one below.</p>'}</div>
       ${c.do_not_contact ? '<p class="ib-dnc">Marked "Do not contact". You can still answer them for 30 days after they write to you.</p>' : ''}
       <form class="ib-reply" id="ib-reply">
-        ${!st.canSend && !chatMode ? '<p class="muted small">Set up email on <a href="#contacts/launchpad">Launchpad</a> to answer from here.</p>' : ''}
-        <textarea name="text" rows="3" placeholder="${chatMode || c.email ? `Write to ${h(String(c.name).split(' ')[0])}...` : 'Add an email address on their card first'}" ${canWrite ? '' : 'disabled'}>${h(store.get(draftKey, ''))}</textarea>
-        <div class="ib-send-row"><span class="muted small">${chatMode ? (d.chat.online ? '<span class="ib-online"></span>On your website now. Your answer shows in their chat.' : `They left the chat.${c.email ? ' Your answer is also emailed to them.' : ' They gave no email, so they see it if they come back.'}`) : `Sent from ${h(st.from || 'your email')}, under their last email.`}</span>
+        ${!st.canSend && !chatMode && !social ? '<p class="muted small">Set up email on <a href="#contacts/launchpad">Launchpad</a> to answer from here.</p>' : ''}
+        ${social && !social.open ? `<p class="ib-dnc">Facebook only lets apps answer within 24 hours of their last message. Answer ${h(String(c.name).split(' ')[0])} in the ${socialName} app${c.email ? ', or email them from their card' : ''}.</p>` : ''}
+        <textarea name="text" rows="3" placeholder="${social ? (canWrite ? `Answer on ${socialName}...` : 'The 24 hours are over') : chatMode || c.email ? `Write to ${h(String(c.name).split(' ')[0])}...` : 'Add an email address on their card first'}" ${canWrite ? '' : 'disabled'}>${h(store.get(draftKey, ''))}</textarea>
+        <div class="ib-send-row"><span class="muted small">${social ? `Goes to their ${socialName} inbox from ${h(social.account || 'your Page')}.${social.open ? ` You can answer until ${when(social.closesAt, true)}.` : ''}` : chatMode ? (d.chat.online ? '<span class="ib-online"></span>On your website now. Your answer shows in their chat.' : `They left the chat.${c.email ? ' Your answer is also emailed to them.' : ' They gave no email, so they see it if they come back.'}`) : `Sent from ${h(st.from || 'your email')}, under their last email.`}</span>
           <button class="btn primary" ${canWrite ? '' : 'disabled'}>${svg('send')}<span>Send</span></button></div>
       </form>`;
     q$('.ib').classList.add('show-thread');
@@ -175,8 +187,8 @@
       const btn = q$('button', form);
       btn.disabled = true;
       try {
-        if (chatMode) {
-          const r = await fetch(`/api/crm/chat/${c.id}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: ta.value }) });
+        if (social || chatMode) {
+          const r = await fetch(`/api/crm/${social ? 'social' : 'chat'}/${c.id}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: ta.value }) });
           if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not send');
         } else await call(`/${c.id}/reply`, { method: 'POST', json: { text: ta.value } });
         store.set(draftKey, '');

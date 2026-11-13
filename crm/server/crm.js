@@ -371,8 +371,18 @@ async function sendFollowUpReminder(now = new Date()) {
 const err400 = (m) => Object.assign(new Error(m), { status: 400 });
 const ymdOrNull = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null);
 
-function listTasks({ open, contact_id, biz: b } = {}) {
+// Board columns, who it's for (a team member; empty = the owner), notes and "important".
+for (const [col, def] of [['status', "TEXT NOT NULL DEFAULT 'todo'"], ['assigned_to', 'INTEGER'], ['notes', 'TEXT'], ['priority', 'INTEGER NOT NULL DEFAULT 0']]) {
+  if (!db.prepare(`SELECT 1 FROM pragma_table_info('crm_tasks') WHERE name='${col}'`).get()) db.exec(`ALTER TABLE crm_tasks ADD COLUMN ${col} ${def}`);
+}
+const teamName = (id) => (id ? db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='crm_team'").get() && db.prepare('SELECT name FROM crm_team WHERE id=?').get(Number(id))?.name : null);
+
+function listTasks({ open, contact_id, biz: b, who, me } = {}) {
   const where = [], args = {};
+  // who: "me" (the person signed in), "owner" (tasks for the owner), or a team member's id.
+  const mine = who === 'me' ? (me ? Number(me) : null) : who === 'owner' ? null : who ? Number(who) : undefined;
+  if (mine !== undefined) { if (mine == null) where.push('t.assigned_to IS NULL'); else { where.push('t.assigned_to=@who'); args.who = mine; } }
+  if (open === 'board') { where.push("(t.done_at IS NULL OR t.done_at > @recent)"); args.recent = new Date(Date.now() - 14 * 86400e3).toISOString(); open = false; }
   const bf = biz().filter(b, 'c.group_name');
   if (bf.sql) { let n = 0; where.push(`(t.contact_id IS NULL OR ${bf.sql.replace(/\?/g, () => `@bg${n++}`)})`); bf.args.forEach((g, i) => { args[`bg${i}`] = g; }); }
   if (open) where.push('t.done_at IS NULL');
@@ -380,7 +390,8 @@ function listTasks({ open, contact_id, biz: b } = {}) {
   return db.prepare(`SELECT t.*, c.name AS contact_name, (SELECT name FROM crm_templates WHERE id=t.template_id) AS template_name
     FROM crm_tasks t LEFT JOIN contacts c ON c.id=t.contact_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY (t.done_at IS NOT NULL), (t.due_on IS NULL), t.due_on, t.id`).all(args);
+    ORDER BY (t.done_at IS NOT NULL), t.priority DESC, (t.due_on IS NULL), t.due_on, t.id`).all(args)
+    .map((t) => ({ ...t, status: t.done_at ? 'done' : t.status === 'doing' ? 'doing' : 'todo', assigned_name: teamName(t.assigned_to) }));
 }
 function saveTask(body, id) {
   const old = id ? db.prepare('SELECT * FROM crm_tasks WHERE id=?').get(id) : {};
@@ -390,10 +401,22 @@ function saveTask(body, id) {
   if (!t.title) throw err400('Say what the task is.');
   t.due_on = ymdOrNull(t.due_on);
   t.contact_id = t.contact_id ? Number(t.contact_id) : null;
+  // Moving a card on the board: To do, Doing or Done.
+  if (['todo', 'doing', 'done'].includes(body.status)) { body.done = body.status === 'done'; t.status = body.status === 'done' ? old.status : body.status; }
   if ('done' in body) t.done_at = body.done ? (old.done_at || new Date().toISOString()) : null;
-  if (id) db.prepare('UPDATE crm_tasks SET title=@title, due_on=@due_on, contact_id=@contact_id, done_at=@done_at WHERE id=@id').run({ ...t, id });
-  else id = db.prepare('INSERT INTO crm_tasks (title, due_on, contact_id, done_at) VALUES (@title,@due_on,@contact_id,@done_at)').run({ done_at: null, ...t }).lastInsertRowid;
+  t.status = t.status === 'doing' ? 'doing' : 'todo';
+  if ('assigned_to' in body) {
+    t.assigned_to = body.assigned_to ? Number(body.assigned_to) : null;
+    if (t.assigned_to && !teamName(t.assigned_to)) throw err400('That team member was not found.');
+  }
+  t.assigned_to = t.assigned_to || null;
+  t.notes = String(t.notes || '').trim().slice(0, 3000) || null;
+  t.priority = t.priority && t.priority !== '0' && t.priority !== 'false' ? 1 : 0;
+  const row = { title: t.title, due_on: t.due_on, contact_id: t.contact_id, done_at: t.done_at || null, status: t.status, assigned_to: t.assigned_to, notes: t.notes, priority: t.priority };
+  if (id) db.prepare('UPDATE crm_tasks SET title=@title, due_on=@due_on, contact_id=@contact_id, done_at=@done_at, status=@status, assigned_to=@assigned_to, notes=@notes, priority=@priority WHERE id=@id').run({ ...row, id });
+  else id = db.prepare('INSERT INTO crm_tasks (title, due_on, contact_id, done_at, status, assigned_to, notes, priority) VALUES (@title,@due_on,@contact_id,@done_at,@status,@assigned_to,@notes,@priority)').run(row).lastInsertRowid;
   if (body.done && !old.done_at && t.contact_id) logActivity(t.contact_id, { kind: 'Task', note: `Done: ${t.title}` });
+  if (t.assigned_to && t.assigned_to !== old.assigned_to && !t.done_at) require('./tasks').tellAssignee(id).catch(() => {});
   return db.prepare('SELECT * FROM crm_tasks WHERE id=?').get(id);
 }
 
@@ -579,7 +602,7 @@ router.delete('/activities/:id', wrap((req, res) => {
   db.prepare('DELETE FROM contact_activities WHERE id=?').run(req.params.id);
   res.json({ ok: true });
 }));
-router.get('/tasks', wrap((req, res) => res.json(listTasks(req.query))));
+router.get('/tasks', wrap((req, res) => res.json(listTasks({ ...req.query, me: req.team ? req.team.id : null }))));
 router.post('/tasks', wrap((req, res) => res.json(saveTask(req.body || {}))));
 router.put('/tasks/:id', wrap((req, res) => res.json(saveTask(req.body || {}, Number(req.params.id)))));
 router.delete('/tasks/:id', wrap((req, res) => { db.prepare('DELETE FROM crm_tasks WHERE id=?').run(req.params.id); res.json({ ok: true }); }));

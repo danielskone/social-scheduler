@@ -48,8 +48,9 @@
       <h2>Put it on your website</h2>
       <p class="muted small"><b>Pages you make in Sites:</b> open the page, tick <b>Chat bubble</b> and save. Done.</p>
       <p class="muted small"><b>Any other website</b> (Hostinger, Wix, WordPress, Squarespace): copy this code and paste it where the site lets you add <b>custom code</b> to every page, often called <b>Header code</b> or <b>Embed code</b>.</p>
-      ${linkbox(s.code, 'Copy code')}</form>`;
+      ${linkbox(s.code, 'Copy code')}</form><div id="faq-box" class="chat-set"></div>`;
     if (!d.open) d.showModal();
+    if (window.VTExtra7) window.VTExtra7.faqEditor(q$('#faq-box', d), s);
     const f = q$('#chat-form', d);
     f.onclick = (e) => { if (e.target.closest('[data-close]')) d.close(); onCopy(e); };
     f.onsubmit = async (e) => {

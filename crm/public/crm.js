@@ -77,7 +77,7 @@
       'This app never bulk-sends texts, so your accounts can\'t get flagged for spam. Tick "OK to email" only when someone said yes.'],
     pipeline: ['pipeline', 'Where every deal stands', 'Each column is a step, from <b>New</b> to <b>Paid / Done</b>. <b>Drag a card</b> to the next column as things move along. The total under each column adds up the money at that step.',
       'Moving a card can start an automation, like a thank-you task when someone reaches "Paid / Done".'],
-    tasks: ['tasks', 'Your to-do list', 'Start each day here. <b>Tick the circle</b> when something is done. Red dates are late, orange ones are due today. When a task has a <b>Write</b> button, it opens a ready-made message in your Mail or Messages app, and you just press Send.'],
+    tasks: ['tasks', 'Your to-do board', 'Start each day here. Drag a task from <b>To do</b> to <b>Doing</b> to <b>Done</b>, or tick the circle. Give a task to someone on your team and they get an email, plus one every morning at 7 with what is due. Red dates are late, orange ones are due today. When a task has a <b>Write</b> button, it opens a ready-made message in your Mail or Messages app, and you just press Send.'],
     appointments: ['appointments', 'Calls and meetings people booked', 'Your week at a glance. When someone books a time, it shows up here, they\'re added to People, they get a confirmation and a reminder email, and <b>your iPhone buzzes</b>. Click an appointment to move or cancel it. Use <b>Time off</b> for vacations. Share a booking link below in a post, your bio or a text.'],
     forms: ['forms', 'Your own form builder', 'Make any form: sign-ups, RSVPs, surveys, quotes, releases with a signature. <b>Describe it</b> or pick a ready-made one, then drag questions around. Share it as a link, a QR code or website code. Every response is saved, people become contacts, and your iPhone gets a ping.'],
     templates: ['templates', 'Messages you send a lot', 'Write a message once, use it again and again. Put <b>{first_name}</b>, <b>{name}</b> or <b>{company}</b> in it and the right details fill in for each person. They open in your own Mail or Messages, one person at a time.'],
@@ -188,7 +188,7 @@
   const HEADS = {
     launchpad: ['Launchpad', 'Set these up once and the CRM works by itself.'],
     dashboard: ['Dashboard', 'How things are going, at a glance.'],
-    conversations: ['Conversations', 'Emails from the people in your CRM. Read and answer them here.'],
+    conversations: ['Conversations', 'Emails, website chats and Facebook and Instagram messages, all in one place. Read and answer them here.'],
     list: ['People', 'Everyone you work with, what\'s next with each of them, and who to follow up with today.'],
     pipeline: ['Pipeline', 'Where every deal stands. Drag a card to move it along.'],
     tasks: ['Tasks', 'Your to-do list. Tick things off as you go.'],
@@ -379,6 +379,12 @@
     <span class="when-chip ${t.done_at ? 'muted' : dueClass(t.due_on)}">${!t.done_at && dueClass(t.due_on) === 'overdue' ? `Late · ${niceDate(t.due_on)}` : !t.done_at && dueClass(t.due_on) === 'due-today' ? 'Today' : niceDate(t.due_on)}</span>
     <button class="x" data-edit title="Edit">✎</button><button class="x" data-del title="Delete">×</button></li>`;
   async function renderTasks() {
+    // The board (To do, Doing, Done) is the main view; the simple list is one tap away.
+    if (window.VTExtra7) {
+      const board = await window.VTExtra7.renderBoard({ editTask, openContact, after: renderTasks });
+      q$('#task-list').hidden = board; q$('#task-list-tools').hidden = board;
+      if (board) return;
+    }
     const tasks = await call(`/tasks${q$('#task-show-done').checked ? '' : '?open=1'}`);
     q$('#task-list').innerHTML = tasks.map((t) => taskRow(t)).join('') || '<li class="muted crm-empty" style="display:block"><span class="big">🎉</span>All caught up! Nothing to do right now. Press "+ Task" at the top to add something.</li>';
   }
@@ -400,18 +406,24 @@
   q$('#task-list').onclick = (e) => taskClick(e, refresh);
 
   async function editTask(t, after = refresh) {
-    const people = await call('/contacts');
+    const [people, team] = await Promise.all([call('/contacts'), call('/taskboard/people').catch(() => [])]);
     const dlg = q$('#crm-edit-dialog');
     dlg.innerHTML = `<form id="task-form"><h1>${t.id ? 'Edit task' : 'New task'}</h1>
       <label class="field"><span>To do</span><input name="title" required value="${h(t.title)}" placeholder="e.g. Call about their invoice" style="width:100%"></label>
       <label class="field"><span>Due</span><input type="date" name="due_on" value="${h(t.due_on || todayStr())}"></label>
-      <label class="field"><span>For</span><select name="contact_id" style="width:100%"><option value="">(nobody in particular)</option>
+      <label class="field"><span>About which person</span><select name="contact_id" style="width:100%"><option value="">(nobody in particular)</option>
         ${people.map((p) => `<option value="${p.id}"${p.id === t.contact_id ? ' selected' : ''}>${h(p.name)}${p.company && p.company !== p.name ? ` (${h(p.company)})` : ''}</option>`).join('')}</select></label>
+      ${team.length > 1 ? `<label class="field"><span>Who does it</span><select name="assigned_to" style="width:100%">${team.map((m) => `<option value="${m.id || ''}"${(m.id || null) === (t.assigned_to || null) ? ' selected' : ''}>${h(m.name)}</option>`).join('')}</select></label>` : ''}
+      <label class="field"><span>Column</span><select name="status"><option value="todo">To do</option><option value="doing"${t.status === 'doing' ? ' selected' : ''}>Doing</option><option value="done"${t.status === 'done' || t.done_at ? ' selected' : ''}>Done</option></select></label>
+      <label class="check"><input type="checkbox" name="priority" ${t.priority ? 'checked' : ''}> Important (shows first, with a red flag)</label>
+      <label class="field"><span>Notes</span><textarea name="notes" rows="3" style="width:100%" placeholder="Anything that helps, like a phone number or what to say">${h(t.notes || '')}</textarea></label>
       <div class="row"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button><span class="muted" id="task-msg"></span></div></form>`;
     q$('[data-close]', dlg).onclick = () => dlg.close();
     q$('#task-form', dlg).onsubmit = async (e) => {
       e.preventDefault();
-      try { await call(t.id ? `/tasks/${t.id}` : '/tasks', { method: t.id ? 'PUT' : 'POST', json: Object.fromEntries(new FormData(e.target)) }); dlg.close(); after(); }
+      const body = Object.fromEntries(new FormData(e.target));
+      body.priority = e.target.priority.checked ? 1 : 0;
+      try { await call(t.id ? `/tasks/${t.id}` : '/tasks', { method: t.id ? 'PUT' : 'POST', json: body }); dlg.close(); after(); }
       catch (err) { q$('#task-msg', dlg).textContent = err.message; }
     };
     dlg.showModal();

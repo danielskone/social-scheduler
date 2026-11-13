@@ -29,12 +29,30 @@ CREATE TABLE IF NOT EXISTS crm_chat_visitors (
 );
 `);
 require('./inbox'); // makes crm_messages
+// The free answer bot: your own questions and answers. No AI service, nothing to pay.
+db.exec(`
+CREATE TABLE IF NOT EXISTS crm_chat_faq (
+  id INTEGER PRIMARY KEY,
+  business_id INTEGER NOT NULL,
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  keywords TEXT,                          -- extra words people might use, like "cost, price, how much"
+  sort INTEGER NOT NULL DEFAULT 0,
+  hits INTEGER NOT NULL DEFAULT 0
+);
+`);
+for (const [col, def] of [['bot_on', 'INTEGER NOT NULL DEFAULT 0'], ['bot_fallback', 'TEXT']]) {
+  if (!db.prepare(`SELECT 1 FROM pragma_table_info('crm_chat_settings') WHERE name='${col}'`).get()) db.exec(`ALTER TABLE crm_chat_settings ADD COLUMN ${col} ${def}`);
+}
+if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_chat_visitors') WHERE name='bot_waited'").get()) db.exec('ALTER TABLE crm_chat_visitors ADD COLUMN bot_waited INTEGER NOT NULL DEFAULT 0');
 if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_messages') WHERE name='channel'").get()) db.exec("ALTER TABLE crm_messages ADD COLUMN channel TEXT NOT NULL DEFAULT 'email'");
 
 const businesses = () => require('./businesses');
 const crm = () => require('./crm');
 const err = (m, status = 400) => Object.assign(new Error(m), { status });
 const DEFAULT_GREETING = 'Hi! Ask us anything. We usually answer within a few minutes.';
+const DEFAULT_FALLBACK = 'Thanks! A person will answer you right here soon. If you leave, we will email you.';
+const BOT = 'Answer bot';
 const ONLINE_MS = 3 * 60e3;
 
 // ---------- Settings (one chat bubble per business) ----------
@@ -47,7 +65,8 @@ function settingsFor(bizId) {
     s = db.prepare('SELECT * FROM crm_chat_settings WHERE business_id=?').get(b.id);
   }
   const src = `${config.publicBaseUrl}/chat/widget.js?k=${s.key}`;
-  return { ...s, enabled: Boolean(s.enabled), business: { id: b.id, name: b.name, color: b.color }, groups: b.groups,
+  return { ...s, enabled: Boolean(s.enabled), bot_on: Boolean(s.bot_on), bot_fallback: s.bot_fallback || DEFAULT_FALLBACK, faq: faqList(b.id),
+    business: { id: b.id, name: b.name, color: b.color }, groups: b.groups,
     code: `<script src="${src}" async></script>`, testLink: `${config.publicBaseUrl}/chat/${s.key}?full=1` };
 }
 function saveSettings(bizId, body = {}) {
@@ -55,7 +74,72 @@ function saveSettings(bizId, body = {}) {
   const greeting = 'greeting' in body ? String(body.greeting || '').trim().slice(0, 300) || DEFAULT_GREETING : s.greeting;
   const group = 'group_name' in body ? String(body.group_name || '').trim().slice(0, 60) || null : s.group_name;
   db.prepare('UPDATE crm_chat_settings SET enabled=?, greeting=?, group_name=? WHERE business_id=?').run('enabled' in body ? (body.enabled ? 1 : 0) : (s.enabled ? 1 : 0), greeting, group, s.business_id);
+  if ('bot_on' in body) db.prepare('UPDATE crm_chat_settings SET bot_on=? WHERE business_id=?').run(body.bot_on ? 1 : 0, s.business_id);
+  if ('bot_fallback' in body) db.prepare('UPDATE crm_chat_settings SET bot_fallback=? WHERE business_id=?').run(String(body.bot_fallback || '').trim().slice(0, 300) || null, s.business_id);
   return settingsFor(s.business_id);
+}
+
+// ---------- Answer bot (your own questions and answers) ----------
+const faqList = (bizId) => db.prepare('SELECT * FROM crm_chat_faq WHERE business_id=? ORDER BY sort, id').all(Number(bizId));
+function saveFaq(bizId, body = {}, id) {
+  const b = businesses().get(bizId) || businesses().all()[0];
+  const old = id ? db.prepare('SELECT * FROM crm_chat_faq WHERE id=?').get(Number(id)) : null;
+  if (id && !old) throw err('Question not found', 404);
+  const question = String(body.question ?? old?.question ?? '').trim().slice(0, 200);
+  const answer = String(body.answer ?? old?.answer ?? '').trim().slice(0, 1500);
+  const keywords = String(body.keywords ?? old?.keywords ?? '').trim().slice(0, 300) || null;
+  if (!question) throw err('Type the question people ask.');
+  if (!answer) throw err('Type your answer.');
+  if (old) db.prepare('UPDATE crm_chat_faq SET question=?, answer=?, keywords=? WHERE id=?').run(question, answer, keywords, old.id);
+  else {
+    if (faqList(b.id).length >= 100) throw err('You can have up to 100 questions.');
+    const sort = (db.prepare('SELECT MAX(sort) AS m FROM crm_chat_faq WHERE business_id=?').get(b.id).m || 0) + 1;
+    db.prepare('INSERT INTO crm_chat_faq (business_id, question, answer, keywords, sort) VALUES (?,?,?,?,?)').run(b.id, question, answer, keywords, sort);
+  }
+  return settingsFor(b.id);
+}
+function deleteFaq(id) {
+  const f = db.prepare('SELECT * FROM crm_chat_faq WHERE id=?').get(Number(id));
+  if (!f) throw err('Question not found', 404);
+  db.prepare('DELETE FROM crm_chat_faq WHERE id=?').run(f.id);
+  return settingsFor(f.business_id);
+}
+const STOP = new Set('a an and are as at be but by can could do does for from get got have hello hey hi how i if in is it its me my no not of on or our please so that the their there this to us was we what when where which who why will with would you your yours'.split(' '));
+const stem = (w) => w.replace(/(ing|ed|es|s)$/, '') || w;
+const wordsOf = (t) => [...new Set(String(t || '').toLowerCase().replace(/[^a-z0-9$ ]+/g, ' ').split(/\s+/).filter((w) => w && !STOP.has(w)).map(stem))];
+// The best matching answer for what they typed, or null. Plain word matching, so it is free and fast.
+function findAnswer(bizId, text) {
+  const said = new Set(wordsOf(text));
+  if (!said.size) return null;
+  let best = null;
+  for (const f of faqList(bizId)) {
+    const q = wordsOf(f.question);
+    const keys = String(f.keywords || '').split(',').map((k) => k.trim().toLowerCase()).filter(Boolean);
+    const phrase = keys.some((k) => k.length > 2 && ` ${String(text).toLowerCase()} `.includes(k));
+    const hit = q.filter((w) => said.has(w)).length + keys.flatMap(wordsOf).filter((w) => said.has(w) && !q.includes(w)).length;
+    const score = phrase ? 1 + hit : q.length ? hit / Math.min(q.length, Math.max(said.size, 2)) : 0;
+    if ((phrase || (hit >= 1 && score >= 0.5)) && (!best || score > best.score)) best = { faq: f, score };
+  }
+  return best && best.faq;
+}
+// After someone writes: answer from your list, or tell them once that a person is coming.
+function botReply(s, c, text, token) {
+  if (!s.bot_on) return null;
+  // Someone on your team answered in the last 30 minutes: the bot stays out of the way.
+  const human = db.prepare("SELECT 1 FROM crm_messages WHERE contact_id=? AND channel='chat' AND direction='out' AND COALESCE(subject,'')<>? AND sent_at > ?")
+    .get(c.id, BOT, new Date(Date.now() - 30 * 60e3).toISOString());
+  if (human) return null;
+  const f = findAnswer(s.business_id, text);
+  let say = f ? f.answer : null;
+  if (f) db.prepare('UPDATE crm_chat_faq SET hits=hits+1 WHERE id=?').run(f.id);
+  else if (token) {
+    const v = db.prepare('SELECT bot_waited FROM crm_chat_visitors WHERE token=?').get(token);
+    if (v && !v.bot_waited) { say = s.bot_fallback || DEFAULT_FALLBACK; db.prepare('UPDATE crm_chat_visitors SET bot_waited=1 WHERE token=?').run(token); }
+  }
+  if (!say) return null;
+  db.prepare(`INSERT INTO crm_messages (contact_id, direction, channel, subject, body, full_text, is_read, sent_at) VALUES (?, 'out', 'chat', ?, ?, ?, 1, ?)`)
+    .run(c.id, BOT, say, say, new Date(Date.now() + 1).toISOString());
+  return { answered: Boolean(f), question: f ? f.question : null };
 }
 const byKey = (k) => { const s = db.prepare('SELECT * FROM crm_chat_settings WHERE key=?').get(String(k || '')); return s && s.enabled ? s : null; };
 
@@ -86,16 +170,18 @@ function start(s, { name, email, text, page } = {}, ip = '') {
   const token = crypto.randomBytes(18).toString('base64url');
   db.prepare('INSERT INTO crm_chat_visitors (token, contact_id, business_id, page, last_seen) VALUES (?,?,?,?,?)').run(token, c.id, s.business_id, String(page || '').slice(0, 300) || null, new Date().toISOString());
   crm().logActivity(c.id, { kind: 'Note', note: `Started a website chat${page ? ` on ${String(page).slice(0, 200)}` : ''}` });
-  addIncoming(c, text, s);
+  addIncoming(c, text, s, findAnswer(s.business_id, text));
+  if (s.bot_on) botReply(s, c, text, token);
   return { token, name: c.name };
 }
-function addIncoming(c, text, s) {
+function addIncoming(c, text, s, faq) {
   db.prepare(`INSERT INTO crm_messages (contact_id, direction, channel, subject, body, full_text, sent_at) VALUES (?, 'in', 'chat', 'Website chat', ?, ?, ?)`)
     .run(c.id, text, text, new Date().toISOString());
   // One buzz per chat every few minutes, not one per line.
   if (!limited(`buzz:${c.id}`, 1, 3 * 60e3)) {
     const b = businesses().get(s.business_id);
-    notify.send(`Chat: ${c.name}`, `${text.slice(0, 180)}${b ? `\n(${b.name} website)` : ''}`, { tags: 'speech_balloon', priority: 'high' }).catch(() => {});
+    const bot = s.bot_on && faq ? `\nThe answer bot answered: ${faq.question}` : '';
+    notify.send(`Chat: ${c.name}`, `${text.slice(0, 180)}${b ? `\n(${b.name} website)` : ''}${bot}`, { tags: 'speech_balloon', priority: 'high' }).catch(() => {});
   }
 }
 function send(s, token, text) {
@@ -107,7 +193,8 @@ function send(s, token, text) {
   const c = db.prepare('SELECT * FROM contacts WHERE id=?').get(v.contact_id);
   if (!c) throw err('This chat ended. Please start a new one.', 404);
   db.prepare('UPDATE crm_chat_visitors SET last_seen=? WHERE token=?').run(new Date().toISOString(), v.token);
-  addIncoming(c, text, s);
+  addIncoming(c, text, s, findAnswer(s.business_id, text));
+  if (s.bot_on) botReply(s, c, text, v.token);
   return messages(s, token, 0);
 }
 function messages(s, token, after = 0) {
@@ -158,6 +245,7 @@ b.onclick=open;addEventListener('message',function(e){if(e.data==='vt-chat-close
 }
 function chatPage(s, { full } = {}) {
   const b = businesses().get(s.business_id) || { name: 'Chat', color: '#4f46e5' };
+  const faq = s.bot_on ? faqList(s.business_id).slice(0, 6).map((f) => ({ q: f.question, a: f.answer })) : [];
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Chat with ${esc(b.name)}</title>
 <style>:root{--c:${esc(b.color)};--bg:#fff;--soft:#f3f4f8;--text:#171a24;--muted:#6a7184;--line:#e4e7ef}
 @media (prefers-color-scheme:dark){:root{--bg:#171a22;--soft:#232733;--text:#eceef4;--muted:#9aa1b4;--line:#2d3240}}
@@ -171,9 +259,11 @@ header{background:var(--c);color:#fff;padding:14px 16px;display:flex;align-items
 [hidden]{display:none!important}form{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}textarea,input{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px;width:100%}
 textarea{resize:none;height:44px}button.go{background:var(--c);color:#fff;border:0;border-radius:12px;padding:0 16px;font:inherit;font-weight:700;cursor:pointer}
 .start{padding:14px;display:grid;gap:10px;border-top:1px solid var(--line)}.start textarea{height:80px}.start button{padding:12px}.err{color:#c92a2a;font-size:.88rem}.hp{position:absolute;left:-9999px}
-.small{font-size:.78rem;color:var(--muted)}</style></head><body><div class="app">
+.small{font-size:.78rem;color:var(--muted)}
+.qs{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 4px}.qs button{font:inherit;font-size:.86rem;background:var(--bg);color:var(--c);border:1.5px solid var(--c);border-radius:99px;padding:6px 12px;cursor:pointer;text-align:left}
+@media (prefers-color-scheme:dark){.qs button{color:var(--text)}}</style></head><body><div class="app">
 <header><b>${esc(b.name)}<span>We usually answer in a few minutes</span></b>${full ? '' : '<button class="x" id="x" aria-label="Close chat">×</button>'}</header>
-<div class="msgs" id="msgs"><div class="m them">${esc(s.greeting || DEFAULT_GREETING)}</div></div>
+<div class="msgs" id="msgs"><div class="m them">${esc(s.greeting || DEFAULT_GREETING)}</div>${faq.length ? '<div class="qs" id="qs" aria-label="Common questions"></div>' : ''}</div>
 <form class="start" id="start" hidden><input name="name" placeholder="Your name" required maxlength="80" autocomplete="name">
 <input name="email" type="email" placeholder="Email (so we can answer if you leave)" maxlength="200" autocomplete="email">
 <textarea name="text" placeholder="Your question" required maxlength="2000"></textarea><input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
@@ -182,6 +272,10 @@ textarea{resize:none;height:44px}button.go{background:var(--c);color:#fff;border
 </div><script>
 (function(){var K=${JSON.stringify(s.key)},store='vtchat-'+K,tok=null,last=0,box=document.getElementById('msgs'),page=new URLSearchParams(location.search).get('page')||'';
 try{tok=localStorage.getItem(store)}catch(e){}
+var FAQ=${JSON.stringify(faq).replace(/</g, '\\u003c')};
+function local(t,me){var d=document.createElement('div');d.className='m '+(me?'me':'them');d.textContent=t;box.appendChild(d);box.scrollTop=box.scrollHeight;}
+var qs=document.getElementById('qs');if(qs)FAQ.forEach(function(f){var b=document.createElement('button');b.type='button';b.textContent=f.q;b.onclick=function(){
+if(tok){api('send',{token:tok,text:f.q}).then(function(r){r.messages.forEach(add)});}else{local(f.q,true);local(f.a,false);var n=document.getElementById('more');if(!n){n=document.createElement('div');n.id='more';n.className='note';n.textContent='Still need help? Type your question below.';}box.appendChild(n);box.scrollTop=box.scrollHeight;}};qs.appendChild(b);});
 var x=document.getElementById('x');if(x)x.onclick=function(){parent.postMessage('vt-chat-close','*')};
 function add(m){if(m.id<=last)return;last=m.id;var d=document.createElement('div');d.className='m '+(m.me?'me':'them');d.textContent=m.text;box.appendChild(d);box.scrollTop=box.scrollHeight;}
 function api(p,body){return fetch(K+'/'+p,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){if(!r.ok)throw Object.assign(new Error(j.error||'Error'),{status:r.status});return j;})});}
@@ -229,6 +323,10 @@ const router = express.Router();
 const jwrap = (fn) => async (req, res) => { try { res.json(await fn(req)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); } };
 router.get('/settings', jwrap((req) => settingsFor(req.query.biz)));
 router.put('/settings', jwrap((req) => saveSettings(req.query.biz, req.body || {})));
+router.post('/faq', jwrap((req) => saveFaq(req.query.biz, req.body || {})));
+router.put('/faq/:id', jwrap((req) => saveFaq(req.query.biz, req.body || {}, req.params.id)));
+router.delete('/faq/:id', jwrap((req) => deleteFaq(req.params.id)));
+router.post('/faq-test', jwrap((req) => { const f = findAnswer(settingsFor(req.query.biz).business_id, (req.body || {}).text); return { answer: f ? f.answer : null, question: f ? f.question : null }; }));
 router.post('/:contactId/reply', jwrap((req) => reply(req.params.contactId, (req.body || {}).text)));
 
-module.exports = { settingsFor, saveSettings, start, send, messages, reply, isOnline, publicRouter, router, byKey };
+module.exports = { settingsFor, saveSettings, start, send, messages, reply, isOnline, publicRouter, router, byKey, saveFaq, deleteFaq, findAnswer, faqList };
