@@ -35,7 +35,17 @@ function layout(title, body, { wide = false } = {}) {
 
 const msg = (error, ok) => `${error ? `<p class="err">${esc(error)}</p>` : ''}${ok ? `<p class="ok">${esc(ok)}</p>` : ''}`;
 
-function welcome({ priceLabel, trialDays, signupsOpen }) {
+function welcome({ priceLabel, trialDays, signupsOpen, beta }) {
+  if (beta) {
+    return layout('Beta test', `
+<div class="hero">
+  <h1>Viral Post beta</h1>
+  <p class="muted">Schedule your posts, track what works, and keep your contacts in a simple CRM.</p>
+  <p>This beta is <b>invite only</b>. If you got an invite link, open it to make your password. Already done that? Sign in.</p>
+  <div class="row"><a class="btn primary" href="/login">Sign in</a></div>
+</div>
+<p class="muted small" style="text-align:center"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>`);
+  }
   return layout('Schedule your social posts', `
 <div class="hero">
   <h1>Plan a month of posts in one sitting</h1>
@@ -46,17 +56,18 @@ function welcome({ priceLabel, trialDays, signupsOpen }) {
 <p class="muted small" style="text-align:center"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>`);
 }
 
-function signup({ error = '', values = {}, trialDays, signupsOpen }) {
+function signup({ error = '', values = {}, trialDays, signupsOpen, owner = false }) {
   if (!signupsOpen) return layout('Sign up', '<div class="card"><h1>Sign-ups are closed</h1><p class="muted">New accounts are not open right now. If you already have one, <a href="/login">sign in</a>.</p></div>');
   return layout('Create your account', `
 <form class="card" method="post" action="/signup">
-  <h1>Create your account</h1>
-  <p class="muted">${trialDays ? `Free for ${trialDays} days. No card needed to start.` : 'Takes less than a minute.'}</p>
+  <h1>${owner ? 'Make your owner account' : 'Create your account'}</h1>
+  <p class="muted">${owner ? 'Use the owner email you gave Viral Post. Testers can\'t sign up here; you invite them from the Customers page.' : trialDays ? `Free for ${trialDays} days. No card needed to start.` : 'Takes less than a minute.'}</p>
+  ${owner ? '<input type="hidden" name="owner" value="1">' : ''}
   ${msg(error)}
   <label for="name">Your name</label><input id="name" type="text" name="name" autocomplete="name" value="${esc(values.name)}" required maxlength="100">
   <label for="email">Email</label><input id="email" type="email" name="email" autocomplete="email" value="${esc(values.email)}" required maxlength="200">
   <label for="password">Password (8 or more characters)</label><input id="password" type="password" name="password" autocomplete="new-password" minlength="8" required>
-  <label class="check"><input type="checkbox" name="terms" value="1" required> I agree to the <a href="/terms" target="_blank">Terms</a> and <a href="/privacy" target="_blank">Privacy Policy</a>.</label>
+  <label class="check"><input type="checkbox" name="terms" value="1" required> <span>I agree to the <a href="/terms" target="_blank">Terms</a> and <a href="/privacy" target="_blank">Privacy Policy</a>.</span></label>
   <button class="btn primary full" type="submit">Create account</button>
   <p class="muted small" style="margin-top:14px">Already have an account? <a href="/login">Sign in</a></p>
 </form>`);
@@ -95,6 +106,34 @@ function reset({ token, error = '' }) {
   <label for="password">New password (8 or more characters)</label><input id="password" type="password" name="password" autocomplete="new-password" minlength="8" required autofocus>
   <button class="btn primary full" type="submit">Save new password</button>
 </form>`);
+}
+
+function invite({ token, user, beta, error = '' }) {
+  if (!user) return layout('Invite', `<div class="card"><h1>Link expired</h1>${msg(error)}<p class="muted">Ask the person who invited you for a new link. Already have a password? <a href="/login">Sign in</a>.</p></div>`);
+  return layout('Welcome', `
+<form class="card" method="post" action="/invite">
+  <h1>Welcome${user.name ? `, ${esc(user.name.split(' ')[0])}` : ''}!</h1>
+  <p class="muted">${beta ? 'You\'re invited to test Viral Post. ' : ''}Pick a password and you're in. You'll sign in with <b>${esc(user.email)}</b>.</p>
+  ${msg(error)}
+  <input type="hidden" name="token" value="${esc(token)}">
+  ${user.name ? '' : '<label for="name">Your name</label><input id="name" type="text" name="name" autocomplete="name" maxlength="100">'}
+  <input type="email" name="email" value="${esc(user.email)}" autocomplete="username" hidden>
+  <label for="password">Password (8 or more characters)</label><input id="password" type="password" name="password" autocomplete="new-password" minlength="8" required autofocus>
+  ${user.accepted_terms_at ? '' : '<label class="check"><input type="checkbox" name="terms" value="1" required> <span>I agree to the <a href="/terms" target="_blank">Terms</a> and <a href="/privacy" target="_blank">Privacy Policy</a>.</span></label>'}
+  <button class="btn primary full" type="submit">Save password and open Viral Post</button>
+</form>`);
+}
+
+// The message the owner sends a new tester (also emailed when email is set up).
+function inviteText({ name, link }) {
+  return `Hi${name ? ` ${name.split(' ')[0]}` : ''}! I'd love your help testing my social media scheduler, Viral Post.
+
+1. Open this link and pick a password (the link works for 14 days):
+${link}
+2. Go to Accounts and connect your Facebook Page or Instagram. I have to add you as a tester in Facebook first, so tell me your Facebook name.
+3. Schedule a post or two, and tell me anything that's confusing.
+
+Thank you!`;
 }
 
 const STATUS = {
@@ -152,7 +191,7 @@ ${msg(error, ok)}
 <p class="muted small">Signed in as ${esc(user.email)} · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>`);
 }
 
-function admin({ users, running, billingEnabled, notice = '' }) {
+function admin({ users, running, billingEnabled, beta, notice = '', invite: inv = null, error = '', values = {} }) {
   const rows = users.map((u) => `<tr>
 <td>${u.id}</td><td><b>${esc(u.name || '-')}</b><br><span class="muted">${esc(u.email)}</span></td>
 <td>${statusPill(u.status)}${u.role === 'admin' ? ' <span class="pill">owner</span>' : ''}${u.status === 'trialing' ? `<br><span class="muted">until ${day(u.trial_ends_at)}</span>` : ''}</td>
@@ -162,10 +201,23 @@ function admin({ users, running, billingEnabled, notice = '' }) {
     .map((a) => { const [act, label] = a.split(':'); return `<form method="post" action="/admin/users/${u.id}"><input type="hidden" name="action" value="${act}"><button class="btn" type="submit">${label}</button></form>`; }).join(' ')}</td>
 </tr>`).join('');
   return layout('Customers', `
-<div class="top"><h1>Customers (${users.length})</h1><div><a class="btn primary" href="/">Open Viral Post</a> <a class="btn" href="/account">Your account</a></div></div>
+<div class="top"><h1>${beta ? 'Beta testers' : 'Customers'} (${users.length})</h1><div><a class="btn primary" href="/">Open Viral Post</a> <a class="btn" href="/account">Your account</a></div></div>
 ${notice ? `<div class="card"><p class="ok">${notice}</p></div>` : ''}
-<p class="muted">${billingEnabled ? 'Payments: Stripe is ON.' : 'Payments: OFF (new customers get the free trial; add your Stripe keys to switch payments on).'}</p>
+${inv ? `<div class="card"><p class="ok">${esc(inv.user.email)} can now sign in.</p>
+<p>${inv.emailed ? 'An invite email is on its way to them. You can also send them this message yourself:' : 'Copy this message and send it to them by text or email:'}</p>
+<textarea readonly rows="9" style="width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text)" onclick="this.select()">${esc(inviteText({ name: inv.user.name, link: inv.link }))}</textarea>
+<p class="muted small">Then add them as a Tester in your Meta app (App roles, Roles, Add People) so they can connect Facebook and Instagram.</p></div>` : ''}
+<form class="card" method="post" action="/admin/invite">
+  <h2>${beta ? 'Add a beta tester' : 'Add a customer'}</h2>
+  ${msg(error)}
+  <p class="muted small">They get their own login and their own empty Viral Post. They never see your posts, accounts or contacts.${beta ? ' Testers use it free.' : ''}</p>
+  <label for="inv-name">Their name</label><input id="inv-name" type="text" name="name" maxlength="100" value="${esc(values.name)}">
+  <label for="inv-email">Their email</label><input id="inv-email" type="email" name="email" maxlength="200" required value="${esc(values.email)}">
+  ${beta ? '' : '<label class="check"><input type="checkbox" name="free" value="1"> Give them free access (no trial end)</label>'}
+  <button class="btn primary full" type="submit">Make their login</button>
+</form>
+<p class="muted">${beta ? 'Beta: invite only. Testers use it free.' : billingEnabled ? 'Payments: Stripe is ON.' : 'Payments: OFF (new customers get the free trial; add your Stripe keys to switch payments on).'}</p>
 <div class="card scroll"><table><tr><th>#</th><th>Customer</th><th>Plan</th><th>Joined</th><th>App</th><th></th></tr>${rows}</table></div>`, { wide: true });
 }
 
-module.exports = { layout, welcome, signup, login, forgot, reset, account, admin, esc };
+module.exports = { layout, welcome, signup, login, forgot, reset, invite, inviteText, account, admin, esc };

@@ -131,11 +131,29 @@ function createStore(dir, { trialDays = 14, adminEmail = '' } = {}) {
     endSession: (t) => db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha(t || '')),
 
     // ---- forgotten passwords: one-time link that works for 1 hour ----
-    createReset(userId) {
+    createReset(userId, ms = 3600e3) {
       const t = token();
-      db.prepare('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(sha(t), userId, iso(Date.now() + 3600e3));
+      db.prepare('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(sha(t), userId, iso(Date.now() + ms));
       return t;
     },
+    // Is this invite or reset link still good? Returns its person, or null.
+    resetUser(t) {
+      const r = db.prepare('SELECT * FROM password_resets WHERE token_hash = ? AND used = 0').get(sha(t || ''));
+      return r && r.expires_at >= iso(Date.now()) ? q.byId.get(r.user_id) || null : null;
+    },
+
+    // ---- beta testers: the owner adds them; they pick their own password from a link ----
+    inviteUser({ email, name, status = 'free' }) {
+      email = String(email || '').trim();
+      if (!EMAIL_RE.test(email) || email.length > 200) throw new Error('Please enter a real email address.');
+      if (q.byEmail.get(email)) throw new Error('That email already has an account. Use "Make reset link" on their row instead.');
+      // A random password nobody knows, until they pick their own from the invite link.
+      const info = db.prepare(`INSERT INTO users (email, name, password_hash, role, status, trial_ends_at)
+        VALUES (?, ?, ?, 'customer', ?, ?)`).run(email, String(name || '').trim().slice(0, 100), hashPassword(token()), status, iso(Date.now() + trialDays * 864e5));
+      const user = q.byId.get(info.lastInsertRowid);
+      return { user, token: store.createReset(user.id, 14 * 864e5) };
+    },
+    acceptTerms: (userId) => db.prepare("UPDATE users SET accepted_terms_at = datetime('now') WHERE id = ? AND accepted_terms_at IS NULL").run(userId),
     useReset(t, password) {
       const r = db.prepare('SELECT * FROM password_resets WHERE token_hash = ? AND used = 0').get(sha(t || ''));
       if (!r || r.expires_at < iso(Date.now())) throw new Error('That reset link has expired. Ask for a new one.');

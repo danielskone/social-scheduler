@@ -81,6 +81,7 @@ function on() {
   }
   console.log('BACKGROUND ON. Each app runs by itself, and starts again whenever you log in:');
   for (const a of want) console.log(`  ${a.name.padEnd(17)} http://localhost:${portOf(a)}`);
+  require('./beta').restartIfOn(); // the beta tester site, if you turned it on (npm run beta)
   console.log('You can close this Terminal window.');
 }
 

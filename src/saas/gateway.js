@@ -14,7 +14,10 @@
 //   SAAS_DIR               where accounts and customer folders are kept (default ./saas-data)
 //   SAAS_TRIAL_DAYS        default 14
 //   SAAS_PRICE_LABEL       shown on the site, e.g. "$29/month"
-//   SAAS_SIGNUPS           "open" (default) or "closed"
+//   SAAS_SIGNUPS           "open" (default) or "closed" (default "closed" in beta)
+//   SAAS_BETA              1 = beta test: invite only, testers get free access (npm run beta)
+//   SAAS_YOUTUBE / SAAS_TIKTOK  "on" lets customers connect YouTube / TikTok (default off; the
+//                          funnel address must be added in Google's / TikTok's settings first)
 //   SAAS_APPS              which apps customers get: "all" (default) or e.g. "scheduler" for Viral Post
 //                          on its own, or "scheduler,crm" (crm, clips)
 //   SAAS_SMTP_HOST/PORT/USER/PASS, SAAS_EMAIL_FROM  to email password-reset links (optional)
@@ -34,7 +37,9 @@ function createGateway(opts = {}) {
   const dir = opts.dir || env.SAAS_DIR || path.join(__dirname, '..', '..', 'saas-data');
   const trialDays = Number(opts.trialDays ?? env.SAAS_TRIAL_DAYS ?? 14);
   const priceLabel = env.SAAS_PRICE_LABEL || '$29/month';
-  const signupsOpen = (env.SAAS_SIGNUPS || 'open') !== 'closed';
+  const beta = /^(1|on|yes|true)$/i.test(String(env.SAAS_BETA || ''));
+  const signupsOpen = (env.SAAS_SIGNUPS || (beta ? 'closed' : 'open')) !== 'closed';
+  const adminEmail = String(env.SAAS_ADMIN_EMAIL || '').trim().toLowerCase();
   const secure = publicUrl.startsWith('https://');
 
   const store = opts.store || createStore(dir, { trialDays, adminEmail: env.SAAS_ADMIN_EMAIL || '' });
@@ -100,9 +105,16 @@ function createGateway(opts = {}) {
   });
 
   // ---- Sign up / sign in / sign out ----
-  app.get('/signup', (req, res) => res.send(pages.signup({ trialDays, signupsOpen })));
+  // When sign-ups are closed (the beta), only the owner can make an account here, at
+  // /signup?owner=1. Testers get an invite link from the owner instead.
+  const ownerSignup = (req) => !signupsOpen && (req.query.owner === '1' || req.body?.owner === '1') && adminEmail && !store.listUsers().some((u) => u.role === 'admin');
+  app.get('/signup', (req, res) => res.send(pages.signup({ trialDays: beta ? 0 : trialDays, signupsOpen: signupsOpen || ownerSignup(req), owner: ownerSignup(req) })));
   app.post('/signup', sameSite, form, (req, res) => {
-    if (!signupsOpen) return res.status(403).send(pages.signup({ signupsOpen }));
+    const owner = ownerSignup(req);
+    if (!signupsOpen && !owner) return res.status(403).send(pages.signup({ signupsOpen }));
+    if (owner && String(req.body.email || '').trim().toLowerCase() !== adminEmail) {
+      return res.status(400).send(pages.signup({ error: 'Use the owner email that is saved in Viral Post\'s settings.', values: { name: req.body.name, email: req.body.email }, signupsOpen: true, owner: true }));
+    }
     if (tooMany(`signup:${req.ip}`, Number(env.SAAS_SIGNUP_LIMIT || 5), 3600e3)) return res.status(429).send(pages.signup({ error: 'Too many new accounts from here. Please try again later.', values: req.body, trialDays, signupsOpen }));
     try {
       const user = store.createUser({ email: req.body.email, name: req.body.name, password: req.body.password, acceptedTerms: req.body.terms === '1' });
@@ -110,7 +122,7 @@ function createGateway(opts = {}) {
       tenants.start(user.id).catch(() => {});
       res.redirect(303, '/');
     } catch (e) {
-      res.status(400).send(pages.signup({ error: e.message, values: { name: req.body.name, email: req.body.email }, trialDays, signupsOpen }));
+      res.status(400).send(pages.signup({ error: e.message, values: { name: req.body.name, email: req.body.email }, trialDays, signupsOpen: true, owner }));
     }
   });
 
@@ -148,6 +160,27 @@ function createGateway(opts = {}) {
     }
     res.send(pages.forgot({ ok, canEmail: true }));
   });
+  // Invite links (from the owner's Customers page): pick a password and you're in.
+  app.get('/invite', (req, res) => {
+    const user = store.resetUser(req.query.token);
+    res.status(user ? 200 : 400).send(pages.invite({ token: req.query.token || '', user, beta, error: user ? '' : 'This link has expired or was already used. Ask for a new one.' }));
+  });
+  app.post('/invite', sameSite, form, (req, res) => {
+    const user = store.resetUser(req.body.token);
+    if (!user) return res.status(400).send(pages.invite({ token: '', user: null, beta, error: 'This link has expired or was already used. Ask for a new one.' }));
+    if (!user.accepted_terms_at && req.body.terms !== '1') return res.status(400).send(pages.invite({ token: req.body.token, user, beta, error: 'Please agree to the Terms and Privacy Policy.' }));
+    try {
+      store.useReset(req.body.token, req.body.password);
+      store.acceptTerms(user.id);
+      if (req.body.name && !user.name) store.update(user.id, { name: String(req.body.name).trim().slice(0, 100) });
+      setSession(res, store.createSession(user.id));
+      if (access(store.getUser(user.id)).ok) tenants.start(user.id).catch(() => {});
+      res.redirect(303, '/');
+    } catch (e) {
+      res.status(400).send(pages.invite({ token: req.body.token, user, beta, error: e.message }));
+    }
+  });
+
   app.get('/reset', (req, res) => res.send(pages.reset({ token: req.query.token || '' })));
   app.post('/reset', sameSite, form, (req, res) => {
     try {
@@ -167,7 +200,7 @@ function createGateway(opts = {}) {
   };
   const needAdmin = (req, res, next) => (req.user.role === 'admin' ? next() : res.status(404).send('Not found'));
 
-  app.get('/welcome', (req, res) => res.send(pages.welcome({ priceLabel, trialDays, signupsOpen })));
+  app.get('/welcome', (req, res) => res.send(pages.welcome({ priceLabel, trialDays, signupsOpen, beta })));
 
   const accountPage = (req, res, extra = {}) => {
     const settings = tenants.readSettings(req.user.id);
@@ -215,7 +248,23 @@ function createGateway(opts = {}) {
   });
 
   // ---- Owner's Customers page ----
-  app.get('/admin', needUser, needAdmin, (req, res) => res.send(pages.admin({ users: store.listUsers(), running: tenants.isRunning, billingEnabled: billing.enabled })));
+  const adminPage = (res, extra = {}) => res.send(pages.admin({ users: store.listUsers(), running: tenants.isRunning, billingEnabled: billing.enabled, beta, ...extra }));
+  app.get('/admin', needUser, needAdmin, (req, res) => adminPage(res));
+  // Add a beta tester: makes their login and an invite link (good for 14 days) to send them.
+  app.post('/admin/invite', sameSite, needUser, needAdmin, form, (req, res) => {
+    try {
+      const { user, token } = store.inviteUser({ email: req.body.email, name: req.body.name, status: beta || req.body.free === '1' ? 'free' : 'trialing' });
+      const link = `${publicUrl}/invite?token=${token}`;
+      if (mailer) {
+        mailer({ to: user.email, subject: 'You\'re invited to test Viral Post', text: pages.inviteText({ name: user.name, link }) })
+          .catch((e) => console.error('[invite email]', e.message));
+      }
+      adminPage(res, { invite: { user, link, emailed: Boolean(mailer) } });
+    } catch (e) {
+      res.status(400);
+      adminPage(res, { error: e.message, values: req.body });
+    }
+  });
   app.post('/admin/users/:id', sameSite, needUser, needAdmin, form, (req, res) => {
     const u = store.getUser(Number(req.params.id));
     if (!u || u.role === 'admin') return res.redirect(303, '/admin');
@@ -226,11 +275,11 @@ function createGateway(opts = {}) {
     else if (a === 'disable') store.update(u.id, { status: 'disabled' });
     else if (a === 'enable') store.update(u.id, { status: u.stripe_subscription_id ? 'active' : 'trialing' });
     else if (a === 'reset') {
-      const link = `${publicUrl}/reset?token=${store.createReset(u.id)}`;
-      notice = `Reset link for ${pages.esc(u.email)} (works for 1 hour, send it to them): <br><code style="word-break:break-all">${pages.esc(link)}</code>`;
+      const link = `${publicUrl}/invite?token=${store.createReset(u.id, 3 * 864e5)}`;
+      notice = `Password link for ${pages.esc(u.email)} (works for 3 days, send it to them): <br><code style="word-break:break-all">${pages.esc(link)}</code>`;
     }
     syncTenant(store.getUser(u.id));
-    if (notice) return res.send(pages.admin({ users: store.listUsers(), running: tenants.isRunning, billingEnabled: billing.enabled, notice }));
+    if (notice) return adminPage(res, { notice });
     res.redirect(303, '/admin');
   });
 
