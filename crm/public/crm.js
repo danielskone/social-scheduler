@@ -197,7 +197,7 @@
     templates: ['Templates', 'Messages you send a lot, written once.'],
     email: ['Email', 'Newsletters and email blasts to people who said yes.'],
     automations: ['Automations', 'Your helper that works while you\'re busy.'],
-    payments: ['Payments', 'Invoices, quotes, products, coupons, referrals, monthly plans and contracts.'],
+    payments: ['Payments', 'Invoices, quotes, products, coupons, referrals, plans, contracts, gift cards and points.'],
     sites: ['Sites', 'Simple websites, and funnels that lead people from one page to the next.'],
     courses: ['Courses', 'Lessons people watch in their private members area.'],
     events: ['Events', 'Event pages, free or paid tickets, and check-in at the door.'],

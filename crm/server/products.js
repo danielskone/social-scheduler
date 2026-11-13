@@ -71,13 +71,19 @@ function buyer(body, bizId, note) {
   return c;
 }
 // Starts a card payment: makes the invoice, marks it sent, and returns the Stripe page to go to.
-async function startPayment({ contact, items, note }) {
+// gift: a gift card code; it pays first, and the card pays for the rest (or none is needed).
+async function startPayment({ contact, items, note, gift }) {
   const total = items.reduce((n, i) => n + i.qty * i.price, 0);
-  if (total > 0 && !invoices().settings().stripe) throw err('Card payments are not set up yet. Please contact us to pay another way.');
+  const card = gift && String(gift).trim() && total > 0 ? require('./giftcards').usable(gift) : null;
+  if (total > 0 && !invoices().settings().stripe && !(card && card.balance >= total)) throw err('Card payments are not set up yet. Please contact us to pay another way.');
   const inv = invoices().save({ contact_id: contact.id, items, note }, null, { allowZero: total <= 0 });
   await invoices().send(inv.id, { by: 'link' });
   // Free after a coupon: no card needed.
   if (total <= 0) { invoices().markPaid(inv.id, 'Coupon'); return { invoice: invoices().get(inv.id), url: `../invoice/${inv.token}?paid=1`, free: true }; }
+  if (card) {
+    const g = require('./giftcards').applyToInvoice(inv.token, card.code);
+    if (g.paid) return { invoice: invoices().get(inv.id), url: `../invoice/${inv.token}?paid=1`, free: true };
+  }
   try { require('./checkouts').track({ invoiceId: inv.id }); } catch {}
   const out = await invoices().checkout(inv.token);
   return { invoice: invoices().get(inv.id), url: out.url };
@@ -88,9 +94,10 @@ async function buy(token, body = {}) {
   const qty = Math.min(p.max_qty, Math.max(1, Math.round(Number(body.qty) || 1)));
   const cp = require('./coupons').check(body.coupon, 'products', p.price);
   const price = cp ? cp.price : p.price;
-  if (price > 0 && !invoices().settings().stripe) throw err('Card payments are not set up yet. Please contact us to pay another way.');
+  if (price > 0 && !invoices().settings().stripe && !String(body.gift || '').trim()) throw err('Card payments are not set up yet. Please contact us to pay another way.');
+  if (String(body.gift || '').trim()) require('./giftcards').usable(body.gift); // a bad code stops before anything is made
   const c = buyer(body, p.business_id, `Started buying ${qty > 1 ? `${qty} x ` : ''}${p.name} (${money(price * qty)}${cp ? `, coupon ${cp.coupon.code}` : ''})`);
-  const r = await startPayment({ contact: c, items: [{ what: cp ? `${p.name} (coupon ${cp.coupon.code})` : p.name, qty, price }], note: p.description || null });
+  const r = await startPayment({ contact: c, items: [{ what: cp ? `${p.name} (coupon ${cp.coupon.code})` : p.name, qty, price }], note: p.description || null, gift: body.gift });
   if (cp) require('./coupons').use(cp.coupon.id);
   db.prepare('UPDATE crm_products SET sold=sold+? WHERE id=?').run(qty, p.id);
   return r;
@@ -99,7 +106,7 @@ async function buy(token, body = {}) {
 // ---------- The public "Buy now" page ----------
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 const nl = (v) => esc(v).replace(/\n/g, '<br>');
-function buyPage({ title, sub, description, price, maxQty = 1, bizId, error, values = {}, button = 'Pay with card', extra = '', coupon = false }) {
+function buyPage({ title, sub, description, price, maxQty = 1, bizId, error, values = {}, button = 'Pay with card', extra = '', coupon = false, gift = true }) {
   const b = (bizId && businesses().get(bizId)) || businesses().all()[0] || { name: '', color: '#4f46e5' };
   const stripeOn = invoices().settings().stripe;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}${b.name ? ` · ${esc(b.name)}` : ''}</title>
@@ -119,6 +126,7 @@ ${error ? `<div class="err">${esc(error)}</div>` : ''}
 <label for="n">Your name</label><input id="n" name="name" required maxlength="80" autocomplete="name" value="${esc(values.name)}">
 <label for="e">Email <span class="muted">(for your receipt)</span></label><input id="e" name="email" type="email" required maxlength="200" autocomplete="email" value="${esc(values.email)}">
 <label for="p">Phone <span class="muted">(optional)</span></label><input id="p" name="phone" type="tel" maxlength="40" autocomplete="tel" value="${esc(values.phone)}">
+${gift && price > 0 && (() => { try { return require('./giftcards').anyActive(); } catch { return false; } })() ? `<label for="gc">Gift card code <span class="muted">(optional)</span></label><input id="gc" name="gift" maxlength="20" autocapitalize="characters" autocomplete="off" placeholder="ABCD-EFGH-JKMN" value="${esc(values.gift)}">` : ''}
 ${coupon ? `<label for="cp">Coupon code <span class="muted">(optional)</span></label><input id="cp" name="coupon" maxlength="30" autocapitalize="characters" value="${esc(values.coupon)}">` : ''}
 <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
 <button type="submit"${price > 0 && !stripeOn ? ' disabled' : ''}>${esc(button)}</button>

@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS crm_invoices (
 );
 CREATE TABLE IF NOT EXISTS crm_pay_settings (key TEXT PRIMARY KEY, value TEXT);
 `);
+// Part paid with a gift card (giftcards.js): the card covers this much, the rest is paid by card or cash.
+if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_invoices') WHERE name='gift_paid'").get()) db.exec('ALTER TABLE crm_invoices ADD COLUMN gift_paid REAL NOT NULL DEFAULT 0');
 const getSet = (k) => db.prepare('SELECT value FROM crm_pay_settings WHERE key=?').get(k)?.value || '';
 const setSet = (k, v) => db.prepare('INSERT INTO crm_pay_settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, String(v ?? ''));
 const crm = () => require('./crm');
@@ -86,7 +88,8 @@ function withExtras(inv) {
   const c = inv.contact_id ? db.prepare('SELECT id, name, company, email, phone, address, group_name FROM contacts WHERE id=?').get(inv.contact_id) : null;
   const b = inv.business_id ? businesses().get(inv.business_id) : (c ? businesses().ownerOf(c.group_name) : null);
   const overdue = inv.status === 'sent' && inv.due_date && inv.due_date < new Date().toISOString().slice(0, 10);
-  return { ...inv, ...sums(inv.items, inv.tax_rate), contact: c, business: b ? { id: b.id, name: b.name, color: b.color, email: b.email, phone: b.phone, address: b.address, website: b.website } : null,
+  const s = sums(inv.items, inv.tax_rate);
+  return { ...inv, ...s, gift_paid: round(inv.gift_paid || 0), due: Math.max(0, round(s.total - (inv.gift_paid || 0))), contact: c, business: b ? { id: b.id, name: b.name, color: b.color, email: b.email, phone: b.phone, address: b.address, website: b.website } : null,
     link: linkFor(inv), label: overdue ? 'overdue' : inv.status };
 }
 
@@ -118,6 +121,7 @@ function save(body = {}, id, { allowZero = false } = {}) {
   const due = /^\d{4}-\d{2}-\d{2}$/.test(body.due_date || '') ? body.due_date : body.due_date === '' ? null : (old ? old.due_date : null);
   const note = 'note' in body ? String(body.note || '').trim().slice(0, 1000) || null : (old ? old.note : null);
   const { total } = sums(items, taxRate);
+  if (old && old.gift_paid && total < old.gift_paid) throw err(`A gift card already paid ${money(old.gift_paid)}, so the total can't be lower than that.`);
   if (total <= 0 && !allowZero) throw err('The total must be more than $0.');
   if (total > 999999) throw err('That total is too big for one invoice.');
   const biz = businesses().ownerOf(c.group_name);
@@ -174,6 +178,8 @@ function markPaid(id, how = 'Cash or check', { quiet } = {}) {
   if (inv.status === 'paid') return inv;
   if (inv.status === 'void') throw err('This invoice was cancelled.');
   db.prepare("UPDATE crm_invoices SET status='paid', paid_at=?, paid_how=? WHERE id=?").run(new Date().toISOString(), String(how).slice(0, 60), inv.id);
+  try { require('./giftcards').onPaid(inv.id); } catch (e) { console.error(`[invoices] ${e.message}`); }
+  try { require('./loyalty').onPaid(get(inv.id)); } catch (e) { console.error(`[invoices] ${e.message}`); }
   try { require('./courses').onPaid(inv.id); } catch (e) { console.error(`[invoices] ${e.message}`); }
   try { require('./events').onPaid(inv.id); } catch (e) { console.error(`[invoices] ${e.message}`); }
   try { require('./referrals').onPaid(get(inv.id)); } catch (e) { console.error(`[invoices] ${e.message}`); }
@@ -190,6 +196,7 @@ function setStatus(id, status) {
   else if (status === 'sent') { if (inv.status !== 'paid') throw err('Only a paid invoice can be marked unpaid.'); }
   else throw err('Unknown status');
   db.prepare(`UPDATE crm_invoices SET status=?${status === 'sent' ? ', paid_at=NULL, paid_how=NULL' : ''} WHERE id=?`).run(status, inv.id);
+  if (status === 'void') { try { require('./giftcards').refundInvoice(inv.id); } catch (e) { console.error(`[invoices] ${e.message}`); } }
   return withExtras(get(inv.id));
 }
 function remove(id) {
@@ -204,6 +211,7 @@ async function checkout(token) {
   const inv = withExtras(byToken(token));
   if (!inv || inv.status === 'void' || inv.status === 'draft') throw err('This invoice is not available.', 404);
   if (inv.status === 'paid') return { paid: true };
+  if (inv.due <= 0) { markPaid(inv.id, 'Gift card'); return { paid: true }; }
   if (!getSet('stripe_key')) throw err('Online payment is not set up for this invoice.');
   const base = linkFor(inv), f = {
     mode: 'payment', success_url: `${base}?paid=1&session={CHECKOUT_SESSION_ID}`, cancel_url: base,
@@ -213,7 +221,7 @@ async function checkout(token) {
   // One line with the total (tax included), so Stripe charges exactly what the invoice says.
   f['line_items[0][quantity]'] = '1';
   f['line_items[0][price_data][currency]'] = 'usd';
-  f['line_items[0][price_data][unit_amount]'] = String(Math.round(inv.total * 100));
+  f['line_items[0][price_data][unit_amount]'] = String(Math.round(inv.due * 100));
   f['line_items[0][price_data][product_data][name]'] = `Invoice #${inv.number}${inv.business ? ` - ${inv.business.name}` : ''}`;
   const s = await stripe('POST', 'checkout/sessions', f);
   db.prepare('UPDATE crm_invoices SET stripe_session=? WHERE id=?').run(s.id, inv.id);
@@ -270,10 +278,11 @@ ${notice ? `<div class="${notice.ok ? 'ok' : 'err'}">${esc(notice.text)}</div>` 
 <table><thead><tr><th>What</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Amount</th></tr></thead><tbody>
 ${inv.items.map((i) => `<tr><td>${esc(i.what)}</td><td class="n">${i.qty}</td><td class="n">${money(i.price)}</td><td class="n">${money(i.qty * i.price)}</td></tr>`).join('')}
 </tbody></table><div class="sum">${inv.tax ? `<div><span>Subtotal</span><span>${money(inv.subtotal)}</span></div><div><span>Tax (${inv.tax_rate}%)</span><span>${money(inv.tax)}</span></div>` : ''}
-<div class="total"><span>Total</span><span>${money(inv.total)}</span></div></div>
+<div class="total"><span>Total</span><span>${money(inv.total)}</span></div>${inv.gift_paid ? `<div><span>Gift card</span><span>-${money(inv.gift_paid)}</span></div><div style="font-weight:800"><span>${inv.status === 'paid' ? 'Paid' : 'Left to pay'}</span><span>${money(inv.due)}</span></div>` : ''}</div>
 ${inv.note ? `<div class="note">${nl(inv.note)}</div>` : ''}
 ${(() => { try { return require('./courses').invoiceExtra(inv); } catch { return ''; } })()}${(() => { try { return require('./events').invoiceExtra(inv); } catch { return ''; } })()}
-${['sent', 'overdue'].includes(inv.label) && st ? `<form method="post" action="${esc(inv.token)}/pay"><button class="pay">Pay ${money(inv.total)} with card</button></form>` : ''}
+${['sent', 'overdue'].includes(inv.label) && st ? `<form method="post" action="${esc(inv.token)}/pay"><button class="pay">Pay ${money(inv.due)} with card</button></form>` : ''}
+${['sent', 'overdue'].includes(inv.label) ? (() => { try { return require('./giftcards').invoiceForm(inv); } catch { return ''; } })() : ''}
 ${['sent', 'overdue'].includes(inv.label) && note ? `<div class="note"><b>Other ways to pay</b><br>${nl(note)}</div>` : ''}
 </div><footer class="muted small">Questions? Reply to the email this came in${b.phone ? ` or call ${esc(b.phone)}` : ''}.</footer></div></body></html>`;
 }
@@ -290,8 +299,17 @@ function publicRouter() {
       if (!notice) notice = { ok: true, text: 'Thank you! Your payment is being confirmed.' };
       inv = byToken(req.params.token);
     } else if (req.query.paid) notice = { ok: true, text: 'Thank you! Your payment went through.' };
+    if (req.query.gift) notice = { ok: true, text: `Your gift card paid ${money(Number(req.query.gift) || 0)}.` };
     if (req.query.error) notice = { ok: false, text: String(req.query.error).slice(0, 200) };
     res.set('Cache-Control', 'no-store').type('html').send(page(withExtras(inv), { notice }));
+  });
+  r.post('/:token/gift', async (req, res) => {
+    const back = `../${encodeURIComponent(req.params.token)}`;
+    if (crm().tooMany(String(req.get('cf-connecting-ip') || req.ip))) return res.redirect(303, `${back}?error=${encodeURIComponent('Too many tries. Please wait a bit.')}`);
+    try {
+      const out = require('./giftcards').applyToInvoice(req.params.token, (req.body || {}).code);
+      res.redirect(303, out.paid ? `${back}?paid=1` : `${back}?gift=${encodeURIComponent(out.used)}`);
+    } catch (e) { res.redirect(303, `${back}?error=${encodeURIComponent(e.message)}`); }
   });
   r.post('/:token/pay', async (req, res) => {
     try {

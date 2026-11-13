@@ -199,7 +199,7 @@ function publicRouter() {
   const products = () => require('./products');
   const plan = (t) => db.prepare('SELECT * FROM crm_plans WHERE token=? AND active=1').get(String(t));
   const course = (p) => p.course_id && db.prepare('SELECT title FROM crm_courses WHERE id=?').get(p.course_id);
-  const show = (p, extra = {}) => products().buyPage({ title: p.name, description: p.description, price: p.amount, bizId: p.business_id,
+  const show = (p, extra = {}) => products().buyPage({ gift: false, title: p.name, description: p.description, price: p.amount, bizId: p.business_id,
     sub: `<div class="muted" style="margin-bottom:4px">Paid ${per(p.every)}. Cancel any time.</div>`,
     extra: course(p) ? `<p class="desc">Includes the course <b>${course(p).title.replace(/[<>&"]/g, '')}</b>.</p>` : '',
     button: `Start for ${money(p.amount)} ${per(p.every)}`, ...extra });
