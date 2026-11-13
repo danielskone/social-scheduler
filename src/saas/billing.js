@@ -37,6 +37,10 @@ function createBilling({ secretKey = '', priceId = '', webhookSecret = '', apiBa
         cancel_url: `${baseUrl}/account`,
         allow_promotion_codes: 'true',
       };
+      // Free days left from the trial are kept: the card is saved now and the first payment
+      // happens when the trial ends (Stripe needs at least 2 days' notice for that).
+      const trialEnd = user.status === 'trialing' ? Date.parse(user.trial_ends_at || 0) : 0;
+      if (trialEnd > Date.now() + 2.5 * 864e5) params['subscription_data[trial_end]'] = String(Math.floor(trialEnd / 1000));
       if (user.stripe_customer_id) params.customer = user.stripe_customer_id;
       else params.customer_email = user.email;
       return (await stripe('POST', 'checkout/sessions', params)).url;

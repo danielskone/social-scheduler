@@ -9,6 +9,7 @@
     "beta": "node scripts/beta.js on",
     "beta:off": "node scripts/beta.js off",
     "beta:status": "node scripts/beta.js status",
+    "stripe-setup": "node scripts/stripe-setup.js",
     "test": "node --test test/*.test.js",
     "mac": "node scripts/start-with-tunnel.js",
     "background:on": "node scripts/background.js on",

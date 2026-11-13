@@ -156,7 +156,7 @@ function account({ user, access, billingEnabled, priceLabel, settings, error = '
   let buttons = '';
   if (billingEnabled && user.status !== 'free' && user.status !== 'disabled') {
     if (user.stripe_customer_id && ['active', 'past_due'].includes(user.status)) buttons = '<form method="post" action="/billing/portal"><button class="btn" type="submit">Change card, receipts or cancel</button></form>';
-    else buttons = `<form method="post" action="/billing/checkout"><button class="btn primary" type="submit">Subscribe · ${esc(priceLabel)}</button></form>`;
+    else buttons = `<form method="post" action="/billing/checkout"><button class="btn primary" type="submit">Subscribe · ${esc(priceLabel)}</button></form>${user.status === 'trialing' && trialLeft > 2 ? `<p class="muted small" style="margin-top:8px">You won't be charged until your free days end on ${day(user.trial_ends_at)}.</p>` : ''}`;
   } else if (!billingEnabled && !access.ok && user.status !== 'disabled') {
     buttons = '<p class="muted">Payments are not switched on yet. Please contact support to keep using Viral Post.</p>';
   }
@@ -216,7 +216,7 @@ ${inv ? `<div class="card"><p class="ok">${esc(inv.user.email)} can now sign in.
   ${beta ? '' : '<label class="check"><input type="checkbox" name="free" value="1"> Give them free access (no trial end)</label>'}
   <button class="btn primary full" type="submit">Make their login</button>
 </form>
-<p class="muted">${beta ? 'Beta: invite only. Testers use it free.' : billingEnabled ? 'Payments: Stripe is ON.' : 'Payments: OFF (new customers get the free trial; add your Stripe keys to switch payments on).'}</p>
+<p class="muted">${beta ? 'Beta test. ' : ''}${billingEnabled ? 'Payments: Stripe is ON.' : 'Payments: OFF (new customers get the free trial; add your Stripe keys to switch payments on).'}</p>
 <div class="card scroll"><table><tr><th>#</th><th>Customer</th><th>Plan</th><th>Joined</th><th>App</th><th></th></tr>${rows}</table></div>`, { wide: true });
 }
 
