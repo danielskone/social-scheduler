@@ -44,6 +44,9 @@
     stage_changed: { name: 'Stage changed', help: 'A contact moves to a stage on your board, like "Interested" or "Paid / Done".', icon: 'flag' },
     appointment_booked: { name: 'Appointment booked', help: 'Someone books a call or meeting with you.', icon: 'calendar' },
     email_opt_in: { name: 'Subscribed to email', help: 'Someone says yes to getting your emails.', icon: 'mail' },
+    plan_started: { name: 'Plan started', help: 'Someone signs up for one of your monthly plans and pays.', icon: 'person' },
+    contract_signed: { name: 'Contract signed', help: 'Someone signs a contract you sent.', icon: 'form' },
+    quote_signed: { name: 'Quote signed', help: 'Someone signs a quote you sent.', icon: 'form' },
   };
   const STEP = {
     email: { name: 'Send email', help: 'Goes out by itself from your email, only to people who contacted you or said yes to email.', icon: 'mail', color: 'green', group: 'Messages' },

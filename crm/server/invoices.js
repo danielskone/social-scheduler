@@ -315,4 +315,4 @@ router.post('/:id/paid', wrap((req) => markPaid(req.params.id, (req.body || {}).
 router.post('/:id/status', wrap((req) => setStatus(req.params.id, (req.body || {}).status)));
 router.delete('/:id', wrap((req) => remove(req.params.id)));
 
-module.exports = { save, list, send, markPaid, setStatus, remove, checkout, checkSession, checkPending, settings, saveSettings, publicRouter, router, page, withExtras, get, cleanItems, sums };
+module.exports = { stripe, stripeOn: () => Boolean(getSet("stripe_key")), save, list, send, markPaid, setStatus, remove, checkout, checkSession, checkPending, settings, saveSettings, publicRouter, router, page, withExtras, get, cleanItems, sums };

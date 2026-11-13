@@ -195,7 +195,7 @@
     templates: ['Templates', 'Messages you send a lot, written once.'],
     email: ['Email', 'Newsletters and email blasts to people who said yes.'],
     automations: ['Automations', 'Your helper that works while you\'re busy.'],
-    payments: ['Payments', 'Quotes, invoices, products, coupons and referral partners.'],
+    payments: ['Payments', 'Invoices, quotes, products, coupons, referrals, monthly plans and contracts.'],
     sites: ['Sites', 'Simple websites, and funnels that lead people from one page to the next.'],
     courses: ['Courses', 'Lessons people watch in their private members area.'],
     reports: ['Reports', 'Your month in numbers, ready to email.'],
@@ -699,7 +699,7 @@
     const cPipe = meta.pipelines.find((x) => x.id === (c.pipeline || c.pipeline_id)) || (id ? meta.pipelines[0] : curPipe()) || meta.pipelines[0];
     if (!id) c.stage = cPipe.stages[0].name;
     dlg.innerHTML = `<form method="dialog" id="contact-form">
-      <header class="view-head"><h1>${id ? h(c.name) : 'New contact'}</h1><div class="row c-actions">${id && c.email ? '<button class="btn ghost" type="button" id="c-emails" title="Read and answer their emails">Emails</button>' : ''}${id ? '<button class="btn ghost" type="button" id="c-quote" title="Send them a quote to sign">Quote</button><button class="btn ghost" type="button" id="c-invoice" title="Make an invoice for them">Invoice</button><button class="btn ghost" type="button" id="c-book" title="Add an appointment with them">Book</button><button class="btn ghost" type="button" id="c-review" title="Ask them for a review">Review</button><button class="btn ghost" type="button" id="c-portal" title="Their private page with invoices, quotes, appointments and courses">Portal</button>' : ''}<button class="btn ghost" value="cancel" formnovalidate>Close</button></div></header>
+      <header class="view-head"><h1>${id ? h(c.name) : 'New contact'}</h1><div class="row c-actions">${id && c.email ? '<button class="btn ghost" type="button" id="c-emails" title="Read and answer their emails">Emails</button>' : ''}${id ? '<button class="btn ghost" type="button" id="c-quote" title="Send them a quote to sign">Quote</button><button class="btn ghost" type="button" id="c-contract" title="Send them a contract to sign">Contract</button><button class="btn ghost" type="button" id="c-invoice" title="Make an invoice for them">Invoice</button><button class="btn ghost" type="button" id="c-book" title="Add an appointment with them">Book</button><button class="btn ghost" type="button" id="c-review" title="Ask them for a review">Review</button><button class="btn ghost" type="button" id="c-portal" title="Their private page with invoices, quotes, appointments and courses">Portal</button>' : ''}<button class="btn ghost" value="cancel" formnovalidate>Close</button></div></header>
       ${id && !c.do_not_contact && usable.length ? `<div class="send-row"><select id="send-tpl">${usable.map((t) => `<option value="${t.id}">${t.channel === 'text' ? 'Text' : 'Email'}: ${h(t.name)}</option>`).join('')}</select>
         <button class="btn" type="button" id="send-go">Open in Mail / Messages</button><span class="muted small" style="margin:0">Opens a filled-in message for just this person. You press Send.</span></div>` : ''}
       <div class="form-grid">
@@ -745,6 +745,8 @@
     if (ci) ci.onclick = () => { dlg.close(); window.VTMore.editInvoice(null, id); };
     const cq = q$('#c-quote', dlg), cb = q$('#c-book', dlg);
     if (cq) cq.onclick = () => { dlg.close(); window.VTExtra.editQuote(null, id); };
+    const ck = q$('#c-contract', dlg);
+    if (ck) ck.onclick = () => { dlg.close(); window.VTExtra4.editContract(null, id, () => { if (tab === 'payments') refresh(); }); };
     if (cb) cb.onclick = () => { dlg.close(); window.VTExtra.addAppointment({ contactId: id, onChange: refresh }); };
     if (cr) cr.onclick = () => { dlg.close(); window.VTMore.askReview(id, () => openContact(id)); };
     const cp = q$('#c-portal', dlg);

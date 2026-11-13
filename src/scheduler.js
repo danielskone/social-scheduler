@@ -205,6 +205,10 @@ function startCrm() {
   cron.schedule('* * * * *', () => campaigns.runMailboxCampaigns().catch((e) => console.error(e)));
   // Invoices paid online with Stripe get marked paid (checks every 10 minutes, no webhooks needed).
   cron.schedule('*/10 * * * *', () => require('../crm/server/invoices').checkPending().catch((e) => console.error(e)));
+  // Monthly payments: ask Stripe for new payments, cancels and failed cards.
+  cron.schedule('3,13,23,33,43,53 * * * *', () => require('../crm/server/plans').syncAll().catch((e) => console.error(e)));
+  // One friendly reminder to people who started paying and stopped.
+  cron.schedule('*/15 * * * *', () => require('../crm/server/checkouts').run().catch((e) => console.error(e)));
   // Conversations: new emails from people in the CRM, every 2 minutes.
   cron.schedule('*/2 * * * *', () => require('../crm/server/inbox').check().catch((e) => console.error(e)));
   // Google Calendar bookings (the website's "Book a free call" page) -> Contacts + Appointments.

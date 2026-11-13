@@ -100,7 +100,7 @@ function createGateway(opts = {}) {
   // ---- Public links of each customer: pictures for Instagram, sign-up forms, booking pages, invoices, review links ----
   app.use('/w/:id', (req, res, next) => {
     const id = Number(req.params.id);
-    const m = req.url.match(/^\/(media|f|book|invoice|r|quote|s|chat|pay|portal|learn)(\/.*)?$/);
+    const m = req.url.match(/^\/(media|f|book|invoice|r|quote|s|chat|pay|portal|learn|subscribe|sign|blog)(\/.*)?$/);
     const owner = id && store.getUser(id);
     if (!m || !owner || !access(owner).ok) return res.status(404).send('Not found');
     tenants.proxy(id, req, res, { pathOverride: req.url, publicIp: req.ip }).catch(next);

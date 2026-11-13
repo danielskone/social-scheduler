@@ -98,11 +98,21 @@ function home(c, token) {
     .filter((p) => !b.groups || !b.groups.length || b.groups.includes(p.group_name));
   const due = invoices.filter((i) => i.status !== 'paid');
   const partner = (() => { try { return require('./referrals').forContact(c.id); } catch { return null; } })();
+  const plans = (() => { try { return require('./plans').forContact(c.id); } catch { return []; } })();
+  const contracts = (() => { try { return require('./contracts').forContact(c.id); } catch { return []; } })();
+  const per = (e) => ({ week: 'a week', month: 'a month', year: 'a year' }[e] || 'a month');
   const sec = (title, items, emptyText) => `<h2>${title}</h2>${items.length ? items.join('') : `<div class="empty">${emptyText}</div>`}`;
   const body = `<h1>Hi ${esc(String(c.name).split(' ')[0])}</h1><div class="muted">Everything you have with ${esc(b.name || 'us')}, in one place.</div>
 ${due.length ? `<div class="note"><b>You have ${due.length} invoice${due.length > 1 ? 's' : ''} to pay</b> (${money(due.reduce((s, i) => s + i.total, 0))}).</div>` : ''}
 ${courses.length ? sec('Your courses', courses.map((k) => `<div class="card"><div class="row"><div><b>${esc(k.title)}</b><div class="muted small">${k.done} of ${k.lessons} lessons done</div></div>
 <a class="btn" href="${base}?course=${k.id}">${k.done ? 'Keep going' : 'Start'}</a></div><div class="prog"><i style="width:${k.lessons ? Math.round(k.done / k.lessons * 100) : 0}%"></i></div></div>`), '') : ''}
+${plans.length ? sec('Your plans', plans.map((s) => `<div class="card"><div class="row"><div><b>${esc(s.name)} · ${money(s.amount)} ${per(s.every)}</b>
+<span class="pill ${s.status === 'past_due' ? 'due' : 'ok'}">${{ active: 'Active', past_due: 'Card declined', ending: 'Ending' }[s.status] || esc(s.status)}</span>
+<div class="muted small">${s.status === 'ending' ? `Ends ${day(s.renews_at)}. You keep it until then.` : s.status === 'past_due' ? 'Your card was declined. We will try again soon. Questions? Reply to any email from us.' : s.renews_at ? `Renews ${day(s.renews_at)}` : ''}</div></div>
+${s.status === 'ending' ? '' : `<form method="post" action="${base}/cancel" onsubmit="return confirm('Cancel ${esc(s.name).replace(/'/g, '')}? You keep it until the end of the time you already paid for.')"><input type="hidden" name="sub" value="${s.id}"><button class="btn ghost" type="submit">Cancel plan</button></form>`}</div></div>`), '') : ''}
+${contracts.length ? sec('Contracts', contracts.map((k) => `<div class="card"><div class="row"><div><b>${esc(k.title)}</b> <span class="pill ${k.status === 'signed' ? 'ok' : 'due'}">${k.status === 'signed' ? 'Signed' : 'Please sign'}</span>
+<div class="muted small">${k.status === 'signed' ? `Signed ${day(k.signed_at)}` : `Sent ${day(k.sent_at)}`}</div></div>
+<a class="btn${k.status === 'signed' ? ' ghost' : ''}" href="../sign/${esc(k.token)}">${k.status === 'signed' ? 'View' : 'Read and sign'}</a></div></div>`), '') : ''}
 ${sec('Appointments', appts.map((a) => `<div class="card"><div class="row"><div><b>${esc(a.title)}</b><div class="muted small">${esc(when(a.starts_at))}${a.location ? ` · ${esc(a.location)}` : ''}</div></div>
 ${a.token ? `<a class="btn ghost" href="../book/a/${esc(a.token)}">Change or cancel</a>` : ''}</div></div>`), 'No upcoming appointments.')}
 ${pages.length ? `<div class="row" style="gap:8px;justify-content:flex-start">${pages.map((p) => `<a class="btn ghost" href="../book/${esc(p.slug)}">Book: ${esc(p.title)}</a>`).join('')}</div>` : ''}
@@ -154,6 +164,21 @@ function publicRouter() {
     if (!c) return page(res, gone(), 404);
     const next = require('./courses').markDone(c.id, req.body.lesson, req.body.undo === '1');
     res.redirect(303, `../${encodeURIComponent(req.params.token)}?course=${next.course}${next.lesson ? `&lesson=${next.lesson}` : ''}`);
+  });
+  // Members cancel their own plan. It ends after the time they already paid for.
+  r.post('/:token/cancel', async (req, res) => {
+    const c = contactFor(req.params.token);
+    if (!c) return page(res, gone(), 404);
+    const sub = db.prepare("SELECT id FROM crm_subscriptions WHERE id=? AND contact_id=?").get(Number(req.body.sub), c.id);
+    if (sub) {
+      await require('./plans').cancel(sub.id, { now: false, by: 'them' }).catch((e) => {
+        // We could not reach Stripe: tell the owner so they cancel it by hand.
+        console.error(`[portal] ${e.message}`);
+        require('../../src/notify').send('Please cancel a plan', `${c.name} asked to cancel their plan, but Stripe said: ${e.message}`, { tags: 'warning', priority: 'high' }).catch(() => {});
+        crm().logActivity(c.id, { kind: 'Payment', note: 'Asked to cancel their plan. Please cancel it in Stripe.' });
+      });
+    }
+    res.redirect(303, `../${encodeURIComponent(req.params.token)}`);
   });
   // The members community.
   const talk = (fn) => (req, res) => {
