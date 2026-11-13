@@ -1,7 +1,7 @@
 // Website sign-ups -> Viral Touch CRM.
 //
 // Your website (e.g. viralattraction.com) sends each form sign-up to a free "website inbox":
-// a Google Sheet with a small script (website-inbox/Code.gs) in your own Google account. It is
+// a Google Sheet with a small script (crm/website-inbox/Code.gs) in your own Google account. It is
 // always on, so nothing is lost while this Mac is off, and the Mac never has to be opened up
 // to the internet. Every 2 minutes this file reads new rows (with a secret key) and adds or
 // updates the person in Contacts, then buzzes your phone.
@@ -9,9 +9,9 @@
 // Email consent: only a newsletter sign-up counts as "OK to email". A contact form does not.
 const fs = require('fs');
 const path = require('path');
-const db = require('./db');
+const db = require('../../src/db');
 const crm = require('./crm');
-const notify = require('./notify');
+const notify = require('../../src/notify');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS website_inbox (

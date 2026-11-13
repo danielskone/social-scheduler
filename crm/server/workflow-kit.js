@@ -1,7 +1,7 @@
 // Ready-made workflows for the CRM's Automations builder, and "describe it in a sentence":
 // turns plain words ("when someone fills out a form, email them, wait 2 days, then remind me")
 // into a draft workflow. All of this is plain keyword matching on this Mac: free, no AI service.
-const db = require('./db');
+const db = require('../../src/db');
 const crm = require('./crm');
 
 const tplId = (name, channel) => db.prepare(`SELECT id FROM crm_templates WHERE name=?${channel ? ' AND channel=?' : ''}`).get(...[name, channel].filter(Boolean))?.id || null;

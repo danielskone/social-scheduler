@@ -48,11 +48,11 @@ test.before(async () => {
     EMAIL_FROM: 'daniel@viralattraction.com', EMAIL_FROM_NAME: 'Daniel King', EMAIL_MAILING_ADDRESS: 'PO Box 1, Fuquay-Varina, NC 27526',
     EMAIL_GAP_MS: '0', BREVO_API_BASE: 'http://127.0.0.1:1',
   });
-  crm = require('../src/crm');
-  auto = require('../src/automations');
-  camp = require('../src/campaigns');
-  email = require('../src/email');
-  db = require('../src/db');
+  crm = require('../server/crm');
+  auto = require('../server/automations');
+  camp = require('../server/campaigns');
+  email = require('../server/email');
+  db = require('../../src/db');
 });
 test.after(() => { smtp.close(); ntfy.close(); });
 

@@ -17,10 +17,10 @@ test.before(async () => {
   process.env.NTFY_BASE = `http://127.0.0.1:${ntfy.address().port}`;
   process.env.APP_PASSWORD = '';
   delete process.env.WEBSITE_INBOX_URL;
-  forms = require('../src/forms');
-  crm = require('../src/crm');
-  db = require('../src/db');
-  const app = require('../src/server');
+  forms = require('../server/forms');
+  crm = require('../server/crm');
+  db = require('../../src/db');
+  const app = require('../../src/server');
   server = app.listen(0);
   await new Promise((r) => server.once('listening', r));
   root = `http://127.0.0.1:${server.address().port}`;
@@ -169,7 +169,7 @@ test('website code: made only when the inbox is connected; its answers come back
   assert.match(body.code, /data-viral-post="off"/, 'the website listener skips it, so nothing is sent twice');
   delete process.env.WEBSITE_INBOX_URL; delete process.env.WEBSITE_INBOX_KEY;
 
-  const website = require('../src/website');
+  const website = require('../server/website');
   const r = website.importRow({ row: 2, received: '2026-11-08T10:00:00Z', form: `vpform:${f.slug}`, name: 'Bea Shop', email: 'bea@shop.com', company: 'Bea Bakery',
     message: 'What do you need?: Ads, Commercial\nMonthly budget: $500 to $1,500', newsletter: true });
   assert.ok(r.viaForm);

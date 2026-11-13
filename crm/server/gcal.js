@@ -6,10 +6,10 @@
 // 5 minutes, and for each booking it adds or finds the person in Contacts, puts it in the
 // CRM's Appointments list (so it's in the 8am phone summary), and buzzes your phone.
 // Read-only: nothing is ever changed in your Google Calendar. No Google sign-in or app review needed.
-const db = require('./db');
+const db = require('../../src/db');
 const crm = require('./crm');
 const booking = require('./booking');
-const notify = require('./notify');
+const notify = require('../../src/notify');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS gcal_bookings (

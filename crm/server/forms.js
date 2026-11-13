@@ -13,10 +13,10 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const multer = require('multer');
-const config = require('./config');
-const db = require('./db');
+const config = require('../../src/config');
+const db = require('../../src/db');
 const crm = require('./crm');
-const notify = require('./notify');
+const notify = require('../../src/notify');
 
 const { esc, nl } = crm.html;
 const filesDir = path.join(config.dataDir, 'form-files');

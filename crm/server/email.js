@@ -14,7 +14,7 @@
 //  - it ends with your name, your mailing address, and how to unsubscribe (reply
 //    "unsubscribe"); the email also carries a one-click unsubscribe header;
 //  - each automation emails a person at most once, and there is a daily limit.
-const db = require('./db');
+const db = require('../../src/db');
 const design = require('./emaildesign');
 
 db.exec(`

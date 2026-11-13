@@ -20,12 +20,12 @@ test.before(async () => {
   process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'book-'));
   process.env.APP_PASSWORD = '';
   delete process.env.BOOKING_TIMEZONE;
-  booking = require('../src/booking');
-  crm = require('../src/crm');
-  notify = require('../src/notify');
-  db = require('../src/db');
+  booking = require('../server/booking');
+  crm = require('../server/crm');
+  notify = require('../../src/notify');
+  db = require('../../src/db');
   notify.createTopic();
-  server = require('../src/server').listen(0);
+  server = require('../../src/server').listen(0);
   await new Promise((r) => server.once('listening', r));
   root = `http://127.0.0.1:${server.address().port}`;
 });

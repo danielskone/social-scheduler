@@ -123,7 +123,7 @@
             <div class="row"><button class="btn" data-site-copy>Copy code</button></div></details>
             ${calLine}
             <div class="row"><button class="btn ghost" data-site-check>Check now</button><span class="muted" data-site-msg></span></div>`
-          : '<div class="muted">Want sign-ups from your website (like viralattraction.com) to show up here by themselves? Follow the steps in <b>website-inbox/README.md</b>, then run <b>npm run website</b> in Terminal. This also makes the always-on <b>Website code</b> for your forms work.</div>'}
+          : '<div class="muted">Want sign-ups from your website (like viralattraction.com) to show up here by themselves? Follow the steps in <b>crm/website-inbox/README.md</b>, then run <b>npm run website</b> in Terminal. This also makes the always-on <b>Website code</b> for your forms work.</div>'}
       </div>`;
   }
 

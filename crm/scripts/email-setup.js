@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
-const envPath = path.join(__dirname, '..', '.env');
+const envPath = path.join(__dirname, '..', '..', '.env');
 
 function ask(question, hidden = false) {
   return new Promise((resolve) => {
@@ -70,7 +70,7 @@ const PRESETS = {
   }
 
   Object.assign(process.env, env);
-  const email = require('../src/email');
+  const email = require('../server/email');
   if (email.provider() === 'mailbox') {
     console.log('\nChecking your email password…');
     const v = await email.verify();

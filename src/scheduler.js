@@ -10,11 +10,11 @@ const notify = require('./notify');
 
 const youtube = require('./youtube');
 const tiktok = require('./tiktok');
-const crm = require('./crm');
-const website = require('./website');
-const automations = require('./automations');
-const campaigns = require('./campaigns');
-const gcal = require('./gcal');
+const crm = require('../crm/server/crm');
+const website = require('../crm/server/website');
+const automations = require('../crm/server/automations');
+const campaigns = require('../crm/server/campaigns');
+const gcal = require('../crm/server/gcal');
 const thumbs = require('./thumbs');
 
 const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram, youtube: youtube.publishYouTube, tiktok: tiktok.publishTikTok };

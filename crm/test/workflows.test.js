@@ -10,10 +10,10 @@ test.before(async () => {
   process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-'));
   process.env.APP_PASSWORD = '';
   process.env.NTFY_BASE = 'http://127.0.0.1:9';
-  crm = require('../src/crm');
-  auto = require('../src/automations');
-  kit = require('../src/workflow-kit');
-  const app = require('../src/server');
+  crm = require('../server/crm');
+  auto = require('../server/automations');
+  kit = require('../server/workflow-kit');
+  const app = require('../../src/server');
   server = app.listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}/api/crm/automations`;
@@ -63,7 +63,7 @@ test('"describe it" turns a sentence into a draft workflow', async () => {
 
 test('a "send a text" step never sends: it makes a ready-to-send task, and skips Do not contact', () => {
   const tpl = crm.listTemplates ? crm.listTemplates().find((t) => t.channel === 'text') : null;
-  const tplId = tpl ? tpl.id : require('../src/db').prepare("INSERT INTO crm_templates (name, channel, body) VALUES ('T','text','Hi {name}')").run().lastInsertRowid;
+  const tplId = tpl ? tpl.id : require('../../src/db').prepare("INSERT INTO crm_templates (name, channel, body) VALUES ('T','text','Hi {name}')").run().lastInsertRowid;
   auto.save({ name: 'Text new people', active: true, trigger: { type: 'contact_added' }, steps: [{ type: 'text', template_id: tplId }] });
   const a = crm.createContact({ name: 'Tina Text', phone: '555-0100' });
   assert.ok(crm.getContact(a.id).tasks.some((t) => t.title === 'Text Tina Text' && t.template_id === tplId));

@@ -39,11 +39,11 @@ test.before(async () => {
     BREVO_API_BASE: `http://127.0.0.1:${brevo.address().port}`, BREVO_API_KEY: 'xkeysib-test', EMAIL_FROM: 'daniel@viralattraction.com',
     EMAIL_FROM_NAME: 'Daniel King', EMAIL_MAILING_ADDRESS: 'PO Box 1, Fuquay-Varina, NC 27526', APP_PASSWORD: '',
   });
-  crm = require('../src/crm');
-  auto = require('../src/automations');
-  camp = require('../src/campaigns');
-  db = require('../src/db');
-  app = require('../src/server');
+  crm = require('../server/crm');
+  auto = require('../server/automations');
+  camp = require('../server/campaigns');
+  db = require('../../src/db');
+  app = require('../../src/server');
   server = app.listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}/api/crm/email`;

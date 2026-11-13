@@ -10,13 +10,13 @@ const youtube = require('./youtube');
 const tiktok = require('./tiktok');
 const scheduler = require('./scheduler');
 const { importBundle } = require('./importer');
-const crm = require('./crm');
-const forms = require('./forms');
-const booking = require('./booking');
-const website = require('./website');
-const automations = require('./automations');
-const campaigns = require('./campaigns');
-const gcal = require('./gcal');
+const crm = require('../crm/server/crm');
+const forms = require('../crm/server/forms');
+const booking = require('../crm/server/booking');
+const website = require('../crm/server/website');
+const automations = require('../crm/server/automations');
+const campaigns = require('../crm/server/campaigns');
+const gcal = require('../crm/server/gcal');
 const clipper = require('./clipper');
 const compression = require('compression');
 const { thumbFor } = require('./thumbs');
@@ -132,11 +132,14 @@ app.get('/clipfile/:job/:file', clipper.serveFile);
 // (app.js?v=1a2b3c), so the browser and phone keep them and don't ask the Mac again on every
 // open. After an update the fingerprint changes, so the new version still loads right away.
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+// Viral Touch CRM keeps its own page files in crm/public; they load at the same addresses (/crm.js etc.).
+const CRM_PUBLIC_DIR = path.join(__dirname, '..', 'crm', 'public');
+const fileIn = (file) => [PUBLIC_DIR, CRM_PUBLIC_DIR].map((d) => path.join(d, file)).find((f) => fs.existsSync(f)) || path.join(PUBLIC_DIR, file);
 const fingerprints = new Map();
 function fingerprint(file) {
   if (!fingerprints.has(file)) {
     let v = '0';
-    try { v = crypto.createHash('sha1').update(fs.readFileSync(path.join(PUBLIC_DIR, file))).digest('hex').slice(0, 10); } catch { /* missing file */ }
+    try { v = crypto.createHash('sha1').update(fs.readFileSync(fileIn(file))).digest('hex').slice(0, 10); } catch { /* missing file */ }
     fingerprints.set(file, v);
   }
   return fingerprints.get(file);
@@ -200,9 +203,11 @@ if (ownApp && ownApp.key !== 'scheduler') {
     res.set('Cache-Control', 'no-cache').type('html').send(html);
   });
 }
-app.use(express.static(PUBLIC_DIR, {
+const staticOptions = {
   setHeaders(res) { if (res.req.query.v) res.set('Cache-Control', 'public, max-age=31536000, immutable'); },
-}));
+};
+app.use(express.static(PUBLIC_DIR, staticOptions));
+app.use(express.static(CRM_PUBLIC_DIR, staticOptions));
 
 // ---------- Connecting Facebook / Instagram ----------
 const loginStates = new Set();

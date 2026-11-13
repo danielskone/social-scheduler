@@ -1,11 +1,11 @@
-// Connects your website's forms to Viral Touch CRM (see website-inbox/README.md).
+// Connects your website's forms to Viral Touch CRM (see crm/website-inbox/README.md).
 //   npm run website
 // Asks for the Google "Web app URL" and the secret key, checks that they work, and saves them in .env.
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
-const envPath = path.join(__dirname, '..', '.env');
+const envPath = path.join(__dirname, '..', '..', '.env');
 const ask = (q) => new Promise((resolve) => {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   rl.question(q, (a) => { rl.close(); resolve(a.trim()); });
