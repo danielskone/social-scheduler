@@ -1,5 +1,5 @@
 // npm run mac-app : puts an app on your Desktop for each of your apps: Viral Post (the
-// scheduler), Viral Touch CRM, Viral Clips and Viral Ads Studio. Each app is its own program
+// scheduler), Viral Touch CRM and Viral Clips. Each app is its own program
 // on its own port (see src/apps.js). Double-click one to open it in its own window (it starts
 // the background programs first if they aren't running).
 const fs = require('fs');
@@ -10,7 +10,7 @@ const { execFileSync } = require('child_process');
 if (process.platform !== 'darwin') { console.log('This is only for Macs.'); process.exit(1); }
 const root = path.join(__dirname, '..');
 require('dotenv').config({ path: path.join(root, '.env'), quiet: true });
-const { APPS, enabledApps, portOf } = require('../src/apps');
+const { APPS, RETIRED, enabledApps, portOf } = require('../src/apps');
 const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 function makeApp(a) {
@@ -69,6 +69,7 @@ function makeApp(a) {
 }
 
 const on = enabledApps();
+for (const a of RETIRED) fs.rmSync(path.join(os.homedir(), 'Desktop', `${a.name}.app`), { recursive: true, force: true });
 for (const a of APPS) {
   if (on.includes(a)) makeApp(a);
   else fs.rmSync(path.join(os.homedir(), 'Desktop', `${a.name}.app`), { recursive: true, force: true });

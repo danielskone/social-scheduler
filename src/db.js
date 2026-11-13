@@ -6,7 +6,7 @@ fs.mkdirSync(config.mediaDir, { recursive: true });
 const db = new Database(config.dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
-// Viral Post, Viral Touch CRM, Viral Clips and Viral Ads Studio run as separate programs that share
+// Viral Post, Viral Touch CRM and Viral Clips run as separate programs that share
 // this database: wait a moment for another one to finish writing instead of failing.
 db.pragma('busy_timeout = 5000');
 
@@ -69,7 +69,7 @@ if (!acctSql.includes("'tiktok'")) {
     db.exec('INSERT INTO accounts_new SELECT * FROM accounts; DROP TABLE accounts; ALTER TABLE accounts_new RENAME TO accounts;');
   })();
   db.pragma('foreign_keys = ON');
-// Viral Post, Viral Touch CRM, Viral Clips and Viral Ads Studio run as separate programs that share
+// Viral Post, Viral Touch CRM and Viral Clips run as separate programs that share
 // this database: wait a moment for another one to finish writing instead of failing.
 db.pragma('busy_timeout = 5000');
 }

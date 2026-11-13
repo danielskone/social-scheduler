@@ -66,6 +66,5 @@ The gateway listens on 127.0.0.1 only. Put Caddy (free, automatic HTTPS) in fron
 
 ## Limits on a server
 
-- Mac voices (including Siri) in Ads Studio only exist on a Mac.
 - Clips (speech-to-text) uses a lot of computer power; a small server can do one at a time.
 - Each customer's copy uses roughly 100 MB of memory.

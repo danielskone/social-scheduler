@@ -1,12 +1,12 @@
-// The separate apps: Viral Post (the scheduler), Viral Touch CRM, Viral Clips and Viral Ads Studio.
+// The separate apps: Viral Post (the scheduler), Viral Touch CRM and Viral Clips.
 //
 // On the Mac each app runs as its own program (APP=crm etc., see scripts/background.js) on its
-// own port: Viral Post 3000, Viral Touch CRM 3001, Viral Clips 3002, Viral Ads Studio 3003. Each
+// own port: Viral Post 3000, Viral Touch CRM 3001, Viral Clips 3002. Each
 // has its own address, menu, icon, Desktop app and background jobs. They read the same data
 // folder, so a clip or an ad can still be scheduled in Viral Post.
 //
 // Without APP (customer copies, tests) one program serves every app at its own path instead:
-// /, /crm/, /clips/, /ads/.
+// /, /crm/, /clips/.
 //
 // APPS in .env picks which apps are switched on (default: all), e.g. APPS=scheduler to sell or
 // run Viral Post on its own. Viral Post (the scheduler) is always on.
@@ -14,8 +14,11 @@ const APPS = [
   { key: 'scheduler', name: 'Viral Post', short: 'Viral Post', path: '/', port: 3000, home: 'calendar', views: ['calendar', 'compose', 'analytics', 'accounts'], icon: 'icon', theme: '#3b5bdb', about: 'Schedule and auto-post to Facebook, Instagram, TikTok and YouTube.' },
   { key: 'crm', name: 'Viral Touch CRM', short: 'Viral Touch', path: '/crm/', port: 3001, home: 'contacts', views: ['contacts'], icon: 'crm', theme: '#10967a', about: 'Contacts, pipeline, tasks, forms, bookings, email and automations.', apis: ['/api/crm'] },
   { key: 'clips', name: 'Viral Clips', short: 'Viral Clips', path: '/clips/', port: 3002, home: 'clips', views: ['clips'], icon: 'clips', theme: '#f58c1e', about: 'Turn a long video into short captioned clips.', apis: ['/api/clips', '/clipfile'] },
-  { key: 'ads', name: 'Viral Ads Studio', short: 'Ads Studio', path: '/ads/', port: 3003, home: 'ads', views: ['ads'], icon: 'ads', theme: '#823cdc', about: 'Make video ads with presenters, voices and captions.', apis: ['/api/ads', '/adfile', '/adlib'] },
 ];
+
+// Apps that were removed (Viral Ads Studio, 2026-11). The Mac setup scripts stop their old
+// background program and remove their Desktop app; their saved files in data/ are left alone.
+const RETIRED = [{ key: 'ads', name: 'Viral Ads Studio', port: 3003 }];
 
 function enabledApps(env = process.env) {
   const raw = String(env.APPS || '').trim().toLowerCase();
@@ -61,4 +64,4 @@ function manifest(a, separate = false) {
 
 const touchIcon = (a) => (a.icon === 'icon' ? '/icons/apple-touch-icon.png' : `/icons/${a.icon}-touch.png`);
 
-module.exports = { APPS, enabledApps, byKey, own, portOf, publicInfo, manifest, touchIcon };
+module.exports = { APPS, RETIRED, enabledApps, byKey, own, portOf, publicInfo, manifest, touchIcon };

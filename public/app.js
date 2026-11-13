@@ -47,8 +47,8 @@ function banner(msg, isError = false) {
 }
 
 // ---------- Which app this is ----------
-// Viral Post, Viral Touch CRM, Viral Clips and Viral Ads Studio are separate apps, each at its
-// own address (/, /crm/, /clips/, /ads/) with its own menu. The server says which one this is.
+// Viral Post, Viral Touch CRM and Viral Clips are separate apps, each at its
+// own address (/, /crm/, /clips/) with its own menu. The server says which one this is.
 const VP = window.VP_APPS || { app: 'scheduler', apps: [{ key: 'scheduler', name: 'Viral Post', path: '/', home: 'calendar', views: ['calendar', 'compose', 'analytics', 'accounts'], icon: 'icon' }] };
 const THIS_APP = VP.apps.find((a) => a.key === VP.app) || VP.apps[0];
 const appForView = (view) => VP.apps.find((a) => a.views.includes(view));
@@ -63,21 +63,6 @@ function buildAppMenu() {
     nav.innerHTML = [...document.querySelectorAll('#crm-tabs a')].map((a) => {
       const svgEl = a.querySelector('svg');
       return `<a href="${a.getAttribute('href')}" data-tab="${a.dataset.tab}"><span class="nav-ico">${svgEl ? svgEl.outerHTML : ''}</span><span>${esc(a.textContent.trim())}</span></a>`;
-    }).join('');
-  } else if (THIS_APP.key === 'ads') {
-    const ico = (d) => `<span class="nav-ico"><svg viewBox="0 0 24 24">${d}</svg></span>`;
-    const ICO = {
-      create: '<path d="M12 3.5 14 9l5.5 2-5.5 2-2 5.5-2-5.5-5.5-2L10 9z"/>',
-      list: '<rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="m10 9.5 4.5 2.5-4.5 2.5z"/>',
-      brands: '<path d="M4 12.5 11.5 5H19v7.5L11.5 20z"/><circle cx="15.5" cy="8.5" r="1.3"/>',
-      products: '<path d="M4 8 12 4l8 4v8l-8 4-8-4z"/><path d="m4 8 8 4 8-4M12 12v8"/>',
-      presenters: '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5"/>',
-      voices: '<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/>',
-      media: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m4 18 5-5 4 4 3-3 4 4"/>',
-    };
-    nav.innerHTML = [...document.querySelectorAll('#ads-tabs button')].map((b) => {
-      const sub = b.dataset.sub;
-      return `<a href="${sub === 'create' ? '#ads' : `#ads/${sub}`}" data-sub="${sub}">${ico(ICO[sub] || ICO.create)}<span>${esc(b.textContent.trim())}</span></a>`;
     }).join('');
   } else if (THIS_APP.key === 'clips') {
     nav.innerHTML = '<a href="#clips" data-view="clips"><span class="nav-ico"><svg viewBox="0 0 24 24"><circle cx="6.5" cy="6.5" r="2.8"/><circle cx="6.5" cy="17.5" r="2.8"/><path d="M8.6 8.3 20 18M8.6 15.7 20 6"/></svg></span><span>Make clips</span></a>';
@@ -114,17 +99,15 @@ async function route() {
   banner(params.get('error') ? `Couldn't connect: ${params.get('error')}` : params.get('connected') ? `Connected ${params.get('connected')} account(s).` : '', Boolean(params.get('error')));
   document.querySelectorAll('.view').forEach((v) => (v.hidden = v.id !== `view-${view}`));
   const crmTab = ['pipeline', 'tasks', 'appointments', 'forms', 'templates', 'automations', 'email'].includes(sub) ? sub : 'list';
-  const adsSub = !sub ? 'create' : /^\d+$/.test(sub) ? 'list' : sub;
   document.querySelectorAll('.sidebar nav a').forEach((a) => a.classList.toggle('active',
-    a.dataset.tab ? a.dataset.tab === crmTab : a.dataset.sub ? a.dataset.sub === adsSub : a.dataset.view === view));
+    a.dataset.tab ? a.dataset.tab === crmTab : a.dataset.view === view));
   const acctLoad = api('/accounts').then((a) => (accounts = a));
   if (view === 'calendar' && lastView && lastView !== 'calendar') goToToday(); // coming back to the Calendar tab
   lastView = view;
   if (view === 'calendar') { renderCalendar(); return; } // the calendar doesn't need the account list
   await acctLoad;
-  if (view === 'compose') renderCompose(params.get('date'), params.get('clip'), params.get('ad') && { id: params.get('ad'), format: params.get('f') || '9x16' });
+  if (view === 'compose') renderCompose(params.get('date'), params.get('clip'));
   if (view === 'clips') renderClips();
-  if (view === 'ads') renderAds(sub);
   if (view === 'analytics') renderAnalytics();
   if (view === 'contacts') renderContacts(sub);
   if (view === 'accounts') renderAccounts();
@@ -413,9 +396,9 @@ async function openPost(id) {
 // ---------- Compose ----------
 const form = $('#compose-form');
 
-let composeClip = null; // a clip from the Clips tab (or an ad from Viral Ads Studio), used instead of an uploaded video
+let composeClip = null; // a clip from the Clips tab, used instead of an uploaded video
 
-async function renderCompose(dateIso, clipId, ad) {
+async function renderCompose(dateIso, clipId) {
   const box = $('#compose-accounts');
   box.innerHTML = accounts.length
     ? accounts.map((a) => `<label><input type="checkbox" name="accountIds" value="${a.id}" data-platform="${a.platform}"${accounts.length === 1 ? ' checked' : ''}>
@@ -426,9 +409,9 @@ async function renderCompose(dateIso, clipId, ad) {
   form.scheduledAt.value = toLocalInput(when);
   $('#compose-msg').textContent = '';
   composeClip = null;
-  if (clipId || ad) {
+  if (clipId) {
     try {
-      composeClip = ad ? await api(`/ads/${ad.id}/out/${ad.format}`) : await api(`/clips/clip/${clipId}`);
+      composeClip = await api(`/clips/clip/${clipId}`);
       form.media.value = '';
       if (!form.caption.value.trim()) form.caption.value = composeClip.caption || composeClip.title || '';
       if (!form.title.value.trim()) form.title.value = (composeClip.title || '').slice(0, 100);
@@ -445,9 +428,7 @@ function showComposeClip() {
   if (!composeClip) return;
   box.querySelector('img').src = composeClip.poster_url || '';
   box.querySelector('b').textContent = composeClip.title;
-  box.querySelector('small').textContent = composeClip.ref
-    ? `Ad · ${Math.round(composeClip.length)} seconds · ${composeClip.label}`
-    : `Clip · ${Math.round(composeClip.length)} seconds · vertical 9:16`;
+  box.querySelector('small').textContent = `Clip · ${Math.round(composeClip.length)} seconds · vertical 9:16`;
 }
 form.media.addEventListener('change', () => { if (form.media.files[0] && composeClip) { composeClip = null; showComposeClip(); } });
 $('#compose-clip-remove').onclick = () => { composeClip = null; showComposeClip(); updatePreview(); };
@@ -463,7 +444,7 @@ function updatePreview() {
   $('#preview-name').textContent = first ? (first.username ? '@' + first.username : first.name) : 'Your account';
   const file = form.media.files[0];
   const media = $('#preview-media');
-  const clipKey = composeClip ? String(composeClip.ref || composeClip.id) : '';
+  const clipKey = composeClip ? String(composeClip.id) : '';
   if (!file && composeClip && media.dataset.clip === clipKey) return; // keep the clip playing while typing
   media.dataset.clip = '';
   if (media.dataset.url) URL.revokeObjectURL(media.dataset.url);
@@ -485,7 +466,7 @@ async function submitPost(now) {
   const when = now ? new Date() : new Date(form.scheduledAt.value);
   fd.set('scheduledAt', when.toISOString());
   if (!form.media.files[0]) fd.delete('media');
-  if (!form.media.files[0] && composeClip) fd.set(composeClip.ref ? 'adRef' : 'clipId', composeClip.ref || composeClip.id);
+  if (!form.media.files[0] && composeClip) fd.set('clipId', composeClip.id);
   const msg = $('#compose-msg');
   msg.textContent = 'Saving…';
   form.querySelectorAll('button').forEach((b) => (b.disabled = true));

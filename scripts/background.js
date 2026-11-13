@@ -1,4 +1,4 @@
-// Makes Viral Post, Viral Touch CRM, Viral Clips and Viral Ads Studio start by themselves in the
+// Makes Viral Post, Viral Touch CRM and Viral Clips start by themselves in the
 // background on a Mac (no Terminal window), each as its own program on its own port.
 //   npm run background:on    start them now and every time you log in
 //   npm run background:off   stop them and don't start at login
@@ -11,7 +11,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
-const { APPS, enabledApps, portOf } = require('../src/apps');
+const { APPS, RETIRED, enabledApps, portOf } = require('../src/apps');
 
 // One background program per app. Viral Post keeps its old name, so updating replaces it.
 const root = path.join(__dirname, '..');
@@ -68,6 +68,7 @@ function on() {
   fs.mkdirSync(path.join(os.homedir(), 'Library', 'LaunchAgents'), { recursive: true });
   fs.mkdirSync(path.join(root, 'data'), { recursive: true });
   const want = enabledApps();
+  for (const a of RETIRED) stopOne(a); // e.g. the old Viral Ads Studio program
   const failed = [];
   for (const a of APPS) {
     if (!want.includes(a)) { stopOne(a); continue; }
@@ -84,7 +85,7 @@ function on() {
 }
 
 function off() {
-  for (const a of APPS) stopOne(a);
+  for (const a of [...APPS, ...RETIRED]) stopOne(a);
   console.log('BACKGROUND OFF. All the apps are stopped and will not start at login.');
 }
 
