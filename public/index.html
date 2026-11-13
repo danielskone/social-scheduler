@@ -125,8 +125,12 @@
             </label>
             <details class="clip-link" id="clip-link">
               <summary>Video on YouTube, TikTok, Instagram or Facebook? Paste its link</summary>
-              <input type="url" id="clip-link-input" placeholder="Paste the link to your own video here" autocomplete="off">
-              <div id="clip-link-steps" class="clip-link-steps"></div>
+              <div class="clip-link-row">
+                <input type="url" id="clip-link-input" placeholder="Paste the link to your own video here" autocomplete="off">
+                <button type="button" class="btn primary" id="clip-link-go">Get video</button>
+              </div>
+              <p class="muted small clip-link-hint">Works for videos on your connected Facebook Pages and Instagram accounts, and any video Viral Post posted for you.</p>
+              <div id="clip-link-steps" class="clip-link-steps" aria-live="polite"></div>
             </details>
           </div>
           <div class="clip-new-right">

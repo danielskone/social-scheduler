@@ -518,7 +518,11 @@ dialog.wide { width: min(760px, 94vw); }
 .clip-drop-ico svg { width: 26px; height: 26px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .clip-link { margin-top: 12px; }
 .clip-link summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: .88rem; list-style-position: inside; }
-.clip-link input { width: 100%; margin-top: 10px; }
+.clip-link-row { display: flex; gap: 8px; margin-top: 10px; }
+.clip-link-row input { flex: 1; min-width: 0; }
+.clip-link-row .btn { white-space: nowrap; }
+.clip-link-hint { margin: 8px 0 0; font-size: .8rem; }
+.clip-link-steps .why { font-weight: 600; }
 .clip-link-steps p { margin: 12px 0 6px; }
 .clip-link-steps ol { margin: 6px 0; padding-left: 22px; }
 .clip-link-steps li { margin-bottom: 8px; }
@@ -588,6 +592,8 @@ dialog.wide { width: min(760px, 94vw); }
 dialog.clip-viewer { width: min(860px, 96vw); padding: 0; overflow: hidden; }
 .cv-grid { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); }
 .cv-grid video { width: 100%; aspect-ratio: 9 / 16; max-height: 86vh; background: #000; display: block; margin: 0; border-radius: 0; object-fit: contain; }
+.cv-video { position: relative; background: #000; min-width: 0; }
+.cv-slow { position: absolute; left: 12px; right: 12px; bottom: 56px; margin: 0; padding: 10px 12px; border-radius: 10px; background: rgb(15 17 23 / .82); color: #fff; font-size: .85rem; line-height: 1.4; }
 .cv-side { padding: 22px; display: flex; flex-direction: column; gap: 10px; position: relative; min-width: 0; max-height: 86vh; overflow: auto; }
 .cv-side h2 { margin: 0; font-size: 1.2rem; padding-right: 36px; }
 .cv-side p { margin: 0; }

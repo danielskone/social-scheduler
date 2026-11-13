@@ -7,12 +7,34 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-// Stands in for the model download so tests never fetch 200 MB.
-const fake = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
+// Stands in for the model download so tests never fetch 200 MB, and for Facebook's Graph API.
+const graphCalls = [];
+let videoBytes = null;
+const fake = http.createServer((req, res) => {
+  const u = new URL(req.url, 'http://x');
+  const json = (o, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
+  if (u.pathname === '/cdn/video.mp4' && videoBytes) { res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': videoBytes.length }); return res.end(videoBytes); }
+  if (u.pathname.startsWith('/v23.0/')) {
+    graphCalls.push(`${u.pathname} ${u.searchParams.get('access_token')}`);
+    const base = `http://127.0.0.1:${fake.address().port}`;
+    if (u.pathname === '/v23.0/1234567890' && u.searchParams.get('access_token') === 'page-b') return json({ id: '1234567890', title: 'Parade float tour', source: `${base}/cdn/video.mp4` });
+    if (u.pathname === '/v23.0/1234567890') return json({ error: { message: 'Unsupported get request', code: 100 } }, 400);
+    if (u.pathname === '/v23.0/ig1/media' && !u.searchParams.get('after')) {
+      return json({ data: [{ id: 'm1', media_type: 'IMAGE', media_url: 'x', permalink: 'https://www.instagram.com/p/PHOTO1/' }], paging: { cursors: { after: 'c2' }, next: 'more' } });
+    }
+    if (u.pathname === '/v23.0/ig1/media') return json({ data: [{ id: 'm2', media_type: 'VIDEO', media_url: `${base}/cdn/video.mp4`, permalink: 'https://www.instagram.com/reel/REEL22/', caption: 'Santa is coming to town' }] });
+    return json({ error: { message: 'nope', code: 100 } }, 400);
+  }
+  res.statusCode = 404; res.end();
+});
 let clipper, db, server, root, dir;
 test.before(async () => {
   await new Promise((r) => fake.listen(0, r));
   process.env.CLIPS_MODEL_URL = `http://127.0.0.1:${fake.address().port}`;
+  process.env.GRAPH_BASE = `http://127.0.0.1:${fake.address().port}`;
+  process.env.GRAPH_VERSION = 'v23.0';
+  // Pretend this computer has the Mac's video chip: making clips must still work when it fails.
+  process.env.CLIPS_HW = '1';
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-'));
   process.env.DATA_DIR = dir;
   process.env.APP_PASSWORD = '';
@@ -96,6 +118,16 @@ test('upload a video, get vertical clips, and schedule one', { timeout: 180000 }
   assert.ok(Math.abs(info.duration - clip.length) < 0.6);
   assert.strictEqual((await fetch(`${root}/clipfile/${job.id}/..%2F..%2Fscheduler.db`)).status, 404);
 
+  // A small copy plays quickly in the app; videos can be streamed in pieces (needed by iPhones).
+  assert.match(clip.preview_url, /-small\.mp4$/);
+  const small = await clipper.probe(path.join(dir, 'clips', String(job.id), path.basename(clip.preview_url)));
+  assert.deepStrictEqual([small.width, small.height], [540, 960]);
+  assert.ok(Math.abs(small.duration - clip.length) < 0.6);
+  assert.ok(fs.statSync(path.join(dir, 'clips', String(job.id), path.basename(clip.preview_url))).size < clip.size);
+  const part = await fetch(root + clip.preview_url, { headers: { Range: 'bytes=0-99' } });
+  assert.strictEqual(part.status, 206);
+  assert.strictEqual((await part.arrayBuffer()).byteLength, 100);
+
   const acct = db.prepare(`INSERT INTO accounts (platform, external_id, name, access_token) VALUES ('tiktok','t1','Me','x')`).run().lastInsertRowid;
   const post = new FormData();
   post.set('caption', 'From a clip');
@@ -114,4 +146,84 @@ test('upload a video, get vertical clips, and schedule one', { timeout: 180000 }
   await fetch(`${root}/api/clips/${job.id}`, { method: 'DELETE' });
   assert.strictEqual((await fetch(root + clip.url)).status, 404);
   assert.ok(!fs.existsSync(path.join(dir, 'clips', String(job.id))));
+});
+
+test('reads video links from each platform', () => {
+  const { parseLink } = require('../src/linkimport');
+  assert.deepStrictEqual(parseLink('https://youtu.be/dQw4w9WgXcQ?si=abc'), { platform: 'youtube', id: 'dQw4w9WgXcQ', url: 'https://youtu.be/dQw4w9WgXcQ?si=abc' });
+  assert.strictEqual(parseLink('https://www.youtube.com/shorts/dQw4w9WgXcQ').id, 'dQw4w9WgXcQ');
+  assert.strictEqual(parseLink('https://m.youtube.com/watch?v=dQw4w9WgXcQ&t=5').id, 'dQw4w9WgXcQ');
+  assert.strictEqual(parseLink('https://www.tiktok.com/@danielkinglife/video/7312345678901234567').id, '7312345678901234567');
+  assert.strictEqual(parseLink('https://www.instagram.com/reel/C9xYz_AbC12/?igsh=x').id, 'C9xYz_AbC12');
+  assert.strictEqual(parseLink('https://www.instagram.com/king_daniel_st/p/C9xYz_AbC12/').id, 'C9xYz_AbC12');
+  assert.strictEqual(parseLink('https://www.facebook.com/MyPage/videos/1234567890123/').id, '1234567890123');
+  assert.strictEqual(parseLink('https://www.facebook.com/reel/1234567890123').id, '1234567890123');
+  assert.strictEqual(parseLink('https://www.facebook.com/watch/?v=1234567890123').id, '1234567890123');
+  assert.strictEqual(parseLink('https://fb.watch/abcDEF/').short, true);
+  assert.strictEqual(parseLink('not a link'), null);
+});
+
+test('paste a link: brings in your own Facebook and Instagram videos through the official API', { timeout: 180000 }, async () => {
+  const src = path.join(dir, 'linked.mp4');
+  execFileSync(clipper.ffmpegPath(), ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=30', '-t', '20', '-c:v', 'libx264', '-preset', 'ultrafast', src]);
+  videoBytes = fs.readFileSync(src);
+  db.prepare(`INSERT INTO accounts (platform, external_id, name, access_token) VALUES ('facebook','pa','Page A','page-a'), ('facebook','pb','Page B','page-b'), ('instagram','ig1','Insta','page-b')`).run();
+  const post = (url) => fetch(`${root}/api/clips/link`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, length: 'short', count: 1 }) });
+  const waitReady = async (id) => {
+    let job;
+    for (let i = 0; i < 170; i++) {
+      job = await (await fetch(`${root}/api/clips/${id}`)).json();
+      if (job.status === 'failed' || (job.status === 'ready' && job.clips.length && job.clips.every((c) => c.status === 'ready'))) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return job;
+  };
+
+  // Facebook: the Page that owns the video gives its file.
+  let res = await post('https://www.facebook.com/somepage/videos/1234567890/');
+  assert.strictEqual(res.status, 201);
+  let made = await res.json();
+  assert.strictEqual(made.name, 'Parade float tour');
+  assert.strictEqual(made.from, 'Page B');
+  let job = await waitReady(made.id);
+  assert.strictEqual(job.status, 'ready', job.error);
+  assert.ok(Math.abs(job.duration - 20) < 0.5);
+  assert.ok(graphCalls.some((c) => c.includes('page-a')) && graphCalls.some((c) => c.includes('page-b')));
+
+  // Instagram: found by looking through the account's posts.
+  res = await post('https://www.instagram.com/reel/REEL22/');
+  assert.strictEqual(res.status, 201);
+  made = await res.json();
+  assert.strictEqual(made.name, 'Santa is coming to town');
+  job = await waitReady(made.id);
+  assert.strictEqual(job.status, 'ready', job.error);
+
+  res = await post('https://www.instagram.com/p/PHOTO1/');
+  assert.strictEqual(res.status, 422);
+  assert.match((await res.json()).error, /photo/);
+
+  // Someone else's video: refused.
+  res = await post('https://www.facebook.com/reel/999999999');
+  assert.strictEqual(res.status, 422);
+  assert.match((await res.json()).error, /isn't on any of your connected Facebook/);
+
+  // YouTube has no official download, so the official steps are shown...
+  res = await post('https://youtu.be/AAAAAAAAAAA');
+  assert.strictEqual(res.status, 422);
+  const why = await res.json();
+  assert.strictEqual(why.platform, 'youtube');
+  assert.match(why.error, /doesn't let apps download/);
+
+  // ...unless Viral Post posted that video: then the original file is already here.
+  fs.copyFileSync(src, path.join(dir, 'media', 'yt-original.mp4'));
+  const yt = db.prepare(`INSERT INTO accounts (platform, external_id, name, access_token) VALUES ('youtube','ch1','My channel','x')`).run().lastInsertRowid;
+  const p = db.prepare(`INSERT INTO posts (caption, media_file, media_type, scheduled_at, title) VALUES ('c', 'yt-original.mp4', 'video', '2026-11-01T00:00:00Z', 'Christmas parade recap')`).run().lastInsertRowid;
+  db.prepare(`INSERT INTO post_targets (post_id, account_id, status, external_post_id, permalink) VALUES (?, ?, 'published', 'AAAAAAAAAAA', 'https://www.youtube.com/watch?v=AAAAAAAAAAA')`).run(p, yt);
+  res = await post('https://www.youtube.com/shorts/AAAAAAAAAAA');
+  assert.strictEqual(res.status, 201);
+  made = await res.json();
+  assert.strictEqual(made.how, 'local');
+  assert.strictEqual(made.name, 'Christmas parade recap');
+  job = await waitReady(made.id);
+  assert.strictEqual(job.status, 'ready', job.error);
 });
