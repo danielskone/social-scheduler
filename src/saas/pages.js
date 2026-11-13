@@ -216,7 +216,7 @@ ${inv ? `<div class="card"><p class="ok">${esc(inv.user.email)} can now sign in.
   ${beta ? '' : '<label class="check"><input type="checkbox" name="free" value="1"> Give them free access (no trial end)</label>'}
   <button class="btn primary full" type="submit">Make their login</button>
 </form>
-<p class="muted">${beta ? 'Beta: invite only. Testers use it free.' : billingEnabled ? 'Payments: Stripe is ON.' : 'Payments: OFF (new customers get the free trial; add your Stripe keys to switch payments on).'}</p>
+<p class="muted">${beta ? 'Beta test. ' : ''}${billingEnabled ? 'Payments: Stripe is ON.' : 'Payments: OFF (new customers get the free trial; add your Stripe keys to switch payments on).'}</p>
 <div class="card scroll"><table><tr><th>#</th><th>Customer</th><th>Plan</th><th>Joined</th><th>App</th><th></th></tr>${rows}</table></div>`, { wide: true });
 }
 
