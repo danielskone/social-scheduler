@@ -68,6 +68,7 @@
     conversations: ['email', 'Your email inbox, inside the CRM', 'When someone in your CRM emails you, it shows up here, on their card, and <b>your iPhone buzzes</b>. Click a name to read it and <b>answer right here</b>. Your reply goes out from your own email address. Mail from strangers and newsletters stays in your normal inbox.'],
     sites: ['forms', 'A simple website, no coding', 'Make a one-page website for a business or an event. Pick a design, change the words and pictures, and press <b>Save</b> with <b>Live</b> ticked. Put your <b>booking page</b> and <b>forms</b> right on it, so every visitor who books or signs up lands in People by itself. <b>Funnels</b> put pages in order: sign-up, then thank-you, then an offer.'],
     courses: ['check', 'Teach and sell courses', 'Make a course with lessons: a <b>YouTube or Vimeo link</b> or your own video, plus notes. Share the <b>sales page</b>. Free courses open right away, paid ones go through your Stripe. Members watch in their private <b>customer portal</b> and tick lessons done. You see everyone\'s progress here.'],
+    events: ['appointments', 'Events and tickets', 'Make a page for an event with <b>free or paid tickets</b>. Paid tickets go through your own Stripe. Each person gets their tickets by <b>email with a QR code</b>. At the door, scan the code with any phone camera, type the <b>door code</b> once, and press <b>Check in</b>. You see who came right here.'],
     reports: ['pipeline', 'Your month in numbers', 'New people, deals won, money paid, appointments and more, compared with last month. <b>Email it</b> to yourself or a client, or tick the box and it goes out by itself on the 1st of every month. Pick a business at the top of the menu for its own report.'],
     payments: ['email', 'Get paid', 'Send a <b>quote</b> people sign on their phone, then an <b>invoice</b> they pay by card. Make an invoice, then <b>email it</b> or copy its link. People open it on their phone and <b>pay by card</b> with your own Stripe (the money goes straight to you), or by cash, check or Zelle, which you mark as paid. Your iPhone buzzes when a card payment comes in.'],
     reviews: ['check', 'More 5-star reviews', 'Ask people who just bought or donated for a review. Press <b>Ask</b> to email them, or text it from your phone. The link takes them straight to your review page, and you can see who opened it. Each person is asked at most once every 90 days.'],
@@ -112,6 +113,7 @@
     { tab: 'payments', ico: 'email', title: 'Payments', text: 'Send invoices. People pay by card with your own Stripe, or by cash, check or Zelle.' },
     { tab: 'sites', ico: 'forms', title: 'Sites', text: 'Make a simple one-page website with your booking page and forms on it. No coding.' },
     { tab: 'courses', ico: 'check', title: 'Courses', text: 'Teach what you know. Add lessons, share the course page, and members watch in their private portal.' },
+    { tab: 'events', ico: 'appointments', title: 'Events', text: 'Sell or give away tickets to your events. People get a QR ticket by email, and you check them in at the door with your phone.' },
     { tab: 'reports', ico: 'pipeline', title: 'Reports', text: 'Your month in numbers. Email it to yourself or a client, by hand or every month by itself.' },
     { tab: 'forms', ico: 'forms', title: 'Forms', text: 'Build any form by dragging questions around: sign-ups, RSVPs, surveys, quotes. Each response is saved and becomes a contact by itself.', tryIt: 'Try it: pick a ready-made form, press <b>Save</b>, then <b>Share</b>.' },
     { tab: 'templates', ico: 'templates', title: 'Message templates', text: 'Messages you send often, written once. {first_name} fills in each person\'s name for you.' },
@@ -121,7 +123,7 @@
     { tab: 'settings', ico: 'people', title: 'Settings', text: 'Add your businesses here, with their phone, email, website and color. Each one keeps its own people and pipeline.' },
     { tab: 'dashboard', ico: 'party', title: 'You\'re all set!', text: 'Each tab has a short tip at the top if you forget what it\'s for. You can replay this tour any time with <b>How it works</b> at the top.' },
   ];
-  const TABS = ['launchpad', 'dashboard', 'conversations', 'list', 'pipeline', 'tasks', 'appointments', 'payments', 'forms', 'templates', 'automations', 'email', 'reviews', 'sites', 'courses', 'reports', 'settings'];
+  const TABS = ['launchpad', 'dashboard', 'conversations', 'list', 'pipeline', 'tasks', 'appointments', 'payments', 'forms', 'templates', 'automations', 'email', 'reviews', 'sites', 'courses', 'events', 'reports', 'settings'];
   // #contacts on its own opens the Dashboard; #contacts/people (or the old #contacts/list) is People.
   const tabFor = (sub) => (sub === 'people' || sub === 'list' ? 'list' : TABS.includes(sub) ? sub : 'dashboard');
   window.crmTabFor = tabFor;
@@ -198,6 +200,7 @@
     payments: ['Payments', 'Invoices, quotes, products, coupons, referrals, monthly plans and contracts.'],
     sites: ['Sites', 'Simple websites, and funnels that lead people from one page to the next.'],
     courses: ['Courses', 'Lessons people watch in their private members area.'],
+    events: ['Events', 'Event pages, free or paid tickets, and check-in at the door.'],
     reports: ['Reports', 'Your month in numbers, ready to email.'],
     reviews: ['Reviews', 'Ask happy customers for a review, and see who opened the link.'],
     settings: ['Settings', 'Your businesses, custom fields, payments and team.'],
@@ -215,7 +218,7 @@
     q$('#crm-title').textContent = title;
     q$('#crm-sub').innerHTML = `${biz ? `<span class="biz-dot" style="--c:${h(biz.color)}"></span><b>${h(biz.name)}</b> · ` : ''}${sub2}`;
     // The number tiles belong to the people pages; Launchpad, Dashboard and Settings have their own.
-    q$('#crm-tiles').style.display = ['launchpad', 'dashboard', 'settings', 'conversations', 'payments', 'reviews', 'sites', 'courses', 'reports', 'appointments'].includes(tab) ? 'none' : '';
+    q$('#crm-tiles').style.display = ['launchpad', 'dashboard', 'settings', 'conversations', 'payments', 'reviews', 'sites', 'courses', 'events', 'reports', 'appointments'].includes(tab) ? 'none' : '';
     meta = await call('/meta');
     buildStageColors(meta.pipelines);
     const fill = (sel, items, label) => {
@@ -232,7 +235,7 @@
     ].map(([l, v, ico, c]) => `<div class="tile"><div class="tile-ico" style="--c:${c}">${svg(ico)}</div><div><div class="label">${l}</div><div class="value">${v ?? 0}</div></div></div>`).join('');
     renderTip(tab);
     if (!store.get('tour-done', false) && tourAt < 0) setTimeout(() => showTour(0), 400);
-    await ({ launchpad: () => window.VTHome.renderLaunchpad(), dashboard: () => window.VTHome.renderDashboard(), conversations: () => window.VTInbox.render({ openContact }), payments: () => window.VTMore.renderPayments(), reviews: () => window.VTMore.renderReviews(), sites: () => window.VTExtra3.renderSitesTab(), courses: () => window.VTExtra2.renderCourses(), reports: () => window.VTExtra.renderReports(), settings: () => window.VTHome.renderSettings(meta), list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
+    await ({ launchpad: () => window.VTHome.renderLaunchpad(), dashboard: () => window.VTHome.renderDashboard(), conversations: () => window.VTInbox.render({ openContact }), payments: () => window.VTMore.renderPayments(), reviews: () => window.VTMore.renderReviews(), sites: () => window.VTExtra3.renderSitesTab(), courses: () => window.VTExtra2.renderCourses(), events: () => window.VTExtra5.renderEvents(), reports: () => window.VTExtra.renderReports(), settings: () => window.VTHome.renderSettings(meta), list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
   }
   window.renderContacts = renderContacts;
   window.addEventListener('load', () => setTimeout(() => window.VTInbox.badge(), 500));

@@ -100,12 +100,15 @@ function home(c, token) {
   const partner = (() => { try { return require('./referrals').forContact(c.id); } catch { return null; } })();
   const plans = (() => { try { return require('./plans').forContact(c.id); } catch { return []; } })();
   const contracts = (() => { try { return require('./contracts').forContact(c.id); } catch { return []; } })();
+  const tickets = (() => { try { return require('./events').forContact(c.id); } catch { return []; } })();
   const per = (e) => ({ week: 'a week', month: 'a month', year: 'a year' }[e] || 'a month');
   const sec = (title, items, emptyText) => `<h2>${title}</h2>${items.length ? items.join('') : `<div class="empty">${emptyText}</div>`}`;
   const body = `<h1>Hi ${esc(String(c.name).split(' ')[0])}</h1><div class="muted">Everything you have with ${esc(b.name || 'us')}, in one place.</div>
 ${due.length ? `<div class="note"><b>You have ${due.length} invoice${due.length > 1 ? 's' : ''} to pay</b> (${money(due.reduce((s, i) => s + i.total, 0))}).</div>` : ''}
 ${courses.length ? sec('Your courses', courses.map((k) => `<div class="card"><div class="row"><div><b>${esc(k.title)}</b><div class="muted small">${k.done} of ${k.lessons} lessons done</div></div>
 <a class="btn" href="${base}?course=${k.id}">${k.done ? 'Keep going' : 'Start'}</a></div><div class="prog"><i style="width:${k.lessons ? Math.round(k.done / k.lessons * 100) : 0}%"></i></div></div>`), '') : ''}
+${tickets.length ? sec('Your tickets', tickets.map((t) => `<div class="card"><div class="row"><div><b>${esc(t.title)}</b> <span class="pill ok">${esc(t.type_name)}</span>
+<div class="muted small">${esc(t.when)}${t.location ? ` · ${esc(t.location)}` : ''}</div></div><a class="btn" href="../e/ticket/${esc(t.code)}">Show ticket</a></div></div>`), '') : ''}
 ${plans.length ? sec('Your plans', plans.map((s) => `<div class="card"><div class="row"><div><b>${esc(s.name)} · ${money(s.amount)} ${per(s.every)}</b>
 <span class="pill ${s.status === 'past_due' ? 'due' : 'ok'}">${{ active: 'Active', past_due: 'Card declined', ending: 'Ending' }[s.status] || esc(s.status)}</span>
 <div class="muted small">${s.status === 'ending' ? `Ends ${day(s.renews_at)}. You keep it until then.` : s.status === 'past_due' ? 'Your card was declined. We will try again soon. Questions? Reply to any email from us.' : s.renews_at ? `Renews ${day(s.renews_at)}` : ''}</div></div>

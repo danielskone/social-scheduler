@@ -47,6 +47,7 @@
     plan_started: { name: 'Plan started', help: 'Someone signs up for one of your monthly plans and pays.', icon: 'person' },
     contract_signed: { name: 'Contract signed', help: 'Someone signs a contract you sent.', icon: 'form' },
     quote_signed: { name: 'Quote signed', help: 'Someone signs a quote you sent.', icon: 'form' },
+    event_registered: { name: 'Got event tickets', help: 'Someone gets free or paid tickets to one of your events.', icon: 'calendar' },
   };
   const STEP = {
     email: { name: 'Send email', help: 'Goes out by itself from your email, only to people who contacted you or said yes to email.', icon: 'mail', color: 'green', group: 'Messages' },

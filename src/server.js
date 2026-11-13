@@ -50,7 +50,7 @@ const viaTunnel = (req) => Boolean(req.headers['cf-connecting-ip']);
 app.use((req, res, next) => {
   if (viaTunnel(req) && !req.path.startsWith('/media/') && !req.path.startsWith('/f/') && !req.path.startsWith('/book/')
     && !req.path.startsWith('/invoice/') && !req.path.startsWith('/r/') && !req.path.startsWith('/quote/') && !req.path.startsWith('/s/')
-    && !['/chat/', '/pay/', '/portal', '/learn/', '/subscribe/', '/sign/', '/blog'].some((x) => req.path.startsWith(x))) return res.status(404).send('Not found');
+    && !['/chat/', '/pay/', '/portal', '/learn/', '/subscribe/', '/sign/', '/blog', '/e/'].some((x) => req.path.startsWith(x))) return res.status(404).send('Not found');
   next();
 });
 
@@ -63,7 +63,7 @@ app.use(compression({ filter: (req, res) => !req.path.startsWith('/thumb/') && c
 
 // Public sign-up forms from the Contacts tab. No password, so anyone with the link can fill one in.
 // Referral links: ?ref=CODE on any shared page remembers who sent the visitor.
-app.use(['/s', '/pay', '/learn', '/portal', '/book', '/f', '/subscribe', '/blog'], require('../crm/server/referrals').catcher);
+app.use(['/s', '/pay', '/learn', '/portal', '/book', '/f', '/subscribe', '/blog', '/e'], require('../crm/server/referrals').catcher);
 app.use('/f', forms.publicForms);
 app.use('/book', booking.publicBooking);
 // Invoices you send (customers view and pay them) and review-request links: also meant to be shared.
@@ -82,6 +82,7 @@ app.use('/learn', require('../crm/server/courses').publicRouter());
 app.use('/subscribe', require('../crm/server/plans').publicRouter());
 app.use('/sign', require('../crm/server/contracts').publicRouter());
 app.use('/blog', require('../crm/server/blog').publicRouter());
+app.use('/e', require('../crm/server/events').publicRouter());
 
 // ---------- Password protection ----------
 // On this Mac (localhost) the password is optional. From a phone or any other device a
@@ -583,6 +584,7 @@ app.use('/api/crm/chat', require('../crm/server/chat').router);
 app.use('/api/crm/products', require('../crm/server/products').router);
 app.use('/api/crm/portal', require('../crm/server/portal').router);
 app.use('/api/crm/courses', require('../crm/server/courses').router);
+app.use('/api/crm/events', require('../crm/server/events').router);
 app.use('/api/crm/funnels', require('../crm/server/funnels').router);
 app.use('/api/crm/coupons', require('../crm/server/coupons').router);
 app.use('/api/crm/referrals', require('../crm/server/referrals').router);
