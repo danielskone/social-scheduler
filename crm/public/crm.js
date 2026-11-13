@@ -65,6 +65,7 @@
   const TIPS = {
     launchpad: ['check', 'Start here', 'A short list of things to set up once. <b>Green means done.</b> Press the button next to anything that isn\'t done yet.'],
     dashboard: ['pipeline', 'How things are going', 'Your numbers at a glance: new people, money still open, money won and what\'s coming up. Pick a date range at the top right. Use the <b>business switcher</b> at the top of the menu to see one business or all of them.'],
+    conversations: ['email', 'Your email inbox, inside the CRM', 'When someone in your CRM emails you, it shows up here, on their card, and <b>your iPhone buzzes</b>. Click a name to read it and <b>answer right here</b>. Your reply goes out from your own email address. Mail from strangers and newsletters stays in your normal inbox.'],
     settings: ['check', 'Your businesses', 'Add each business you run, like an agency and a nonprofit. Each one gets its own people, pipeline and forms. Switch between them at the top of the menu.'],
     list: ['people', 'Your address book', 'Everyone you work with lives here: leads, customers, partners and more. <b>Click a name</b> to see their notes, history and next follow-up. Use the search box and the group and stage menus to find people fast.',
       'This app never bulk-sends texts, so your accounts can\'t get flagged for spam. Tick "OK to email" only when someone said yes.'],
@@ -98,6 +99,7 @@
     { tab: 'dashboard', ico: 'wave', title: 'Welcome to Viral Touch CRM', text: 'This is where you keep track of everyone you work with and what to do next with each of them. This quick tour shows you each part. It takes about a minute.', tryIt: 'Use <b>Next</b> to move along. You can stop any time.' },
     { tab: 'launchpad', ico: 'check', title: 'Launchpad', text: 'Start here. It lists the few things to set up once, like phone alerts and your email. Green means done.' },
     { tab: 'dashboard', ico: 'pipeline', title: 'Dashboard', text: 'Your numbers at a glance: new people, money still open, money won and what\'s coming up.', tryIt: 'The <b>business switcher</b> at the top of the menu picks which business you\'re looking at.' },
+    { tab: 'conversations', ico: 'email', title: 'Conversations', text: 'Emails from people in your CRM land here, and your iPhone buzzes. Read them and answer right here, from your own email address.' },
     { tab: 'list', ico: 'people', title: 'People', text: 'Your address book. Click anyone to open their card with notes, history and their next follow-up date.', tryIt: 'Try it: press <b>+ Add contact</b> at the top right to add someone new.' },
     { tab: 'pipeline', ico: 'pipeline', title: 'Pipeline', text: 'See where every deal stands, from New to Paid / Done. Drag a card to the next column when things move along.', tryIt: 'Try it: drag someone from "Committed" to "Paid / Done" once they pay.' },
     { tab: 'tasks', ico: 'tasks', title: 'Tasks', text: 'Your to-do list. Many tasks are made for you by automations. Tick the circle when one is done.', tryIt: 'Good habit: check this tab first thing every morning.' },
@@ -109,7 +111,7 @@
     { tab: 'settings', ico: 'people', title: 'Settings', text: 'Add your businesses here, with their phone, email, website and color. Each one keeps its own people and pipeline.' },
     { tab: 'dashboard', ico: 'party', title: 'You\'re all set!', text: 'Each tab has a short tip at the top if you forget what it\'s for. You can replay this tour any time with <b>How it works</b> at the top.' },
   ];
-  const TABS = ['launchpad', 'dashboard', 'list', 'pipeline', 'tasks', 'appointments', 'forms', 'templates', 'automations', 'email', 'settings'];
+  const TABS = ['launchpad', 'dashboard', 'conversations', 'list', 'pipeline', 'tasks', 'appointments', 'forms', 'templates', 'automations', 'email', 'settings'];
   // #contacts on its own opens the Dashboard; #contacts/people (or the old #contacts/list) is People.
   const tabFor = (sub) => (sub === 'people' || sub === 'list' ? 'list' : TABS.includes(sub) ? sub : 'dashboard');
   window.crmTabFor = tabFor;
@@ -174,6 +176,7 @@
   const HEADS = {
     launchpad: ['Launchpad', 'Set these up once and the CRM works by itself.'],
     dashboard: ['Dashboard', 'How things are going, at a glance.'],
+    conversations: ['Conversations', 'Emails from the people in your CRM. Read and answer them here.'],
     list: ['People', 'Everyone you work with, what\'s next with each of them, and who to follow up with today.'],
     pipeline: ['Pipeline', 'Where every deal stands. Drag a card to move it along.'],
     tasks: ['Tasks', 'Your to-do list. Tick things off as you go.'],
@@ -197,7 +200,7 @@
     q$('#crm-title').textContent = title;
     q$('#crm-sub').innerHTML = `${biz ? `<span class="biz-dot" style="--c:${h(biz.color)}"></span><b>${h(biz.name)}</b> · ` : ''}${sub2}`;
     // The number tiles belong to the people pages; Launchpad, Dashboard and Settings have their own.
-    q$('#crm-tiles').style.display = ['launchpad', 'dashboard', 'settings'].includes(tab) ? 'none' : '';
+    q$('#crm-tiles').style.display = ['launchpad', 'dashboard', 'settings', 'conversations'].includes(tab) ? 'none' : '';
     meta = await call('/meta');
     buildStageColors(meta.pipelines);
     const fill = (sel, items, label) => {
@@ -214,9 +217,10 @@
     ].map(([l, v, ico, c]) => `<div class="tile"><div class="tile-ico" style="--c:${c}">${svg(ico)}</div><div><div class="label">${l}</div><div class="value">${v ?? 0}</div></div></div>`).join('');
     renderTip(tab);
     if (!store.get('tour-done', false) && tourAt < 0) setTimeout(() => showTour(0), 400);
-    await ({ launchpad: () => window.VTHome.renderLaunchpad(), dashboard: () => window.VTHome.renderDashboard(), settings: () => window.VTHome.renderSettings(meta), list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
+    await ({ launchpad: () => window.VTHome.renderLaunchpad(), dashboard: () => window.VTHome.renderDashboard(), conversations: () => window.VTInbox.render({ openContact }), settings: () => window.VTHome.renderSettings(meta), list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
   }
   window.renderContacts = renderContacts;
+  window.addEventListener('load', () => setTimeout(() => window.VTInbox.badge(), 500));
   const refresh = () => renderContacts(tab);
 
   // ---------- People ----------
@@ -657,7 +661,7 @@
     const cPipe = meta.pipelines.find((x) => x.id === (c.pipeline || c.pipeline_id)) || (id ? meta.pipelines[0] : curPipe()) || meta.pipelines[0];
     if (!id) c.stage = cPipe.stages[0].name;
     dlg.innerHTML = `<form method="dialog" id="contact-form">
-      <header class="view-head"><h1>${id ? h(c.name) : 'New contact'}</h1><button class="btn ghost" value="cancel" formnovalidate>Close</button></header>
+      <header class="view-head"><h1>${id ? h(c.name) : 'New contact'}</h1><div class="row">${id && c.email ? '<button class="btn ghost" type="button" id="c-emails" title="Read and answer their emails">Emails</button>' : ''}<button class="btn ghost" value="cancel" formnovalidate>Close</button></div></header>
       ${id && !c.do_not_contact && usable.length ? `<div class="send-row"><select id="send-tpl">${usable.map((t) => `<option value="${t.id}">${t.channel === 'text' ? 'Text' : 'Email'}: ${h(t.name)}</option>`).join('')}</select>
         <button class="btn" type="button" id="send-go">Open in Mail / Messages</button><span class="muted small" style="margin:0">Opens a filled-in message for just this person. You press Send.</span></div>` : ''}
       <div class="form-grid">
@@ -698,6 +702,8 @@
       <ul class="history">${c.activities.map((a) => `<li><button title="Delete" data-del="${a.id}">×</button><b>${h(a.kind)} · ${niceDate(a.happened_on)}</b><br>${h(a.note)}</li>`).join('') || '<li class="muted">Nothing logged yet.</li>'}</ul>` : ''}`;
 
     const reopen = () => { openContact(id); refresh(); };
+    const em = q$('#c-emails', dlg);
+    if (em) em.onclick = () => { dlg.close(); window.VTInbox.show(id); if (tab === 'conversations') refresh(); };
     const form = q$('#contact-form', dlg);
     if (form.pipeline_id) form.pipeline_id.onchange = () => {
       const pl = meta.pipelines.find((x) => x.id === Number(form.pipeline_id.value));

@@ -178,7 +178,7 @@ ${msg(error, ok)}
   ${field('SMTP_PORT', 'SMTP port', 'number', '465')}
   ${field('SMTP_USER', 'Mailbox login (usually your email)', 'text')}
   ${field('SMTP_PASS', 'Mailbox password', 'password')}
-  ${field('IMAP_HOST', 'Incoming mail server (IMAP, for unsubscribe replies)', 'text', 'imap.hostinger.com')}
+  ${field('IMAP_HOST', 'Incoming mail server (IMAP, for Conversations and unsubscribe replies)', 'text', 'imap.hostinger.com')}
   ${field('BOOKING_TIMEZONE', 'Your time zone', 'text', 'America/New_York')}
   <button class="btn primary full" type="submit">Save email settings</button>
 </form>
