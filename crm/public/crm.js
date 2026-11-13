@@ -66,6 +66,8 @@
     launchpad: ['check', 'Start here', 'A short list of things to set up once. <b>Green means done.</b> Press the button next to anything that isn\'t done yet.'],
     dashboard: ['pipeline', 'How things are going', 'Your numbers at a glance: new people, money still open, money won and what\'s coming up. Pick a date range at the top right. Use the <b>business switcher</b> at the top of the menu to see one business or all of them.'],
     conversations: ['email', 'Your email inbox, inside the CRM', 'When someone in your CRM emails you, it shows up here, on their card, and <b>your iPhone buzzes</b>. Click a name to read it and <b>answer right here</b>. Your reply goes out from your own email address. Mail from strangers and newsletters stays in your normal inbox.'],
+    payments: ['email', 'Get paid', 'Make an invoice, then <b>email it</b> or copy its link. People open it on their phone and <b>pay by card</b> with your own Stripe (the money goes straight to you), or by cash, check or Zelle, which you mark as paid. Your iPhone buzzes when a card payment comes in.'],
+    reviews: ['check', 'More 5-star reviews', 'Ask people who just bought or donated for a review. Press <b>Ask</b> to email them, or text it from your phone. The link takes them straight to your review page, and you can see who opened it. Each person is asked at most once every 90 days.'],
     settings: ['check', 'Your businesses', 'Add each business you run, like an agency and a nonprofit. Each one gets its own people, pipeline and forms. Switch between them at the top of the menu.'],
     list: ['people', 'Your address book', 'Everyone you work with lives here: leads, customers, partners and more. <b>Click a name</b> to see their notes, history and next follow-up. Use the search box and the group and stage menus to find people fast.',
       'This app never bulk-sends texts, so your accounts can\'t get flagged for spam. Tick "OK to email" only when someone said yes.'],
@@ -104,14 +106,16 @@
     { tab: 'pipeline', ico: 'pipeline', title: 'Pipeline', text: 'See where every deal stands, from New to Paid / Done. Drag a card to the next column when things move along.', tryIt: 'Try it: drag someone from "Committed" to "Paid / Done" once they pay.' },
     { tab: 'tasks', ico: 'tasks', title: 'Tasks', text: 'Your to-do list. Many tasks are made for you by automations. Tick the circle when one is done.', tryIt: 'Good habit: check this tab first thing every morning.' },
     { tab: 'appointments', ico: 'appointments', title: 'Appointments', text: 'Calls people booked with you show up here, and your iPhone buzzes when a new one comes in.' },
+    { tab: 'payments', ico: 'email', title: 'Payments', text: 'Send invoices. People pay by card with your own Stripe, or by cash, check or Zelle.' },
     { tab: 'forms', ico: 'forms', title: 'Forms', text: 'Build any form by dragging questions around: sign-ups, RSVPs, surveys, quotes. Each response is saved and becomes a contact by itself.', tryIt: 'Try it: pick a ready-made form, press <b>Save</b>, then <b>Share</b>.' },
     { tab: 'templates', ico: 'templates', title: 'Message templates', text: 'Messages you send often, written once. {first_name} fills in each person\'s name for you.' },
     { tab: 'email', ico: 'email', title: 'Email marketing', text: 'Send a newsletter to everyone who said yes to email. Pick a design, pick who gets it, then press Send or pick a time.' },
+    { tab: 'reviews', ico: 'check', title: 'Reviews', text: 'Ask happy customers for a review with one press, and see who opened the link.' },
     { tab: 'automations', ico: 'automations', title: 'Automations', text: 'Your helper. When a new lead comes in, it can make a task, buzz your phone or send a welcome email, all by itself. These are already switched on for you.' },
     { tab: 'settings', ico: 'people', title: 'Settings', text: 'Add your businesses here, with their phone, email, website and color. Each one keeps its own people and pipeline.' },
     { tab: 'dashboard', ico: 'party', title: 'You\'re all set!', text: 'Each tab has a short tip at the top if you forget what it\'s for. You can replay this tour any time with <b>How it works</b> at the top.' },
   ];
-  const TABS = ['launchpad', 'dashboard', 'conversations', 'list', 'pipeline', 'tasks', 'appointments', 'forms', 'templates', 'automations', 'email', 'settings'];
+  const TABS = ['launchpad', 'dashboard', 'conversations', 'list', 'pipeline', 'tasks', 'appointments', 'payments', 'forms', 'templates', 'automations', 'email', 'reviews', 'settings'];
   // #contacts on its own opens the Dashboard; #contacts/people (or the old #contacts/list) is People.
   const tabFor = (sub) => (sub === 'people' || sub === 'list' ? 'list' : TABS.includes(sub) ? sub : 'dashboard');
   window.crmTabFor = tabFor;
@@ -185,7 +189,9 @@
     templates: ['Templates', 'Messages you send a lot, written once.'],
     email: ['Email', 'Newsletters and email blasts to people who said yes.'],
     automations: ['Automations', 'Your helper that works while you\'re busy.'],
-    settings: ['Settings', 'Your businesses and how everything is connected.'],
+    payments: ['Payments', 'Invoices people can pay by card, or by cash, check or Zelle.'],
+    reviews: ['Reviews', 'Ask happy customers for a review, and see who opened the link.'],
+    settings: ['Settings', 'Your businesses, custom fields, payments and team.'],
   };
   let timer;
 
@@ -200,7 +206,7 @@
     q$('#crm-title').textContent = title;
     q$('#crm-sub').innerHTML = `${biz ? `<span class="biz-dot" style="--c:${h(biz.color)}"></span><b>${h(biz.name)}</b> · ` : ''}${sub2}`;
     // The number tiles belong to the people pages; Launchpad, Dashboard and Settings have their own.
-    q$('#crm-tiles').style.display = ['launchpad', 'dashboard', 'settings', 'conversations'].includes(tab) ? 'none' : '';
+    q$('#crm-tiles').style.display = ['launchpad', 'dashboard', 'settings', 'conversations', 'payments', 'reviews'].includes(tab) ? 'none' : '';
     meta = await call('/meta');
     buildStageColors(meta.pipelines);
     const fill = (sel, items, label) => {
@@ -217,7 +223,7 @@
     ].map(([l, v, ico, c]) => `<div class="tile"><div class="tile-ico" style="--c:${c}">${svg(ico)}</div><div><div class="label">${l}</div><div class="value">${v ?? 0}</div></div></div>`).join('');
     renderTip(tab);
     if (!store.get('tour-done', false) && tourAt < 0) setTimeout(() => showTour(0), 400);
-    await ({ launchpad: () => window.VTHome.renderLaunchpad(), dashboard: () => window.VTHome.renderDashboard(), conversations: () => window.VTInbox.render({ openContact }), settings: () => window.VTHome.renderSettings(meta), list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
+    await ({ launchpad: () => window.VTHome.renderLaunchpad(), dashboard: () => window.VTHome.renderDashboard(), conversations: () => window.VTInbox.render({ openContact }), payments: () => window.VTMore.renderPayments(), reviews: () => window.VTMore.renderReviews(), settings: () => window.VTHome.renderSettings(meta), list: renderList, pipeline: renderBoard, tasks: renderTasks, appointments: renderAppointments, forms: renderForms, templates: renderTemplates, automations: renderAutomations, email: renderEmail }[tab])();
   }
   window.renderContacts = renderContacts;
   window.addEventListener('load', () => setTimeout(() => window.VTInbox.badge(), 500));
@@ -651,6 +657,23 @@
 
   // ---------- One contact ----------
   window.crmOpenContact = (id) => openContact(id);
+  // The business's own boxes (Settings > Custom fields), shown on every person's card.
+  function customFieldsHtml(c) {
+    const defs = meta.fields || [];
+    if (!defs.length) return '';
+    const v = (f) => (c.custom || {})[f.key] ?? '';
+    const input = (f) => {
+      const n = `cf:${f.key}`;
+      if (f.type === 'long') return `<textarea name="${n}" rows="2">${h(v(f))}</textarea>`;
+      if (f.type === 'choice') return `<select name="${n}"><option value="">Pick one</option>${f.options.map((o) => `<option${o === v(f) ? ' selected' : ''}>${h(o)}</option>`).join('')}</select>`;
+      if (f.type === 'yesno') return `<label class="check"><input type="checkbox" name="${n}"${v(f) === 'Yes' ? ' checked' : ''}> Yes</label>`;
+      const type = { number: 'number', money: 'text', date: 'date', link: 'url' }[f.type] || 'text';
+      return `<input type="${type}" name="${n}" value="${h(v(f))}"${f.type === 'money' ? ' inputmode="decimal" placeholder="$"' : f.type === 'number' ? ' step="any"' : ''}>`;
+    };
+    return `<div class="cf-head full"><b>More details</b><a class="small" href="#contacts/settings" data-cf-edit>Add or change these boxes</a></div>
+      ${defs.map((f) => `<label class="field${f.type === 'long' ? ' full' : ''}"><span>${h(f.label)}</span>${input(f)}</label>`).join('')}`;
+  }
+
   async function openContact(id) {
     const c = id ? await call(`/contacts/${id}`) : { group_name: q$('#crm-group').value || meta.groups[0] || 'Other', stage: 'New', activities: [], tasks: [] };
     const templates = id ? await call('/templates') : [];
@@ -661,7 +684,7 @@
     const cPipe = meta.pipelines.find((x) => x.id === (c.pipeline || c.pipeline_id)) || (id ? meta.pipelines[0] : curPipe()) || meta.pipelines[0];
     if (!id) c.stage = cPipe.stages[0].name;
     dlg.innerHTML = `<form method="dialog" id="contact-form">
-      <header class="view-head"><h1>${id ? h(c.name) : 'New contact'}</h1><div class="row">${id && c.email ? '<button class="btn ghost" type="button" id="c-emails" title="Read and answer their emails">Emails</button>' : ''}<button class="btn ghost" value="cancel" formnovalidate>Close</button></div></header>
+      <header class="view-head"><h1>${id ? h(c.name) : 'New contact'}</h1><div class="row c-actions">${id && c.email ? '<button class="btn ghost" type="button" id="c-emails" title="Read and answer their emails">Emails</button>' : ''}${id ? '<button class="btn ghost" type="button" id="c-invoice" title="Make an invoice for them">Invoice</button><button class="btn ghost" type="button" id="c-review" title="Ask them for a review">Review</button>' : ''}<button class="btn ghost" value="cancel" formnovalidate>Close</button></div></header>
       ${id && !c.do_not_contact && usable.length ? `<div class="send-row"><select id="send-tpl">${usable.map((t) => `<option value="${t.id}">${t.channel === 'text' ? 'Text' : 'Email'}: ${h(t.name)}</option>`).join('')}</select>
         <button class="btn" type="button" id="send-go">Open in Mail / Messages</button><span class="muted small" style="margin:0">Opens a filled-in message for just this person. You press Send.</span></div>` : ''}
       <div class="form-grid">
@@ -677,6 +700,7 @@
         ${field('amount', 'Amount ($) <small>pledged, paid or spent</small>', 'text', 'inputmode="decimal"')}
         ${field('next_follow_up', 'Next follow-up', 'date')}
         <label class="field full"><span>Notes</span><textarea name="notes" rows="3">${h(c.notes)}</textarea></label>
+        ${customFieldsHtml(c)}
         <div class="consent full">
           <label class="check"><input type="checkbox" name="email_ok" ${c.email_ok ? 'checked' : ''}> <b>OK to email</b> <small class="muted">only if they said yes</small></label>
           <input type="text" name="email_ok_source" placeholder="How they said yes, e.g. signed up on my website" value="${h(c.email_ok_source)}" style="width:100%;margin-top:8px">
@@ -702,6 +726,11 @@
       <ul class="history">${c.activities.map((a) => `<li><button title="Delete" data-del="${a.id}">×</button><b>${h(a.kind)} · ${niceDate(a.happened_on)}</b><br>${h(a.note)}</li>`).join('') || '<li class="muted">Nothing logged yet.</li>'}</ul>` : ''}`;
 
     const reopen = () => { openContact(id); refresh(); };
+    const ci = q$('#c-invoice', dlg), cr = q$('#c-review', dlg);
+    if (ci) ci.onclick = () => { dlg.close(); window.VTMore.editInvoice(null, id); };
+    if (cr) cr.onclick = () => { dlg.close(); window.VTMore.askReview(id, () => openContact(id)); };
+    const cfe = q$('[data-cf-edit]', dlg);
+    if (cfe) cfe.onclick = () => dlg.close();
     const em = q$('#c-emails', dlg);
     if (em) em.onclick = () => { dlg.close(); window.VTInbox.show(id); if (tab === 'conversations') refresh(); };
     const form = q$('#contact-form', dlg);
@@ -720,6 +749,10 @@
       }
       const data = Object.fromEntries(new FormData(form));
       data.email_ok = form.email_ok.checked; data.do_not_contact = form.do_not_contact.checked;
+      // Custom fields go in one "custom" box; an unticked yes/no box means No.
+      data.custom = {};
+      for (const k of Object.keys(data).filter((x) => x.startsWith('cf:'))) { data.custom[k.slice(3)] = data[k]; delete data[k]; }
+      form.querySelectorAll('input[type=checkbox][name^="cf:"]').forEach((x) => { data.custom[x.name.slice(3)] = x.checked ? 'Yes' : ''; });
       try {
         const saved = await call(id ? `/contacts/${id}` : '/contacts', { method: id ? 'PUT' : 'POST', json: data });
         refresh();

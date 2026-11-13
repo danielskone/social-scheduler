@@ -21,6 +21,7 @@ const businesses = require('../crm/server/businesses');
 const pipelines = require('../crm/server/pipelines');
 const crmDashboard = require('../crm/server/dashboard');
 const inbox = require('../crm/server/inbox');
+const team = require('../crm/server/team');
 const clipper = require('./clipper');
 const compression = require('compression');
 const { thumbFor } = require('./thumbs');
@@ -47,7 +48,8 @@ app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next
 // The CRM's public sign-up forms (/f/...) and booking pages (/book/...) are the other exceptions: they are meant to be shared.
 const viaTunnel = (req) => Boolean(req.headers['cf-connecting-ip']);
 app.use((req, res, next) => {
-  if (viaTunnel(req) && !req.path.startsWith('/media/') && !req.path.startsWith('/f/') && !req.path.startsWith('/book/')) return res.status(404).send('Not found');
+  if (viaTunnel(req) && !req.path.startsWith('/media/') && !req.path.startsWith('/f/') && !req.path.startsWith('/book/')
+    && !req.path.startsWith('/invoice/') && !req.path.startsWith('/r/')) return res.status(404).send('Not found');
   next();
 });
 
@@ -61,6 +63,11 @@ app.use(compression({ filter: (req, res) => !req.path.startsWith('/thumb/') && c
 // Public sign-up forms from the Contacts tab. No password, so anyone with the link can fill one in.
 app.use('/f', forms.publicForms);
 app.use('/book', booking.publicBooking);
+// Invoices you send (customers view and pay them) and review-request links: also meant to be shared.
+const invoices = require('../crm/server/invoices');
+const reviews = require('../crm/server/reviews');
+app.use('/invoice', express.urlencoded({ extended: false }), invoices.publicRouter());
+app.use('/r', reviews.publicRouter());
 
 // ---------- Password protection ----------
 // On this Mac (localhost) the password is optional. From a phone or any other device a
@@ -91,6 +98,19 @@ app.post('/login', express.urlencoded({ extended: false }), (req, res) => {
   const f = failed.get(ip) || { n: 0, until: 0 };
   const next = apps.APPS.some((a) => a.path !== '/' && a.path === req.body.next) ? `&next=${encodeURIComponent(req.body.next)}` : '';
   if (f.until > Date.now()) return res.redirect(`/login.html?error=wait${next}`);
+  // A Viral Touch CRM team member signs in with their own email and password.
+  if (req.body.email && !config.tenantKey) {
+    const t = team.login(req.body.email, req.body.password);
+    if (t) {
+      failed.delete(ip);
+      res.set('Set-Cookie', `vp_team=${t.cookie}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 90}`);
+      return res.redirect(ownApp ? '/#contacts' : '/crm/#contacts');
+    }
+    f.n += 1;
+    if (f.n >= 5) { f.n = 0; f.until = Date.now() + 15 * 60 * 1000; }
+    failed.set(ip, f);
+    return res.redirect(`/login.html?error=wrong&team=1${next}`);
+  }
   if (config.appPassword && same(req.body.password || '', config.appPassword)) {
     failed.delete(ip);
     res.set('Set-Cookie', `vp_login=${loginToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 365}`);
@@ -104,8 +124,27 @@ app.post('/login', express.urlencoded({ extended: false }), (req, res) => {
   res.redirect(`/login.html?error=wrong${next}`);
 });
 
+// Signing out (team members and phones).
+app.get('/logout', (req, res, next) => {
+  if (config.tenantKey) return next();
+  res.set('Set-Cookie', ['vp_team=; Path=/; Max-Age=0', 'vp_login=; Path=/; Max-Age=0']);
+  res.redirect(ownApp ? '/login.html' : '/login.html?next=%2Fcrm%2F');
+});
+
+// A team member (Viral Touch CRM only): their own login, limited to the CRM's pages and data.
+const crmOnly = (req) => (ownApp ? ownApp.key === 'crm' : !req.path.startsWith('/api/') || req.path.startsWith('/api/crm'));
 app.use((req, res, next) => {
-  if (PUBLIC_FILES.has(req.path) || req.path.startsWith('/icons/') || signedIn(req)) return next();
+  if (config.tenantKey || signedIn(req) || !cookie(req, 'vp_team')) return next();
+  const m = team.fromCookie(cookie(req, 'vp_team'));
+  if (!m || !crmOnly(req)) return next();
+  if (!team.allowed(m, req)) return res.status(403).json({ error: 'Only the owner or an admin can do that.' });
+  req.team = m;
+  if (req.path.startsWith('/api/crm')) team.limitBusinesses(m, req);
+  next();
+});
+
+app.use((req, res, next) => {
+  if (PUBLIC_FILES.has(req.path) || req.path.startsWith('/icons/') || req.team || signedIn(req)) return next();
   if (config.tenantKey) return res.status(401).json({ error: 'Please sign in again.' });
   if (!config.appPassword) {
     return res.status(403).send('<meta name="viewport" content="width=device-width, initial-scale=1"><p style="font:18px system-ui;padding:20px">To open Viral Post on your phone, first set a password on your Mac. In Terminal run: <b>npm run password</b></p>');
@@ -517,6 +556,11 @@ app.use('/api/clips', clipper.router);
 app.use('/api/crm/businesses', businesses.router);
 app.use('/api/crm/pipelines', pipelines.router);
 app.use('/api/crm/inbox', inbox.router);
+app.use('/api/crm/fields', require('../crm/server/fields').router);
+app.use('/api/crm/invoices', invoices.router);
+app.use('/api/crm/team', team.router);
+app.use('/api/crm/me', team.me);
+app.use('/api/crm/reviews', reviews.router);
 app.use('/api/crm', crmDashboard.router);
 app.use('/api/crm/forms', forms.router);
 app.use('/api/crm/booking', booking.router);

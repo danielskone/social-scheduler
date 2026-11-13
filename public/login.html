@@ -18,16 +18,20 @@
     .login input { width: 100%; font-size: 16px; padding: 12px; margin: 16px 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); box-sizing: border-box; }
     .login button { width: 100%; font-size: 16px; padding: 12px; }
     .err { color: var(--bad); min-height: 1.2em; }
+    .login input[type=email] { margin-bottom: 0; }
+    .team-link { margin: 4px 0 0; font-size: .92rem; } .team-link a { color: var(--accent); }
   </style>
 </head>
 <body>
   <form class="login" method="post" action="/login">
     <img src="/icons/apple-touch-icon.png" alt="">
     <h1>Viral Post</h1>
+    <input type="email" name="email" id="email" placeholder="Your email" autocomplete="username" hidden disabled>
     <input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus required>
     <input type="hidden" name="next" id="next">
     <button class="btn primary" type="submit">Sign in</button>
     <p class="err" id="err"></p>
+    <p class="team-link" id="team-link" hidden><a href="#" id="team-toggle">On the team? Sign in with your email</a></p>
   </form>
   <script>
     const q = new URLSearchParams(location.search);
@@ -41,6 +45,15 @@
       document.querySelector('.login img').src = `/icons/${apps[next][1]}-touch.png`;
       document.title = apps[next][0];
     }
+    // Viral Touch CRM team members sign in with their own email and password.
+    const isCrm = next === '/crm/' || /Viral Touch/.test(document.title);
+    const em = document.getElementById('email'), tl = document.getElementById('team-link');
+    const teamMode = (on) => {
+      em.hidden = em.disabled = !on; em.required = on;
+      document.getElementById('team-toggle').textContent = on ? 'Owner? Sign in with the main password' : 'On the team? Sign in with your email';
+      (on ? em : document.querySelector('[name=password]')).focus();
+    };
+    if (isCrm) { tl.hidden = false; document.getElementById('team-toggle').onclick = (ev) => { ev.preventDefault(); teamMode(em.hidden); }; if (q.get('team')) teamMode(true); }
     if (e) document.getElementById('err').textContent = e === 'wait' ? 'Too many tries. Wait 15 minutes.' : 'Wrong password. Try again.';
   </script>
 </body>

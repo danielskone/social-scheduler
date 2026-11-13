@@ -107,7 +107,8 @@ async function route() {
   const crmTab = window.crmTabFor ? window.crmTabFor(sub) : 'list';
   document.querySelectorAll('.sidebar nav a').forEach((a) => a.classList.toggle('active',
     a.dataset.tab ? a.dataset.tab === crmTab : a.dataset.view === view));
-  const acctLoad = api('/accounts').then((a) => (accounts = a));
+  // The CRM doesn't use the social accounts (and a CRM team login can't read them).
+  const acctLoad = THIS_APP.key === 'crm' || view === 'contacts' ? Promise.resolve(accounts) : api('/accounts').then((a) => (accounts = a));
   if (view === 'calendar' && lastView && lastView !== 'calendar') goToToday(); // coming back to the Calendar tab
   lastView = view;
   if (view === 'calendar') { renderCalendar(); return; } // the calendar doesn't need the account list

@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS crm_businesses (
 );
 `);
 
+// The link where customers leave a review (Google, Facebook, Yelp...), for review requests.
+if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_businesses') WHERE name='review_url'").get()) db.exec('ALTER TABLE crm_businesses ADD COLUMN review_url TEXT');
+
 const COLORS = ['#4f46e5', '#dc2626', '#0d9488', '#d97706', '#db2777', '#2563eb', '#16a34a', '#9333ea'];
 
 if (!db.prepare('SELECT 1 FROM crm_businesses LIMIT 1').get()) {
@@ -88,6 +91,9 @@ function save(body, id) {
   const color = /^#[0-9a-f]{6}$/i.test(body.color || '') ? body.color : (old ? old.color : COLORS[all().length % COLORS.length]);
   let website = s('website');
   if (website && !/^https?:\/\//i.test(website)) website = `https://${website}`;
+  let review_url = 'review_url' in body ? s('review_url', 500) : (old ? old.review_url : null);
+  if (review_url && !/^https?:\/\//i.test(review_url)) review_url = `https://${review_url}`;
+  if (review_url && !/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(review_url)) throw err400('That review link does not look right.');
   const email = s('email');
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw err400('That email address does not look right.');
   let groups = old ? old.groups : [];
@@ -100,13 +106,13 @@ function save(body, id) {
       if (left.length !== other.groups.length) db.prepare('UPDATE crm_businesses SET groups=? WHERE id=?').run(JSON.stringify(left), other.id);
     }
   }
-  const row = { name, color, phone: s('phone', 40), email, website, address: s('address', 300), groups: JSON.stringify(groups) };
+  const row = { name, color, phone: s('phone', 40), email, website, address: s('address', 300), groups: JSON.stringify(groups), review_url };
   if (old) {
-    db.prepare('UPDATE crm_businesses SET name=@name, color=@color, phone=@phone, email=@email, website=@website, address=@address, groups=@groups WHERE id=@id').run({ ...row, id: old.id });
+    db.prepare('UPDATE crm_businesses SET name=@name, color=@color, phone=@phone, email=@email, website=@website, address=@address, groups=@groups, review_url=@review_url WHERE id=@id').run({ ...row, id: old.id });
     return get(old.id);
   }
   const sort = (db.prepare('SELECT MAX(sort) AS m FROM crm_businesses').get().m || 0) + 1;
-  const r = db.prepare('INSERT INTO crm_businesses (name, color, phone, email, website, address, groups, sort) VALUES (@name,@color,@phone,@email,@website,@address,@groups,@sort)').run({ ...row, sort });
+  const r = db.prepare('INSERT INTO crm_businesses (name, color, phone, email, website, address, groups, review_url, sort) VALUES (@name,@color,@phone,@email,@website,@address,@groups,@review_url,@sort)').run({ ...row, sort });
   return get(r.lastInsertRowid);
 }
 

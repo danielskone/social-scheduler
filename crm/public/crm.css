@@ -34,10 +34,10 @@
 @keyframes crm-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 25%, transparent); } }
 
 /* Summary tiles with icon bubbles */
-#crm-tiles .tile { display: flex; gap: 12px; align-items: center; }
+#crm-tiles .tile, .pay-tiles .tile, .rev-tiles .tile { display: flex; gap: 12px; align-items: center; }
 .tile-ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c, var(--accent)) 13%, transparent); }
 .tile-ico svg { width: 21px; height: 21px; }
-#crm-tiles .tile .value { font-size: 1.55rem; margin-top: 1px; }
+#crm-tiles .tile .value, .pay-tiles .tile .value, .rev-tiles .tile .value { font-size: 1.55rem; margin-top: 1px; }
 
 /* Friendly tip at the top of each tab */
 .crm-tip { display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px; margin: 0 0 16px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
@@ -412,3 +412,67 @@ body[data-app="crm"] .sidebar .biz-btn small, body[data-app="crm"] .sidebar .biz
 }
 .ib-msg.out .ib-more { color: #fff; text-decoration: underline; }
 @media (max-width: 800px) { .ib { height: calc(100dvh - 24px); } }
+
+/* ---------- Custom fields on a person's card ---------- */
+.cf-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); margin-top: 4px; }
+.cf-head a { color: var(--accent); }
+
+/* ---------- Payments (invoices) ---------- */
+.pay-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: .78rem; font-weight: 700; color: var(--c); background: color-mix(in srgb, var(--c) 13%, transparent); vertical-align: middle; }
+.pay-setup { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin-bottom: 16px; border-radius: var(--radius); background: var(--panel); border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.pay-setup > svg { width: 30px; height: 30px; flex: none; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.pay-setup div { flex: 1; display: grid; gap: 2px; font-size: .92rem; }
+.pay-setup span { color: var(--muted); }
+.pay-table td { vertical-align: middle; }
+.pay-table tr[data-id] { cursor: pointer; }
+.pay-act { text-align: right; }
+.pay-empty { display: grid; justify-items: center; gap: 6px; padding: 30px 0; }
+.pay-empty svg { width: 38px; height: 38px; fill: none; stroke: var(--accent); stroke-width: 1.6; opacity: .7; }
+.pay-empty b { color: var(--text); }
+.tile .tile-ico svg { fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.inv-head, .inv-line { display: grid; grid-template-columns: 1fr 70px 110px 36px; gap: 8px; align-items: center; }
+.inv-head { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 6px 0 4px; }
+.inv-line { margin-bottom: 8px; }
+.inv-line input { width: 100%; min-width: 0; }
+.inv-line .btn { padding: 6px 0; }
+.inv-total { text-align: right; font-size: 1.05rem; margin: 10px 0; }
+.inv-total b { font-size: 1.35rem; margin-left: 6px; }
+.inv-items td, .inv-items th { padding: 8px 10px; }
+.inv-link { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.inv-link code { flex: 1; min-width: 0; overflow-wrap: anywhere; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: .84rem; }
+.inv-link .btn, .inv-actions .btn, .rev-list .btn { display: inline-flex; gap: 6px; align-items: center; }
+.inv-link svg, .inv-actions svg, .rev-list svg, .rev-ok svg, .ok-line svg, .set-ico svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.inv-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.inv-view .view-head { gap: 10px; }
+.inv-view .inv-items { font-size: .9rem; }
+.inv-items td:nth-child(n+2), .inv-items th:nth-child(n+2) { text-align: right; white-space: nowrap; }
+.small-h { font-size: 1rem; margin: 18px 0 6px; }
+.ok-line { display: flex; gap: 6px; align-items: center; color: #16a34a; flex-wrap: wrap; }
+.err-line { color: var(--bad); background: var(--bad-soft); padding: 8px 12px; border-radius: 10px; font-size: .9rem; }
+
+/* ---------- Reviews ---------- */
+.rev-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.rev-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.rev-list { list-style: none; margin: 0; padding: 0; }
+.rev-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.rev-list li:first-child { border-top: 0; }
+.rev-list li > span:first-child { display: grid; min-width: 0; }
+.rev-ok { display: inline-flex; gap: 5px; align-items: center; color: #16a34a; font-weight: 650; font-size: .86rem; }
+
+/* ---------- Settings extras, card buttons ---------- */
+.set-ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; background: var(--accent-soft); color: var(--accent); }
+.set-ico svg { width: 20px; height: 20px; }
+.set-move { display: inline-flex; gap: 2px; }
+.set-move .btn { padding: 4px 10px; }
+.c-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 800px) {
+  .rev-grid { grid-template-columns: 1fr; }
+  .rev-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .rev-tiles .tile { padding: 10px; }
+  .inv-head, .inv-line { grid-template-columns: 1fr 52px 84px 30px; gap: 6px; }
+  .pay-setup { flex-wrap: wrap; }
+  .pay-table th:nth-child(5), .pay-table td:nth-child(5), .pay-table th:nth-child(1), .pay-table td:nth-child(1) { display: none; }
+  .pay-tiles .tile .value, .rev-tiles .tile .value { font-size: 1.2rem; }
+  .rev-tiles .tile { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .c-actions .btn { padding: 6px 10px; }
+}
