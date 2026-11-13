@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS crm_team (
 );
 CREATE TABLE IF NOT EXISTS crm_team_state (key TEXT PRIMARY KEY, value TEXT);
 `);
+// Booking hours for team booking pages (empty = the page's own hours).
+for (const c of ['hours_days', 'hours_start', 'hours_end']) if (!db.prepare(`SELECT 1 FROM pragma_table_info('crm_team') WHERE name='${c}'`).get()) db.exec(`ALTER TABLE crm_team ADD COLUMN ${c} TEXT`);
 function secret() {
   let s = db.prepare("SELECT value FROM crm_team_state WHERE key='secret'").get()?.value;
   if (!s) { s = crypto.randomBytes(32).toString('hex'); db.prepare("INSERT OR REPLACE INTO crm_team_state (key, value) VALUES ('secret', ?)").run(s); }
@@ -49,12 +51,16 @@ function save(body = {}, id) {
   if (pw && pw.length < 8) throw err('Use a password with at least 8 characters.');
   const clash = db.prepare('SELECT id FROM crm_team WHERE email=? AND id != ?').get(email, old ? old.id : 0);
   if (clash) throw err('Someone on the team already uses that email.');
+  const hrs = (k, re) => { const v = body[k] === undefined ? (old ? old[k] : null) : String(body[k] || '').trim(); if (v && !re.test(v)) throw err('Those booking hours do not look right.'); return v || null; };
+  const hours = [hrs('hours_days', /^[0-6](,[0-6])*$/), hrs('hours_start', /^\d{2}:\d{2}$/), hrs('hours_end', /^\d{2}:\d{2}$/)];
+  if (hours[1] && hours[2] && hours[1] >= hours[2]) throw err('Their start time must be before their end time.');
   if (old) {
     db.prepare('UPDATE crm_team SET name=?, email=?, role=?, businesses=? WHERE id=?').run(name, email, role, JSON.stringify(role === 'admin' ? [] : bizIds), old.id);
     if (pw) db.prepare('UPDATE crm_team SET password_hash=? WHERE id=?').run(hashPassword(pw), old.id);
+    db.prepare('UPDATE crm_team SET hours_days=?, hours_start=?, hours_end=? WHERE id=?').run(...hours, old.id);
     return pub(get(old.id));
   }
-  const r = db.prepare('INSERT INTO crm_team (name, email, password_hash, role, businesses) VALUES (?,?,?,?,?)').run(name, email, hashPassword(pw), role, JSON.stringify(role === 'admin' ? [] : bizIds));
+  const r = db.prepare('INSERT INTO crm_team (name, email, password_hash, role, businesses, hours_days, hours_start, hours_end) VALUES (?,?,?,?,?,?,?,?)').run(name, email, hashPassword(pw), role, JSON.stringify(role === 'admin' ? [] : bizIds), ...hours);
   return pub(get(r.lastInsertRowid));
 }
 function remove(id) { db.prepare('DELETE FROM crm_team WHERE id=?').run(Number(id)); return { ok: true }; }
@@ -79,6 +85,9 @@ function fromCookie(value) {
 // What a helper may not do (admins and the owner can do everything).
 const ADMIN_ONLY = [
   [/^\/api\/crm\/team/, null],
+  [/^\/api\/crm\/backups/, null],
+  [/^\/api\/crm\/audit/, null],
+  [/^\/api\/crm\/duplicates\/merge/, 'POST'],
   [/^\/api\/crm\/social\/accounts/, 'PUT'],
   [/^\/api\/crm\/taskboard\/settings/, 'PUT'],
   [/^\/api\/crm\/biztemplates/, 'POST|DELETE'],

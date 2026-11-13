@@ -441,7 +441,7 @@
     const [{ pages, timezone }, appts] = await Promise.all([call('/booking/pages'), call(`/booking/appointments${q$('#appt-past').checked ? '?past=1' : ''}`)]);
     bookingTz = timezone;
     q$('#appt-list').innerHTML = appts.map((a) => `<li data-appt="${a.id}" class="${a.status === 'cancelled' ? 'done' : ''}">
-      <span class="title"><b>${h(apptWhen(a.starts_at))}</b> · ${a.contact_id ? `<a href="#" data-open="${a.contact_id}">${h(a.contact_name)}</a>` : 'Deleted contact'}
+      <span class="title"><b>${h(apptWhen(a.starts_at))}</b> · ${a.contact_id ? `<a href="#" data-open="${a.contact_id}">${h(a.contact_name)}</a>` : 'Deleted contact'}${a.staff_name ? ` <span class="muted">· with ${h(a.staff_name)}</span>` : ''}
         ${a.phone ? ` · <a href="tel:${h(a.phone)}">${h(a.phone)}</a>` : ''}<br><span class="muted">${h(a.title)}${a.note ? ` · "${h(a.note)}"` : ''}${a.status === 'cancelled' ? ' · Cancelled' : ''}</span></span>
       ${a.status === 'booked' && !q$('#appt-past').checked ? '<button class="btn ghost" data-cancel>Cancel</button>' : ''}</li>`).join('')
       || `<li class="muted">${q$('#appt-past').checked ? 'No past appointments.' : 'No upcoming appointments yet. Share a booking link below.'}</li>`;
@@ -473,8 +473,10 @@
   q$('#bp-add').onclick = () => editBookingPage({ minutes: 30, days: '1,2,3,4,5', start_time: '09:00', end_time: '17:00', days_ahead: 30, notice_hours: 2, active: 1, group_name: 'Other',
     email_checkbox: 'Yes, email me updates. I can unsubscribe any time.' });
 
-  function editBookingPage(p) {
+  async function editBookingPage(p) {
     const dlg = q$('#crm-edit-dialog');
+    const team = await call('/taskboard/people').catch(() => []);
+    const onTeam = (() => { try { return JSON.parse(p.team || '[]').map(Number); } catch { return []; } })();
     const on = p.days.split(',');
     dlg.innerHTML = `<form id="bp-form"><h1>${p.id ? 'Edit booking page' : 'New booking page'}</h1>
       <label class="field"><span>Title</span><input name="title" required value="${h(p.title)}" placeholder="Book a test drive" style="width:100%"></label>
@@ -495,6 +497,8 @@
         <label class="field"><span>Most per day <small>(0 = no limit)</small></span><input type="number" name="max_per_day" min="0" max="100" value="${h(p.max_per_day || 0)}" style="width:110px"></label>
         <label class="field"><span>Reminder email</span><select name="remind_hours">${[[24, '1 day before'], [48, '2 days before'], [12, '12 hours before'], [3, '3 hours before'], [1, '1 hour before'], [0, 'No reminder']].map(([v, l]) => `<option value="${v}"${Number(p.remind_hours ?? 24) === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
       </div>
+      ${team.length > 1 ? `<div class="field"><span>Who takes these appointments?</span><p class="muted small" style="margin:0 0 6px">Tick more than one and the page takes turns: each booking goes to whoever is free and has had the fewest. Each person's own hours are set in Settings, Your team.</p>
+        <div class="row">${team.map((m) => `<label class="check"><input type="checkbox" name="team" value="${m.id || 0}" ${(onTeam.length ? onTeam.includes(m.id || 0) : !m.id) ? 'checked' : ''}> ${h(m.name)}</label>`).join('')}</div></div>` : ''}
       <label class="field"><span>Put new people in group</span><input name="group_name" list="bp-groups" value="${h(p.group_name)}" style="width:100%"><datalist id="bp-groups">${meta.groups.map((g) => `<option value="${h(g)}">`).join('')}</datalist></label>
       <label class="field"><span>Email permission box <small>(starts unticked; leave empty for no box)</small></span><input name="email_checkbox" value="${h(p.email_checkbox)}" style="width:100%"></label>
       <label class="check"><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Page is on (people can book)</label>
@@ -505,6 +509,7 @@
       const f = e.target, data = Object.fromEntries(new FormData(f));
       data.days = [...f.querySelectorAll('[name=day]:checked')].map((x) => x.value).join(',');
       delete data.day;
+      if (f.querySelector('[name=team]')) data.team = [...f.querySelectorAll('[name=team]:checked')].map((x) => Number(x.value));
       data.active = f.active.checked;
       try { await call(p.id ? `/booking/pages/${p.id}` : '/booking/pages', { method: p.id ? 'PUT' : 'POST', json: data }); dlg.close(); refresh(); }
       catch (err) { q$('#bp-msg', dlg).textContent = err.message; }

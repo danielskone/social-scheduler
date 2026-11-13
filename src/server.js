@@ -40,6 +40,8 @@ if (config.tenantKey) {
 }
 // Business template files can be bigger than a normal form.
 app.use('/api/crm/biztemplates/upload', express.json({ limit: '4mb' }));
+// Backup files sent back from your computer.
+app.use('/api/crm/backups/upload', express.raw({ type: () => true, limit: '1gb' }));
 app.use(express.json());
 // Private app: ask search engines never to list it.
 app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next(); });
@@ -572,6 +574,8 @@ api.post('/analytics/refresh', async (req, res) => {
 });
 
 app.use('/api/clips', clipper.router);
+// Activity history: writes down every change made in the CRM (who, what, when).
+app.use('/api/crm', require('../crm/server/audit').middleware);
 app.use('/api/crm/businesses', businesses.router);
 app.use('/api/crm/pipelines', pipelines.router);
 app.use('/api/crm/inbox', inbox.router);
@@ -602,6 +606,9 @@ app.use('/api/crm/blog', require('../crm/server/blog').router);
 app.use('/api/crm/social', require('../crm/server/social').router);
 app.use('/api/crm/taskboard', require('../crm/server/tasks').router);
 app.use('/api/crm/biztemplates', require('../crm/server/snapshots').router);
+app.use('/api/crm/backups', require('../crm/server/backups').router);
+app.use('/api/crm/duplicates', require('../crm/server/dupes').router);
+app.use('/api/crm/audit', require('../crm/server/audit').router);
 app.use('/api/crm', crmDashboard.router);
 app.use('/api/crm/forms', forms.router);
 app.use('/api/crm/booking', booking.router);

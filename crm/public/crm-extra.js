@@ -196,7 +196,7 @@
     const label = (k, o) => new Date(`${k}T12:00:00Z`).toLocaleDateString([], { timeZone: 'UTC', ...o });
     const block = (a) => {
       const top = (tzHM(a.starts_at) - lo) / 60 * PX, len = Math.max(40, (Date.parse(a.ends_at) - Date.parse(a.starts_at)) / 36e5 * PX - 2);
-      return `<button class="cal-appt" data-appt="${a.id}" style="top:${top}px;height:${len}px;--c:${colorFor(a.group_name)}" title="${h(`${timeOf(a.starts_at)} ${a.contact_name || ''}: ${a.title}`)}"><b>${h(timeOf(a.starts_at))}</b> ${h(a.contact_name || 'Someone')}<span>${h(a.title)}</span></button>`;
+      return `<button class="cal-appt" data-appt="${a.id}" style="top:${top}px;height:${len}px;--c:${colorFor(a.group_name)}" title="${h(`${timeOf(a.starts_at)} ${a.contact_name || ''}: ${a.title}`)}"><b>${h(timeOf(a.starts_at))}</b> ${h(a.contact_name || 'Someone')}<span>${h(a.title)}${a.staff_name ? ` · ${h(a.staff_name)}` : ''}</span></button>`;
     };
     root.innerHTML = `<div class="cal-bar"><div class="row"><button class="btn ghost" data-wk="-7" aria-label="Last week">‹</button><button class="btn ghost" data-wk="0">This week</button><button class="btn ghost" data-wk="7" aria-label="Next week">›</button>
         <b class="cal-title">${h(label(days[0], { month: 'short', day: 'numeric' }))} – ${h(label(days[6], { month: 'short', day: 'numeric', year: 'numeric' }))}</b></div>
@@ -209,7 +209,7 @@
       </div>
       <div class="cal-agenda">${days.map((k) => `<div class="cal-aday${k === today ? ' today' : ''}"><h4>${h(label(k, { weekday: 'long', month: 'short', day: 'numeric' }))}</h4>
         ${offDay(k).map((t) => `<div class="cal-aoff">${svg('off')} ${h(t.note || 'Time off')}</div>`).join('')}
-        ${byDay[k].map((a) => `<button class="cal-arow" data-appt="${a.id}" style="--c:${colorFor(a.group_name)}"><b>${h(timeOf(a.starts_at))}</b><span>${h(a.contact_name || 'Someone')}<small>${h(a.title)}</small></span></button>`).join('') || (offDay(k).length ? '' : '<p class="muted small">Nothing booked</p>')}</div>`).join('')}</div>`;
+        ${byDay[k].map((a) => `<button class="cal-arow" data-appt="${a.id}" style="--c:${colorFor(a.group_name)}"><b>${h(timeOf(a.starts_at))}</b><span>${h(a.contact_name || 'Someone')}<small>${h(a.title)}${a.staff_name ? ` · with ${h(a.staff_name)}` : ''}</small></span></button>`).join('') || (offDay(k).length ? '' : '<p class="muted small">Nothing booked</p>')}</div>`).join('')}</div>`;
     root.onclick = (e) => {
       const wk = e.target.closest('[data-wk]');
       if (wk) { const n = Number(wk.dataset.wk); if (!n) weekStart = null; else weekStart = keyPlus(weekStart, n); return renderCalendar(root, { openContact, onChange }); }
