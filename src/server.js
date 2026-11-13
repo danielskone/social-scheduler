@@ -191,7 +191,8 @@ app.get('/clipfile/:job/:file', clipper.serveFile);
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 // Viral Touch CRM keeps its own page files in crm/public; they load at the same addresses (/crm.js etc.).
 const CRM_PUBLIC_DIR = path.join(__dirname, '..', 'crm', 'public');
-const fileIn = (file) => [PUBLIC_DIR, CRM_PUBLIC_DIR].map((d) => path.join(d, file)).find((f) => fs.existsSync(f)) || path.join(PUBLIC_DIR, file);
+// The CRM folder comes first: older installs can still have stale copies of these files in public/.
+const fileIn = (file) => [CRM_PUBLIC_DIR, PUBLIC_DIR].map((d) => path.join(d, file)).find((f) => fs.existsSync(f)) || path.join(PUBLIC_DIR, file);
 const fingerprints = new Map();
 function fingerprint(file) {
   if (!fingerprints.has(file)) {
@@ -263,8 +264,8 @@ if (ownApp && ownApp.key !== 'scheduler') {
 const staticOptions = {
   setHeaders(res) { if (res.req.query.v) res.set('Cache-Control', 'public, max-age=31536000, immutable'); },
 };
-app.use(express.static(PUBLIC_DIR, staticOptions));
 app.use(express.static(CRM_PUBLIC_DIR, staticOptions));
+app.use(express.static(PUBLIC_DIR, staticOptions));
 
 // ---------- Connecting Facebook / Instagram ----------
 const loginStates = new Set();

@@ -11,6 +11,8 @@ curl -fsSL -o "$TMP/app.zip" https://github.com/danielskone/social-scheduler/arc
 unzip -oq "$TMP/app.zip" -d "$TMP"
 rsync -a --exclude .env --exclude data --exclude node_modules "$TMP/social-scheduler-main/" "$APP_DIR/"
 rm -rf "$TMP"
+# Viral Touch CRM page files moved to crm/public. Remove old copies left in public/ so they never load.
+for f in crm/public/*; do [ -f "$f" ] && rm -f "public/$(basename "$f")"; done
 npm install --no-fund --no-audit
 npm install-scripts approve better-sqlite3 >/dev/null 2>&1 || true
 node -e "require('better-sqlite3')" 2>/dev/null || npm rebuild better-sqlite3
