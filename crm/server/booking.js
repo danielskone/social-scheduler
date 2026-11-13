@@ -174,11 +174,13 @@ function book(pg, body, now = new Date()) {
   return { ...out, contact: crm.getContact(out.contact.id) };
 }
 
-function listAppointments({ past } = {}) {
+function listAppointments({ past, biz } = {}) {
   const now = new Date().toISOString();
+  const bf = require('./businesses').filter(biz, 'c.group_name');
   return db.prepare(`SELECT a.*, c.name AS contact_name, c.phone, c.email, p.location FROM crm_appointments a
     LEFT JOIN contacts c ON c.id=a.contact_id LEFT JOIN crm_booking_pages p ON p.id=a.page_id
-    WHERE ${past ? 'a.ends_at < ?' : "a.ends_at >= ? AND a.status='booked'"} ORDER BY a.starts_at ${past ? 'DESC LIMIT 100' : ''}`).all(now);
+    WHERE ${past ? 'a.ends_at < ?' : "a.ends_at >= ? AND a.status='booked'"}${bf.sql ? ` AND (a.contact_id IS NULL OR ${bf.sql})` : ''}
+    ORDER BY a.starts_at ${past ? 'DESC LIMIT 100' : ''}`).all(now, ...bf.args);
 }
 
 function cancel(id) {
@@ -267,15 +269,16 @@ publicBooking.post('/:slug', (req, res) => {
 const router = express.Router();
 const wrap = (fn) => (req, res) => { try { fn(req, res); } catch (e) { res.status(e.status || 500).json({ error: e.message }); } };
 router.get('/pages', wrap((req, res) => {
-  const pages = db.prepare('SELECT * FROM crm_booking_pages ORDER BY id').all();
+  const bf = require('./businesses').filter(req.query.biz);
+  const pages = db.prepare(`SELECT * FROM crm_booking_pages ${bf.sql ? `WHERE ${bf.sql}` : ''} ORDER BY id`).all(...bf.args);
   const counts = db.prepare("SELECT page_id, COUNT(*) AS n FROM crm_appointments WHERE status='booked' AND ends_at >= ? GROUP BY page_id").all(new Date().toISOString());
   pages.forEach((p) => { p.url = `${config.publicBaseUrl}/book/${p.slug}`; p.upcoming = counts.find((c) => c.page_id === p.id)?.n || 0; });
   res.json({ pages, timezone: TZ() });
 }));
-router.post('/pages', wrap((req, res) => res.json(savePage(req.body || {}))));
-router.put('/pages/:id', wrap((req, res) => res.json(savePage(req.body || {}, Number(req.params.id)))));
+router.post('/pages', wrap((req, res) => { require('./businesses').claim(req.query.biz, (req.body || {}).group_name); res.json(savePage(req.body || {})); }));
+router.put('/pages/:id', wrap((req, res) => { require('./businesses').claim(req.query.biz, (req.body || {}).group_name); res.json(savePage(req.body || {}, Number(req.params.id))); }));
 router.delete('/pages/:id', wrap((req, res) => { db.prepare('DELETE FROM crm_booking_pages WHERE id=?').run(req.params.id); res.json({ ok: true }); }));
-router.get('/appointments', wrap((req, res) => res.json(listAppointments({ past: req.query.past === '1' }))));
+router.get('/appointments', wrap((req, res) => res.json(listAppointments({ past: req.query.past === '1', biz: req.query.biz }))));
 router.post('/appointments/:id/cancel', wrap((req, res) => { cancel(Number(req.params.id)); res.json({ ok: true }); }));
 
 module.exports = { router, publicBooking, savePage, slotsFor, book, cancel, listAppointments, todaysLines, zoned, parts, niceWhen };

@@ -640,7 +640,8 @@ const one = (id) => {
 const publicUrl = (f) => `${config.publicBaseUrl}/f/${f.slug}`;
 
 router.get('/', wrap((req, res) => {
-  const forms = db.prepare('SELECT * FROM crm_forms ORDER BY id DESC').all().map(formView);
+  const bf = require('./businesses').filter(req.query.biz);
+  const forms = db.prepare(`SELECT * FROM crm_forms ${bf.sql ? `WHERE ${bf.sql}` : ''} ORDER BY id DESC`).all(...bf.args).map(formView);
   const counts = new Map(db.prepare('SELECT form_id, COUNT(*) AS n, MAX(created_at) AS last FROM crm_form_entries GROUP BY form_id').all().map((r) => [r.form_id, r]));
   // Sign-ups from before the builder only live in contact history.
   const legacy = db.prepare("SELECT note, COUNT(*) AS n FROM contact_activities WHERE kind='Form' AND note LIKE 'Filled out \"%' GROUP BY note").all();
@@ -662,8 +663,8 @@ router.post('/preview', wrap((req, res) => {
   const f = { title: String(b.title || 'Untitled form').slice(0, 200), intro: String(b.intro || ''), thank_you: String(b.thank_you || ''), fields: cleanFields(b.fields || []), style: cleanStyle(b.style || {}) };
   res.type('html').send(b.thanks ? thanksPage(f) : renderPage(f));
 }));
-router.post('/', wrap((req, res) => { const f = saveForm(req.body || {}); res.json({ ...f, url: publicUrl(f) }); }));
-router.put('/:id', wrap((req, res) => { const f = saveForm(req.body || {}, Number(req.params.id)); res.json({ ...f, url: publicUrl(f) }); }));
+router.post('/', wrap((req, res) => { require('./businesses').claim(req.query.biz, (req.body || {}).group_name); const f = saveForm(req.body || {}); res.json({ ...f, url: publicUrl(f) }); }));
+router.put('/:id', wrap((req, res) => { require('./businesses').claim(req.query.biz, (req.body || {}).group_name); const f = saveForm(req.body || {}, Number(req.params.id)); res.json({ ...f, url: publicUrl(f) }); }));
 router.post('/:id/copy', wrap((req, res) => {
   const f = one(req.params.id);
   const c = saveForm({ title: `${f.title} (copy)`, intro: f.intro, group_name: f.group_name, thank_you: f.thank_you, active: 1, fields: f.fields.map((x) => ({ ...x })), style: f.style });
