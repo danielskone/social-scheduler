@@ -156,7 +156,7 @@ function account({ user, access, billingEnabled, priceLabel, settings, error = '
   let buttons = '';
   if (billingEnabled && user.status !== 'free' && user.status !== 'disabled') {
     if (user.stripe_customer_id && ['active', 'past_due'].includes(user.status)) buttons = '<form method="post" action="/billing/portal"><button class="btn" type="submit">Change card, receipts or cancel</button></form>';
-    else buttons = `<form method="post" action="/billing/checkout"><button class="btn primary" type="submit">Subscribe · ${esc(priceLabel)}</button></form>`;
+    else buttons = `<form method="post" action="/billing/checkout"><button class="btn primary" type="submit">Subscribe · ${esc(priceLabel)}</button></form>${user.status === 'trialing' && trialLeft > 2 ? `<p class="muted small" style="margin-top:8px">You won't be charged until your free days end on ${day(user.trial_ends_at)}.</p>` : ''}`;
   } else if (!billingEnabled && !access.ok && user.status !== 'disabled') {
     buttons = '<p class="muted">Payments are not switched on yet. Please contact support to keep using Viral Post.</p>';
   }

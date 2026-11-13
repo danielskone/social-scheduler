@@ -228,6 +228,12 @@ test('Stripe checkout sends people to Stripe\'s own page', async () => {
   await new Promise((r) => fake.listen(0, '127.0.0.1', r));
   const billing = createBilling({ secretKey: 'sk_test_1', priceId: 'price_9', apiBase: `http://127.0.0.1:${fake.address().port}` });
   const url = await billing.checkoutUrl({ id: 7, email: 'z@example.com' }, 'https://app.example');
+  assert.strictEqual(seen.body.get('subscription_data[trial_end]'), null, 'no trial: pay now');
+  // During a free trial, the first payment waits until the trial ends.
+  const ends = new Date(Date.now() + 60 * 864e5).toISOString();
+  await billing.checkoutUrl({ id: 8, email: 't@example.com', status: 'trialing', trial_ends_at: ends }, 'https://app.example');
+  assert.strictEqual(seen.body.get('subscription_data[trial_end]'), String(Math.floor(Date.parse(ends) / 1000)));
+  await billing.checkoutUrl({ id: 7, email: 'z@example.com' }, 'https://app.example');
   fake.close();
   assert.strictEqual(url, 'https://checkout.stripe.test/s/1');
   assert.strictEqual(seen.path, '/v1/checkout/sessions');
