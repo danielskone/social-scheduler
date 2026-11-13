@@ -8,11 +8,14 @@
 // Without APP (customer copies, tests) one program serves every app at its own path instead:
 // /, /crm/, /clips/.
 //
+// A standalone app (Viral Touch CRM) is kept apart: it isn't in the other apps' "Your apps"
+// list, and it doesn't show that list itself (Daniel's choice, 2026-11-13).
+//
 // APPS in .env picks which apps are switched on (default: all), e.g. APPS=scheduler to sell or
 // run Viral Post on its own. Viral Post (the scheduler) is always on.
 const APPS = [
   { key: 'scheduler', name: 'Viral Post', short: 'Viral Post', path: '/', port: 3000, home: 'calendar', views: ['calendar', 'compose', 'analytics', 'accounts'], icon: 'icon', theme: '#3b5bdb', about: 'Schedule and auto-post to Facebook, Instagram, TikTok and YouTube.' },
-  { key: 'crm', name: 'Viral Touch CRM', short: 'Viral Touch', path: '/crm/', port: 3001, home: 'contacts', views: ['contacts'], icon: 'crm', theme: '#10967a', about: 'Contacts, pipeline, tasks, forms, bookings, email and automations.', apis: ['/api/crm'] },
+  { key: 'crm', name: 'Viral Touch CRM', short: 'Viral Touch', path: '/crm/', port: 3001, standalone: true, home: 'contacts', views: ['contacts'], icon: 'crm', theme: '#10967a', about: 'Contacts, pipeline, tasks, forms, bookings, email and automations.', apis: ['/api/crm'] },
   { key: 'clips', name: 'Viral Clips', short: 'Viral Clips', path: '/clips/', port: 3002, home: 'clips', views: ['clips'], icon: 'clips', theme: '#f58c1e', about: 'Turn a long video into short captioned clips.', apis: ['/api/clips', '/clipfile'] },
 ];
 
@@ -40,8 +43,8 @@ const portOf = (a, env = process.env) => Number(env[`${a.key.toUpperCase()}_PORT
 
 // What the browser needs: names, addresses and pages of the apps that are on.
 // separate=true: each app is at its own port (the page builds http://<same host>:<port>/).
-const publicInfo = (list, separate = false, env = process.env) => list.map(({ key, name, short, path, home, views, icon, ...a }) => ({
-  key, name, short, home, views, icon, path: separate ? '/' : path, port: separate ? portOf({ key, ...a }, env) : null,
+const publicInfo = (list, separate = false, env = process.env) => list.map(({ key, name, short, path, home, views, icon, standalone, ...a }) => ({
+  key, name, short, home, views, icon, standalone: Boolean(standalone), path: separate ? '/' : path, port: separate ? portOf({ key, ...a }, env) : null,
 }));
 
 function manifest(a, separate = false) {

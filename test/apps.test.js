@@ -130,3 +130,9 @@ test('the other apps use the public address Viral Post found', () => {
   assert.deepStrictEqual(JSON.parse(out), ['http://localhost:3000', 'https://abc.trycloudflare.com']);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('Viral Touch CRM is kept apart from the other apps (no "Your apps" link either way)', () => {
+  const info = apps.publicInfo(apps.APPS, true, {});
+  assert.deepStrictEqual(info.filter((a) => a.standalone).map((a) => a.key), ['crm']);
+  assert.deepStrictEqual(info.filter((a) => !a.standalone).map((a) => a.key), ['scheduler', 'clips']);
+});
