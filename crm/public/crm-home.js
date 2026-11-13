@@ -188,13 +188,16 @@
   }
   async function renderDashboard() {
     const root = q$('#db-root');
+    const b0 = current();
     const days = store.get('dash-days', '30');
-    const d = await call(`/dashboard?days=${days}`);
+    const pkey = `dash-pipe-${b0 ? b0.id : 'all'}`;
+    const d = await call(`/dashboard?days=${days}&pipeline=${store.get(pkey, '')}`);
     const t = d.totals;
     const b = current();
     const when = (iso) => new Date(iso).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     root.innerHTML = `<div class="db-bar"><span class="muted small">${b ? `Showing <b>${h(b.name)}</b>` : 'Showing <b>all businesses</b>'}</span>
-        <label class="db-range">${svg('calendar')}<select id="db-days" aria-label="Date range">${RANGES.map(([v, l]) => `<option value="${v}"${v === String(days) ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div>
+        <span class="db-ctrls">${d.pipelines.length > 1 ? `<label class="db-range"><select id="db-pipe" aria-label="Pipeline">${d.pipelines.map((x) => `<option value="${x.id}"${x.id === d.pipeline ? ' selected' : ''}>${h(x.name)}</option>`).join('')}</select></label>` : ''}
+        <label class="db-range">${svg('calendar')}<select id="db-days" aria-label="Date range">${RANGES.map(([v, l]) => `<option value="${v}"${v === String(days) ? ' selected' : ''}>${l}</option>`).join('')}</select></label></span></div>
       <div class="tiles db-tiles">
         <div class="tile"><div class="label">New people</div><div class="value">${t.newPeople}</div><div class="muted small">${t.allPeople} in total</div></div>
         <div class="tile"><div class="label">Money still open</div><div class="value">${money(t.openValue)}</div><div class="muted small">${t.openCount} ${t.openCount === 1 ? 'deal' : 'deals'} not paid yet</div></div>
@@ -202,12 +205,12 @@
         <div class="tile"><div class="label">Booked calls</div><div class="value">${t.appointments}</div><div class="muted small">${t.formsFilled} forms filled · ${t.tasksDone} tasks done</div></div>
       </div>
       <div class="db-grid">
-        <section class="db-card"><header><h3>Where people are</h3><span class="muted small">How many people are at each step</span></header>
+        <section class="db-card"><header><h3>Where people are</h3><span class="muted small">${h((d.pipelines.find((x) => x.id === d.pipeline) || {}).name || '')}: people at each step</span></header>
           ${t.newPeople ? barsH(d.byStage) : '<p class="db-empty">Nobody was added in this time. Try a longer range at the top.</p>'}</section>
         <section class="db-card"><header><h3>Money at each step</h3><span class="muted small">Amounts added up for each step</span></header>
           ${d.byStage.some((s) => s.value) ? barsH(d.byStage, { value: (r) => r.value, text: (r) => money(r.value), cls: 'money' }) : '<p class="db-empty">No amounts yet. Add an amount on a person\'s card to see it here.</p>'}</section>
         <section class="db-card db-win"><header><h3>Win rate</h3><span class="muted small">Of the deals that are decided</span></header>
-          ${ring(t.winRate)}<p class="muted small center">${t.wonCount} won · ${t.lostCount} not this year</p></section>
+          ${ring(t.winRate)}<p class="muted small center">${t.wonCount} won · ${t.lostCount} lost</p></section>
         <section class="db-card db-wide"><header><h3>New people over time</h3><span class="muted small">One bar for each ${d.unit}</span></header>
           ${t.newPeople ? columns(d.overTime, d.unit) : '<p class="db-empty">No new people in this time.</p>'}</section>
         <section class="db-card"><header><h3>Funnel</h3><span class="muted small">How many got to each step or further</span></header>
@@ -220,6 +223,7 @@
           ${d.due.length ? `<ul class="db-list">${d.due.map((x) => `<li><b>${h(x.title)}</b><span>${h(x.contact_name || '')}</span></li>`).join('')}</ul>` : '<p class="db-empty">Nothing due. Nice work!</p>'}</section>
       </div>`;
     q$('#db-days', root).onchange = (e) => { store.set('dash-days', e.target.value); renderDashboard(); };
+    const dp = q$('#db-pipe', root); if (dp) dp.onchange = (e) => { store.set(pkey, Number(e.target.value)); renderDashboard(); };
   }
 
   // ---------- Settings ----------

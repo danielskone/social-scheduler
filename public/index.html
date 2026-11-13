@@ -256,7 +256,11 @@
 
       <div class="crm-panel" data-panel="pipeline" hidden>
         <div class="row crm-filters">
-          <select id="pipe-group"><option value="">All groups</option></select>
+          <select id="pipe-pick" aria-label="Pipeline"></select>
+          <button class="btn ghost" id="pipe-edit" type="button">Edit steps</button>
+          <button class="btn ghost" id="pipe-new" type="button">+ New pipeline</button>
+          <select id="pipe-group" aria-label="Group"><option value="">All groups</option></select>
+          <span class="muted small" id="pipe-total"></span>
         </div>
         <div class="board" id="pipe-board"></div>
       </div>

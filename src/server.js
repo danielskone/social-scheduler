@@ -18,6 +18,7 @@ const automations = require('../crm/server/automations');
 const campaigns = require('../crm/server/campaigns');
 const gcal = require('../crm/server/gcal');
 const businesses = require('../crm/server/businesses');
+const pipelines = require('../crm/server/pipelines');
 const crmDashboard = require('../crm/server/dashboard');
 const clipper = require('./clipper');
 const compression = require('compression');
@@ -513,6 +514,7 @@ api.post('/analytics/refresh', async (req, res) => {
 
 app.use('/api/clips', clipper.router);
 app.use('/api/crm/businesses', businesses.router);
+app.use('/api/crm/pipelines', pipelines.router);
 app.use('/api/crm', crmDashboard.router);
 app.use('/api/crm/forms', forms.router);
 app.use('/api/crm/booking', booking.router);
