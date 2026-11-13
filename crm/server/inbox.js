@@ -169,7 +169,9 @@ function thread(contactId, { markRead = true } = {}) {
   // Website chats live here too: answer by chat while they are on the page.
   const lastIn = [...msgs].reverse().find((m) => m.direction === 'in');
   const chat = msgs.some((m) => m.channel === 'chat') ? { online: require('./chat').isOnline(c.id), last: Boolean(lastIn && lastIn.channel === 'chat') } : null;
-  return { contact: c, messages: all, status: status(), chat };
+  // Facebook and Instagram messages: answer them there while the 24 hours are open.
+  const social = lastIn && ['facebook', 'instagram'].includes(lastIn.channel) ? require('./social').replyInfo(c.id) : null;
+  return { contact: c, messages: all, status: status(), chat, social };
 }
 function fullText(messageId) {
   const m = db.prepare('SELECT full_text FROM crm_messages WHERE id=?').get(Number(messageId));

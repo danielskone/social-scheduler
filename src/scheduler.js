@@ -211,11 +211,15 @@ function startCrm() {
   cron.schedule('*/15 * * * *', () => require('../crm/server/checkouts').run().catch((e) => console.error(e)));
   // Conversations: new emails from people in the CRM, every 2 minutes.
   cron.schedule('*/2 * * * *', () => require('../crm/server/inbox').check().catch((e) => console.error(e)));
+  // Conversations: new Facebook and Instagram messages on your connected Pages, every 2 minutes.
+  cron.schedule('1-59/2 * * * *', () => require('../crm/server/social').check().catch((e) => console.error(e)));
   // Google Calendar bookings (the website's "Book a free call" page) -> Contacts + Appointments.
   cron.schedule('*/5 * * * *', () => gcal.check().catch((e) => console.error(e)));
   gcal.check().catch(() => {});
   // Appointment reminder emails (a set number of hours before), every 15 minutes.
   cron.schedule('3-59/15 * * * *', () => require('../crm/server/booking').sendReminders().catch((e) => console.error(e)));
+  // Team tasks: at 7am each person gets one email with their tasks due today or late.
+  cron.schedule('0 7 * * *', () => require('../crm/server/tasks').sendDaily().catch((e) => console.error(e)), { timezone: process.env.BOOKING_TIMEZONE || 'America/New_York' });
   // Monthly reports: on the 1st at 8am, last month's numbers go to each business that asked for them.
   cron.schedule('0 8 1 * *', () => require('../crm/server/reports').sendMonthly().catch((e) => console.error(e)), { timezone: process.env.BOOKING_TIMEZONE || 'America/New_York' });
 }

@@ -15,6 +15,9 @@ const SCOPES = [
   // Read the comments on your own posts and who wrote them (Analytics). Needs a reconnect.
   'pages_read_user_content',
   'instagram_manage_comments',
+  // Read and answer Messenger and Instagram messages in the CRM's Conversations. Needs a reconnect.
+  'pages_messaging',
+  'instagram_manage_messages',
 ];
 
 // safeToRetry = Facebook/Instagram answered with an error, so nothing was posted and trying
@@ -407,6 +410,7 @@ async function followerCount(account) {
 
 module.exports = {
   SCOPES,
+  call,
   GraphError,
   loginUrl,
   redirectUri,

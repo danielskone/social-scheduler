@@ -79,6 +79,9 @@ function fromCookie(value) {
 // What a helper may not do (admins and the owner can do everything).
 const ADMIN_ONLY = [
   [/^\/api\/crm\/team/, null],
+  [/^\/api\/crm\/social\/accounts/, 'PUT'],
+  [/^\/api\/crm\/taskboard\/settings/, 'PUT'],
+  [/^\/api\/crm\/biztemplates/, 'POST|DELETE'],
   [/^\/api\/crm\/giftcards\/settings/, 'PUT'],
   [/^\/api\/crm\/giftcards\/\d+\/void/, 'POST'],
   [/^\/api\/crm\/loyalty\/settings/, 'PUT'],
