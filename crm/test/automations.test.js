@@ -16,11 +16,11 @@ test.before(async () => {
   fs.writeFileSync(path.join(process.env.DATA_DIR, 'phone-topic.txt'), 'sched-test\n');
   process.env.NTFY_BASE = `http://127.0.0.1:${ntfy.address().port}`;
   process.env.APP_PASSWORD = '';
-  crm = require('../src/crm');
-  auto = require('../src/automations');
-  booking = require('../src/booking');
-  db = require('../src/db');
-  app = require('../src/server');
+  crm = require('../server/crm');
+  auto = require('../server/automations');
+  booking = require('../server/booking');
+  db = require('../../src/db');
+  app = require('../../src/server');
   server = app.listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}/api/crm/automations`;

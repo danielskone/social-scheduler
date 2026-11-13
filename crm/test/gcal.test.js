@@ -7,9 +7,9 @@ const path = require('node:path');
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'gcal-'));
 process.env.GCAL_ICS_URL = 'https://calendar.google.com/calendar/ical/me%40gmail.com/private-abc/basic.ics';
-const gcal = require('../src/gcal');
-const crm = require('../src/crm');
-const db = require('../src/db');
+const gcal = require('../server/gcal');
+const crm = require('../server/crm');
+const db = require('../../src/db');
 
 const ev = ({ uid, start = '20261110T150000Z', end = '20261110T153000Z', summary = 'Free intro call with Viral Attraction', attendee = 'ava@shop.com', cn = 'Ava Stone', extra = '' }) => [
   'BEGIN:VEVENT', `DTSTART:${start}`, `DTEND:${end}`, `UID:${uid}`,

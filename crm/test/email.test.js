@@ -25,10 +25,10 @@ test.before(async () => {
   process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'email-'));
   process.env.NTFY_BASE = `http://127.0.0.1:${ntfy.address().port}`;
   process.env.BREVO_API_BASE = `http://127.0.0.1:${brevo.address().port}`;
-  crm = require('../src/crm');
-  auto = require('../src/automations');
-  email = require('../src/email');
-  db = require('../src/db');
+  crm = require('../server/crm');
+  auto = require('../server/automations');
+  email = require('../server/email');
+  db = require('../../src/db');
 });
 test.after(() => { brevo.close(); ntfy.close(); });
 

@@ -28,9 +28,9 @@ test.before(async () => {
   process.env.NTFY_BASE = `http://127.0.0.1:${ntfy.address().port}`;
   process.env.WEBSITE_INBOX_URL = `http://127.0.0.1:${inbox.address().port}/exec`;
   process.env.WEBSITE_INBOX_KEY = 'k123';
-  website = require('../src/website');
-  crm = require('../src/crm');
-  db = require('../src/db');
+  website = require('../server/website');
+  crm = require('../server/crm');
+  db = require('../../src/db');
 });
 test.after(() => { inbox.close(); ntfy.close(); });
 

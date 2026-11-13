@@ -19,9 +19,9 @@ test.before(async () => {
   process.env.NTFY_BASE = `http://127.0.0.1:${fake.address().port}`;
   process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'crm-'));
   process.env.APP_PASSWORD = '';
-  crm = require('../src/crm');
-  notify = require('../src/notify');
-  app = require('../src/server');
+  crm = require('../server/crm');
+  notify = require('../../src/notify');
+  app = require('../../src/server');
   server = app.listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}/api/crm`;
@@ -174,7 +174,7 @@ test('through the public tunnel only sign-up forms are reachable, not the CRM da
 });
 
 test('starter parade forms exist once, with the email box unticked by default', () => {
-  const forms = require('../src/db').prepare("SELECT * FROM crm_forms WHERE title LIKE '%parade%' OR title LIKE '%Parade%'").all();
+  const forms = require('../../src/db').prepare("SELECT * FROM crm_forms WHERE title LIKE '%parade%' OR title LIKE '%Parade%'").all();
   assert.deepStrictEqual(forms.map((f) => f.group_name).sort(), ['Parade entry', 'Parade sponsor', 'Volunteer']);
   assert.ok(forms.every((f) => f.active && /unsubscribe/.test(f.email_checkbox)));
 });

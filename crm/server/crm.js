@@ -9,9 +9,9 @@
 // service that handles unsubscribe links and spam rules. That keeps your own email and
 // social accounts safe from spam flags.
 const express = require('express');
-const db = require('./db');
-const notify = require('./notify');
-const config = require('./config');
+const db = require('../../src/db');
+const notify = require('../../src/notify');
+const config = require('../../src/config');
 const { EventEmitter } = require('events');
 
 // Automations (automations.js) listen here: contact_added, form_filled, stage_changed, appointment_booked.

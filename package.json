@@ -10,7 +10,7 @@
     "beta:off": "node scripts/beta.js off",
     "beta:status": "node scripts/beta.js status",
     "stripe-setup": "node scripts/stripe-setup.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --test test/*.test.js crm/test/*.test.js",
     "mac": "node scripts/start-with-tunnel.js",
     "background:on": "node scripts/background.js on",
     "background:off": "node scripts/background.js off",
@@ -22,9 +22,9 @@
     "password": "node scripts/set-password.js",
     "phone-app": "node scripts/phone-app.js",
     "mac-app": "node scripts/mac-app.js",
-    "website": "node scripts/website.js",
-    "email-setup": "node scripts/email-setup.js",
-    "calendar": "node scripts/calendar.js"
+    "website": "node crm/scripts/website.js",
+    "email-setup": "node crm/scripts/email-setup.js",
+    "calendar": "node crm/scripts/calendar.js"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

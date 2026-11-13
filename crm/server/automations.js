@@ -13,10 +13,10 @@
 // see email.js), only to people who just reached out to you or said yes to email, with your
 // address and an unsubscribe line in every email. Texts are never sent automatically.
 const express = require('express');
-const db = require('./db');
-const config = require('./config');
+const db = require('../../src/db');
+const config = require('../../src/config');
 const crm = require('./crm');
-const notify = require('./notify');
+const notify = require('../../src/notify');
 const email = require('./email');
 const kit = require('./workflow-kit');
 

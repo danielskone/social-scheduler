@@ -4,9 +4,9 @@
 // own timezone setting is.
 const crypto = require('crypto');
 const express = require('express');
-const db = require('./db');
-const notify = require('./notify');
-const config = require('./config');
+const db = require('../../src/db');
+const notify = require('../../src/notify');
+const config = require('../../src/config');
 const crm = require('./crm');
 
 const TZ = () => process.env.BOOKING_TIMEZONE || 'America/New_York';

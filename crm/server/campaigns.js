@@ -8,12 +8,12 @@
 // Rules (US CAN-SPAM): campaigns only ever go to people marked "OK to email" (they said yes),
 // never to "Do not contact", and every email shows your mailing address and an unsubscribe link.
 const express = require('express');
-const db = require('./db');
-const config = require('./config');
+const db = require('../../src/db');
+const config = require('../../src/config');
 const crm = require('./crm');
 const email = require('./email');
 const design = require('./emaildesign');
-const notify = require('./notify');
+const notify = require('../../src/notify');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS crm_segments (
