@@ -36,7 +36,20 @@
   };
   const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name] || ''}</svg>`;
   const STAGE_C = { New: 'var(--st-new)', Contacted: 'var(--st-contacted)', Interested: 'var(--st-interested)', Committed: 'var(--st-committed)', 'Paid / Done': 'var(--st-paid)', 'Not this year': 'var(--st-no)' };
-  const stageC = (st) => STAGE_C[st] || 'var(--accent)';
+  // Each pipeline names its own steps: won steps are green, lost ones gray, open ones take colors in order.
+  const OPEN_C = ['var(--st-new)', 'var(--st-contacted)', 'var(--st-interested)', 'var(--st-committed)', '#0891b2', '#c2410c', '#2563eb', '#db2777'];
+  let stageColors = {};
+  function buildStageColors(pipelines) {
+    stageColors = {};
+    (pipelines || []).forEach((pl) => {
+      let i = 0;
+      pl.stages.forEach((st) => {
+        if (!stageColors[st.name]) stageColors[st.name] = st.kind === 'won' ? 'var(--st-paid)' : st.kind === 'lost' ? 'var(--st-no)' : OPEN_C[i % OPEN_C.length];
+        if (st.kind === 'open') i++;
+      });
+    });
+  }
+  const stageC = (st) => stageColors[st] || STAGE_C[st] || 'var(--accent)';
   const stageBadge = (st) => `<span class="stage" style="--c:${stageC(st)}">${h(st)}</span>`;
   const PALETTE = ['#4f46e5', '#db2777', '#0891b2', '#d97706', '#16a34a', '#9333ea', '#dc2626', '#0d9488', '#2563eb', '#c2410c'];
   const colorFor = (str) => { let n = 0; for (const ch of String(str || '')) n = (n * 31 + ch.charCodeAt(0)) >>> 0; return PALETTE[n % PALETTE.length]; };
@@ -186,6 +199,7 @@
     // The number tiles belong to the people pages; Launchpad, Dashboard and Settings have their own.
     q$('#crm-tiles').style.display = ['launchpad', 'dashboard', 'settings'].includes(tab) ? 'none' : '';
     meta = await call('/meta');
+    buildStageColors(meta.pipelines);
     const fill = (sel, items, label) => {
       const el = q$(sel), cur = el.value;
       el.innerHTML = `<option value="">${label}</option>` + items.map((g) => `<option${g === cur ? ' selected' : ''}>${h(g)}</option>`).join('');
@@ -195,8 +209,8 @@
     fill('#crm-stage', meta.stages, 'All stages');
     const s = meta.summary;
     q$('#crm-tiles').innerHTML = [
-      ['Contacts', s.total, 'people', '#4f46e5'], ['To-dos due', s.due + s.tasksDue, 'bell', '#d97706'], ['Committed (not paid yet)', money(s.pledged), 'pipeline', '#9333ea'],
-      ['Paid', money(s.paid), 'money', '#16a34a'], ['OK to email', s.emailable, 'email', '#db2777'],
+      ['Contacts', s.total, 'people', '#4f46e5'], ['To-dos due', s.due + s.tasksDue, 'bell', '#d97706'], ['Open deals', money(s.pledged), 'pipeline', '#9333ea'],
+      ['Won', money(s.paid), 'money', '#16a34a'], ['OK to email', s.emailable, 'email', '#db2777'],
     ].map(([l, v, ico, c]) => `<div class="tile"><div class="tile-ico" style="--c:${c}">${svg(ico)}</div><div><div class="label">${l}</div><div class="value">${v ?? 0}</div></div></div>`).join('');
     renderTip(tab);
     if (!store.get('tour-done', false) && tourAt < 0) setTimeout(() => showTour(0), 400);
@@ -242,19 +256,86 @@
   };
 
   // ---------- Pipeline board ----------
+  // The pipeline picked on the board, remembered for each business.
+  const pipeKey = () => `pipe-${window.VTHome.current() ? window.VTHome.current().id : 'all'}`;
+  // With nothing picked yet, a business opens on its own pipeline before the shared one.
+  const curPipe = () => { const b = window.VTHome.current();
+    return meta.pipelines.find((x) => x.id === Number(store.get(pipeKey(), 0))) || (b && meta.pipelines.find((x) => x.business_id === b.id)) || meta.pipelines[0]; };
   async function renderBoard() {
+    const pl = curPipe();
+    q$('#pipe-pick').innerHTML = meta.pipelines.map((x) => `<option value="${x.id}"${x.id === pl.id ? ' selected' : ''}>${h(x.name)}</option>`).join('');
+    q$('#pipe-pick').hidden = meta.pipelines.length < 2;
     const group = q$('#pipe-group').value;
-    const rows = await call(`/contacts${group ? `?group=${encodeURIComponent(group)}` : ''}`);
-    q$('#pipe-board').innerHTML = meta.stages.map((st) => {
+    const rows = await call(`/contacts?pipeline=${pl.id}${group ? `&group=${encodeURIComponent(group)}` : ''}`);
+    const open = rows.filter((c) => c.stage_kind === 'open').reduce((n, c) => n + (c.amount || 0), 0);
+    q$('#pipe-total').textContent = `${rows.length} ${rows.length === 1 ? 'person' : 'people'} · ${money(open)} still open`;
+    q$('#pipe-board').innerHTML = pl.stages.map(({ name: st, kind }) => {
       const cards = rows.filter((c) => c.stage === st);
       const total = cards.reduce((n, c) => n + (c.amount || 0), 0);
-      return `<div class="col" data-stage="${h(st)}" style="--c:${stageC(st)}"><h3>${h(st)}</h3><div class="muted">${cards.length} ${cards.length === 1 ? 'person' : 'people'} · ${money(total)}</div>
+      return `<div class="col ${kind}" data-stage="${h(st)}" style="--c:${stageC(st)}"><h3>${h(st)}${kind !== 'open' ? ` <small class="kind">${kind === 'won' ? 'Won' : 'Lost'}</small>` : ''}</h3><div class="muted">${cards.length} ${cards.length === 1 ? 'person' : 'people'} · ${money(total)}</div>
         ${cards.map((c) => `<div class="card" draggable="true" data-id="${c.id}"><div class="top">${avatar(c.company || c.name, 'sm')}<div><b>${h(c.company || c.name)}</b>
           ${c.company && c.company !== c.name ? `<div class="muted small">${h(c.name)}</div>` : ''}</div></div>
           ${c.amount ? `<div class="amt">${money(c.amount)}</div>` : ''}
           <div class="meta">${groupPill(c.group_name)}${c.next_follow_up ? ` <span class="${dueClass(c.next_follow_up)}">${niceDate(c.next_follow_up)}</span>` : ''}</div></div>`).join('') || '<div class="empty-col">Drag a card here</div>'}
       </div>`;
     }).join('');
+  }
+  q$('#pipe-pick').onchange = (e) => { store.set(pipeKey(), Number(e.target.value)); renderBoard(); };
+  q$('#pipe-edit').onclick = () => editPipeline(curPipe());
+  q$('#pipe-new').onclick = () => editPipeline(null);
+
+  // Name your own steps: rename, add, remove, move up or down, and say which ones mean won or lost.
+  function editPipeline(pl) {
+    const dlg = q$('#crm-edit-dialog');
+    const biz = window.VTHome.current();
+    let steps = pl ? pl.stages.map((x) => ({ ...x, from: x.name })) : [{ name: 'New', kind: 'open' }, { name: 'Contacted', kind: 'open' }, { name: 'Interested', kind: 'open' }, { name: 'Won', kind: 'won' }, { name: 'Lost', kind: 'lost' }];
+    const KIND = [['open', 'Still open'], ['won', 'Won (money counts)'], ['lost', 'Lost']];
+    const draw = () => {
+      q$('#pl-steps', dlg).innerHTML = steps.map((x, i) => `<li data-i="${i}" style="--c:${x.kind === 'won' ? 'var(--st-paid)' : x.kind === 'lost' ? 'var(--st-no)' : OPEN_C[i % OPEN_C.length]}">
+        <span class="pl-num">${i + 1}</span><input data-name value="${h(x.name)}" maxlength="40" aria-label="Step ${i + 1} name" placeholder="Step name">
+        <select data-kind aria-label="What this step means">${KIND.map(([v, l]) => `<option value="${v}"${v === x.kind ? ' selected' : ''}>${l}</option>`).join('')}</select>
+        <button type="button" class="x" data-up title="Move up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>↑</button><button type="button" class="x" data-down title="Move down" aria-label="Move down"${i === steps.length - 1 ? ' disabled' : ''}>↓</button>
+        <button type="button" class="x" data-rm title="Remove step" aria-label="Remove step">×</button></li>`).join('');
+    };
+    const sync = () => q$('#pl-steps', dlg).querySelectorAll('li').forEach((li) => { const x = steps[li.dataset.i]; x.name = q$('[data-name]', li).value; x.kind = q$('[data-kind]', li).value; });
+    dlg.innerHTML = `<form id="pl-form"><h1>${pl ? 'Edit pipeline' : 'New pipeline'}</h1>
+      <p class="muted" style="margin-top:0">Steps go left to right on the board. Mark the step that means you got paid as <b>Won</b>, and one for deals that fell through as <b>Lost</b>.</p>
+      <label class="field"><span>Pipeline name</span><input name="name" required maxlength="60" value="${h(pl ? pl.name : '')}" placeholder="e.g. Sponsors, New members, Car sales" style="width:100%"></label>
+      ${!pl && biz ? `<label class="check" style="margin:4px 0 12px"><input type="checkbox" name="mine" checked> Only for ${h(biz.name)} <small class="muted">(untick to share it with every business)</small></label>` : ''}
+      <ol class="pl-steps" id="pl-steps"></ol>
+      <button type="button" class="btn ghost" data-add>+ Add a step</button>
+      <p class="muted small">Renaming a step keeps everyone in it. People in a step you remove move to the first step.</p>
+      <div class="row"><button class="btn primary">Save</button><button class="btn ghost" type="button" data-close>Cancel</button>
+        ${pl && meta.pipelines.length > 1 ? '<button class="btn ghost danger" type="button" data-del style="margin-left:auto">Delete pipeline</button>' : ''}</div>
+      <p class="muted" id="pl-msg"></p></form>`;
+    draw();
+    q$('[data-close]', dlg).onclick = () => dlg.close();
+    q$('[data-add]', dlg).onclick = () => { sync(); const won = steps.findIndex((x) => x.kind !== 'open'); steps.splice(won < 0 ? steps.length : won, 0, { name: '', kind: 'open' }); draw(); q$(`li[data-i="${won < 0 ? steps.length - 1 : won}"] [data-name]`, dlg).focus(); };
+    q$('#pl-steps', dlg).onclick = (e) => {
+      const li = e.target.closest('li'); if (!li) return;
+      const i = Number(li.dataset.i); sync();
+      if ('up' in e.target.dataset && i > 0) [steps[i - 1], steps[i]] = [steps[i], steps[i - 1]];
+      else if ('down' in e.target.dataset && i < steps.length - 1) [steps[i + 1], steps[i]] = [steps[i], steps[i + 1]];
+      else if ('rm' in e.target.dataset) steps.splice(i, 1);
+      else return;
+      draw();
+    };
+    const del = q$('[data-del]', dlg);
+    if (del) del.onclick = async () => {
+      if (!confirm(`Delete the "${pl.name}" pipeline? Nobody is deleted. Its people move to another pipeline.`)) return;
+      try { await call(`/pipelines/${pl.id}`, { method: 'DELETE' }); store.set(pipeKey(), 0); dlg.close(); refresh(); } catch (err) { q$('#pl-msg', dlg).textContent = err.message; }
+    };
+    q$('#pl-form', dlg).onsubmit = async (e) => {
+      e.preventDefault(); sync();
+      const f = e.target;
+      const body = { name: f.name.value, stages: steps.filter((x) => x.name.trim()) };
+      if (!pl) body.business_id = f.mine && !f.mine.checked ? '' : (biz ? biz.id : '');
+      try {
+        const saved = await call(pl ? `/pipelines/${pl.id}` : '/pipelines', { method: pl ? 'PUT' : 'POST', json: body });
+        store.set(pipeKey(), saved.id); dlg.close(); say(pl ? 'Pipeline saved.' : `Made the "${saved.name}" pipeline.`); refresh();
+      } catch (err) { q$('#pl-msg', dlg).textContent = err.message; }
+    };
+    dlg.showModal();
   }
   q$('#pipe-group').onchange = renderBoard;
   const board = q$('#pipe-board');
@@ -266,7 +347,7 @@
     if (!col) return;
     e.preventDefault();
     const id = e.dataTransfer.getData('text/plain');
-    try { await call(`/contacts/${id}`, { method: 'PUT', json: { stage: col.dataset.stage } }); } catch (err) { say(err.message, true); }
+    try { await call(`/contacts/${id}`, { method: 'PUT', json: { stage: col.dataset.stage, pipeline_id: curPipe().id } }); } catch (err) { say(err.message, true); }
     refresh();
   });
   board.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c) openContact(Number(c.dataset.id)); });
@@ -572,6 +653,9 @@
     const dlg = q$('#contact-dialog');
     const field = (name, label, type = 'text', extra = '') => `<label class="field"><span>${label}</span><input type="${type}" name="${name}" value="${h(c[name])}" ${extra}></label>`;
     const usable = templates.filter((t) => (t.channel === 'email' ? c.email : c.phone));
+    // Their pipeline (new people start in the pipeline picked on the board).
+    const cPipe = meta.pipelines.find((x) => x.id === (c.pipeline || c.pipeline_id)) || (id ? meta.pipelines[0] : curPipe()) || meta.pipelines[0];
+    if (!id) c.stage = cPipe.stages[0].name;
     dlg.innerHTML = `<form method="dialog" id="contact-form">
       <header class="view-head"><h1>${id ? h(c.name) : 'New contact'}</h1><button class="btn ghost" value="cancel" formnovalidate>Close</button></header>
       ${id && !c.do_not_contact && usable.length ? `<div class="send-row"><select id="send-tpl">${usable.map((t) => `<option value="${t.id}">${t.channel === 'text' ? 'Text' : 'Email'}: ${h(t.name)}</option>`).join('')}</select>
@@ -584,7 +668,8 @@
         ${field('website', 'Website')}
         ${field('address', 'Address')}
         <label class="field"><span>Group</span><input name="group_name" list="crm-groups" value="${h(c.group_name)}"><datalist id="crm-groups">${meta.groups.map((g) => `<option value="${h(g)}">`).join('')}</datalist></label>
-        <label class="field"><span>Stage</span><select name="stage">${opt(meta.stages, c.stage)}</select></label>
+        ${meta.pipelines.length > 1 ? `<label class="field"><span>Pipeline</span><select name="pipeline_id">${meta.pipelines.map((x) => `<option value="${x.id}"${x.id === cPipe.id ? ' selected' : ''}>${h(x.name)}</option>`).join('')}</select></label>` : ''}
+        <label class="field"><span>Step</span><select name="stage">${opt(cPipe.stages.map((x) => x.name), c.stage)}</select></label>
         ${field('amount', 'Amount ($) <small>pledged, paid or spent</small>', 'text', 'inputmode="decimal"')}
         ${field('next_follow_up', 'Next follow-up', 'date')}
         <label class="field full"><span>Notes</span><textarea name="notes" rows="3">${h(c.notes)}</textarea></label>
@@ -614,6 +699,10 @@
 
     const reopen = () => { openContact(id); refresh(); };
     const form = q$('#contact-form', dlg);
+    if (form.pipeline_id) form.pipeline_id.onchange = () => {
+      const pl = meta.pipelines.find((x) => x.id === Number(form.pipeline_id.value));
+      form.stage.innerHTML = opt(pl.stages.map((x) => x.name), pl.stages.some((x) => x.name === form.stage.value) ? form.stage.value : pl.stages[0].name);
+    };
     form.onsubmit = async (e) => {
       const action = e.submitter?.value;
       if (action === 'cancel') return;

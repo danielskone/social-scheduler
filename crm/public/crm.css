@@ -312,3 +312,24 @@ body[data-app="crm"] .sidebar .biz-btn small, body[data-app="crm"] .sidebar .biz
   .biz-two { grid-template-columns: 1fr; }
   .set-biz { flex-wrap: wrap; }
 }
+
+/* ---------- Pipelines: pick one, edit its steps ---------- */
+#pipe-board .col h3 small.kind { font-size: .68rem; font-weight: 700; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); border-radius: 99px; padding: 1px 7px; }
+#pipe-pick { font-weight: 650; }
+#pipe-pick[hidden] { display: none; }
+#pipe-total { margin-left: auto; }
+.pl-steps { list-style: none; margin: 8px 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pl-steps li { display: flex; align-items: center; gap: 6px; border-left: 4px solid var(--c); background: var(--panel-2); border-radius: 10px; padding: 6px 8px; }
+.pl-num { width: 22px; text-align: center; font-weight: 700; color: var(--muted); font-size: .85rem; flex: none; }
+.pl-steps input[data-name] { flex: 1; min-width: 0; }
+.pl-steps select { flex: none; max-width: 46%; }
+.pl-steps .x { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 1.05rem; padding: 4px 6px; border-radius: 8px; flex: none; }
+.pl-steps .x:hover:not([disabled]) { background: var(--panel); color: var(--text); }
+.pl-steps .x[disabled] { opacity: .3; cursor: default; }
+@media (max-width: 800px) {
+  .pl-steps li { flex-wrap: wrap; }
+  .pl-steps input[data-name] { flex-basis: calc(100% - 40px); }
+  .pl-steps select { flex: 1; max-width: none; }
+  #pipe-total { margin-left: 0; width: 100%; }
+}
+.db-ctrls { display: inline-flex; gap: 8px; flex-wrap: wrap; }

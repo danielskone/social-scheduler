@@ -120,6 +120,8 @@ function remove(id) {
   db.transaction(() => {
     db.prepare('UPDATE crm_businesses SET groups=? WHERE id=?').run(JSON.stringify([...new Set([...keep.groups, ...b.groups])]), keep.id);
     db.prepare('DELETE FROM crm_businesses WHERE id=?').run(b.id);
+    // Its own pipelines move to the business that takes over its people.
+    try { db.prepare('UPDATE crm_pipelines SET business_id=? WHERE business_id=?').run(keep.id, b.id); } catch { /* no pipelines table yet */ }
   })();
   return { ok: true, movedTo: keep.name };
 }

@@ -5,11 +5,11 @@ const db = require('../../src/db');
 const notify = require('../../src/notify');
 const crm = require('./crm');
 const biz = require('./businesses');
+const pipes = require('./pipelines');
 const config = require('../../src/config');
 
 const pad = (n) => String(n).padStart(2, '0');
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const WON = 'Paid / Done', LOST = 'Not this year';
 
 // Range: ?days=7|30|90|365 or days=all. Returns local YYYY-MM-DD bounds (inclusive).
 function range(q = {}) {
@@ -30,23 +30,29 @@ function dashboard(q = {}) {
   const r = range(q);
   const bf = biz.filter(q.biz);
   const and = bf.sql ? ` AND ${bf.sql}` : '';
-  const people = db.prepare(`SELECT id, stage, COALESCE(amount,0) AS amount, group_name, ${LOCAL_DAY} AS day FROM contacts WHERE 1=1${and}`).all(...bf.args);
+  const people = db.prepare(`SELECT id, stage, COALESCE(amount,0) AS amount, group_name, pipeline_id, ${LOCAL_DAY} AS day FROM contacts WHERE 1=1${and}`).all(...bf.args);
+  people.forEach((p) => { p.pipe = pipes.ofContact(p); p.kind = pipes.kindOf(p.pipe, p.stage); });
   const inRange = people.filter((p) => p.day >= r.from && p.day <= r.to);
-  const stages = crm.STAGES;
+  // The charts show one pipeline at a time (?pipeline=, or the business's first one).
+  const choices = pipes.forBiz(q.biz);
+  const pipe = choices.find((x) => x.id === Number(q.pipeline)) || choices.find((x) => x.business_id != null && x.business_id === Number(q.biz)) || choices[0];
+  const inPipe = inRange.filter((p) => p.pipe.id === pipe.id);
 
-  // Opportunity status / value: people added in the range, by stage.
-  const byStage = stages.map((st) => {
-    const list = inRange.filter((p) => p.stage === st);
-    return { stage: st, count: list.length, value: list.reduce((n, p) => n + p.amount, 0) };
+  // Opportunity status / value: people added in the range, by step.
+  const byStage = pipe.stages.map((st) => {
+    const list = inPipe.filter((p) => p.stage === st.name);
+    return { stage: st.name, kind: st.kind, count: list.length, value: list.reduce((n, p) => n + p.amount, 0) };
   });
-  const won = byStage.find((s) => s.stage === WON);
-  const lost = byStage.find((s) => s.stage === LOST);
-  const open = byStage.filter((s) => s.stage !== WON && s.stage !== LOST);
+  // Money and win rate add up every pipeline of the business.
+  const sum = (kind) => inRange.filter((p) => p.kind === kind);
+  const won = { count: sum('won').length, value: sum('won').reduce((n, p) => n + p.amount, 0) };
+  const lost = { count: sum('lost').length };
+  const open = sum('open');
   const decided = won.count + lost.count;
 
-  // Funnel: how many reached each step or further (Not this year is left out).
-  const steps = stages.filter((s) => s !== LOST);
-  const funnel = steps.map((st, i) => ({ stage: st, count: inRange.filter((p) => p.stage !== LOST && steps.indexOf(p.stage) >= i).length }));
+  // Funnel: how many reached each step or further (lost steps are left out).
+  const steps = pipe.stages.filter((st) => st.kind !== 'lost').map((st) => st.name);
+  const funnel = steps.map((st, i) => ({ stage: st, count: inPipe.filter((p) => p.kind !== 'lost' && steps.indexOf(p.stage) >= i).length }));
 
   // New people over time: by day for short ranges, by week for 90 days, by month for longer.
   const span = Math.round((new Date(`${r.to}T12:00`) - new Date(`${r.from}T12:00`)) / 864e5) + 1;
@@ -85,10 +91,10 @@ function dashboard(q = {}) {
   const due = crm.listTasks({ open: true, biz: q.biz }).filter((t) => t.due_on && t.due_on <= ymd(new Date())).slice(0, 5);
 
   return {
-    range: r, unit,
+    range: r, unit, pipeline: pipe.id, pipelines: choices.map((x) => ({ id: x.id, name: x.name })),
     totals: {
       newPeople: inRange.length, allPeople: people.length,
-      openValue: open.reduce((n, s) => n + s.value, 0), openCount: open.reduce((n, s) => n + s.count, 0),
+      openValue: open.reduce((n, p) => n + p.amount, 0), openCount: open.length,
       wonValue: won.value, wonCount: won.count, lostCount: lost.count,
       winRate: decided ? Math.round((won.count / decided) * 100) : null,
       appointments: appts, tasksDone, formsFilled,

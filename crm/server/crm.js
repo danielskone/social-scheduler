@@ -24,9 +24,10 @@ function emit(event, data) {
 const GROUPS = config.ownerStarters
   ? ['Parade sponsor', 'Donor', 'Parade entry', 'Volunteer', 'Vendor', 'Viral Attraction lead', 'Auto customer', 'Other']
   : ['Lead', 'Customer', 'Partner', 'Vendor', 'Other'];
-const STAGES = ['New', 'Contacted', 'Interested', 'Committed', 'Paid / Done', 'Not this year'];
+// Pipeline steps live in pipelines.js; each business can name its own.
+const pipes = () => require('./pipelines');
 const FIELDS = ['name', 'company', 'email', 'phone', 'website', 'address', 'group_name', 'stage', 'amount',
-  'next_follow_up', 'email_ok', 'email_ok_source', 'do_not_contact', 'notes'];
+  'next_follow_up', 'email_ok', 'email_ok_source', 'do_not_contact', 'notes', 'pipeline_id'];
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS contacts (
@@ -137,7 +138,11 @@ function clean(body, existing = {}) {
   if (!c.name) c.name = c.company;
   if (!c.name) throw Object.assign(new Error('Add a name or a company.'), { status: 400 });
   c.group_name = str(c.group_name) || 'Other';
-  c.stage = STAGES.includes(c.stage) ? c.stage : 'New';
+  c.pipeline_id = c.pipeline_id === '' || c.pipeline_id == null ? null : Number(c.pipeline_id);
+  if (c.pipeline_id && !pipes().get(c.pipeline_id)) c.pipeline_id = null;
+  const steps = pipes().stageNames(pipes().ofContact(c));
+  // A step that isn't in their pipeline (or none at all) means the pipeline's first step.
+  c.stage = steps.includes(c.stage) ? c.stage : steps[0];
   c.amount = c.amount === '' || c.amount == null ? null : Number(String(c.amount).replace(/[$,\s]/g, ''));
   if (c.amount != null && !Number.isFinite(c.amount)) throw Object.assign(new Error('Amount must be a number.'), { status: 400 });
   c.next_follow_up = /^\d{4}-\d{2}-\d{2}$/.test(c.next_follow_up || '') ? c.next_follow_up : null;
@@ -180,12 +185,13 @@ function updateContact(id, body) {
 function getContact(id) {
   const c = db.prepare('SELECT * FROM contacts WHERE id=?').get(id);
   if (!c) return null;
+  c.pipeline = pipes().ofContact(c).id;
   c.activities = db.prepare('SELECT * FROM contact_activities WHERE contact_id=? ORDER BY happened_on DESC, id DESC').all(id);
   c.tasks = db.prepare('SELECT t.*, (SELECT name FROM crm_templates WHERE id=t.template_id) AS template_name FROM crm_tasks t WHERE contact_id=? ORDER BY (done_at IS NOT NULL), (due_on IS NULL), due_on, id').all(id);
   return c;
 }
 
-function listContacts({ q, group, stage, due, biz: b } = {}) {
+function listContacts({ q, group, stage, due, biz: b, pipeline } = {}) {
   const where = [], args = {};
   const bf = biz().filter(b);
   if (bf.sql) { let n = 0; where.push(bf.sql.replace(/\?/g, () => `@bg${n++}`)); bf.args.forEach((g, i) => { args[`bg${i}`] = g; }); }
@@ -193,8 +199,11 @@ function listContacts({ q, group, stage, due, biz: b } = {}) {
   if (group) { where.push('group_name=@group'); args.group = group; }
   if (stage) { where.push('stage=@stage'); args.stage = stage; }
   if (due) { where.push('next_follow_up IS NOT NULL AND next_follow_up <= @today'); args.today = today(); }
-  return db.prepare(`SELECT * FROM contacts ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+  const rows = db.prepare(`SELECT * FROM contacts ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY (next_follow_up IS NULL), next_follow_up, name COLLATE NOCASE`).all(args);
+  // Which pipeline each person is in (people with none are in their business's first pipeline).
+  for (const r of rows) { const p = pipes().ofContact(r); r.pipeline = p.id; r.stage_kind = pipes().kindOf(p, r.stage); }
+  return pipeline ? rows.filter((r) => r.pipeline === Number(pipeline)) : rows;
 }
 
 function logActivity(contactId, { kind = 'Note', note, happened_on } = {}) {
@@ -212,10 +221,14 @@ function summary(b) {
   const W = bf.sql ? `WHERE ${bf.sql}` : '';
   const row = db.prepare(`SELECT COUNT(*) AS total,
       SUM(CASE WHEN next_follow_up IS NOT NULL AND next_follow_up <= ? THEN 1 ELSE 0 END) AS due,
-      SUM(CASE WHEN email_ok=1 AND do_not_contact=0 THEN 1 ELSE 0 END) AS emailable,
-      SUM(CASE WHEN stage='Committed' THEN COALESCE(amount,0) ELSE 0 END) AS pledged,
-      SUM(CASE WHEN stage='Paid / Done' THEN COALESCE(amount,0) ELSE 0 END) AS paid
+      SUM(CASE WHEN email_ok=1 AND do_not_contact=0 THEN 1 ELSE 0 END) AS emailable
     FROM contacts ${W}`).get(t, ...bf.args);
+  // Money: "open" steps add up as still to come, "won" steps as paid (each pipeline names its own steps).
+  row.pledged = 0; row.paid = 0;
+  for (const c of db.prepare(`SELECT stage, group_name, pipeline_id, amount FROM contacts ${W ? `${W} AND` : 'WHERE'} amount IS NOT NULL`).all(...bf.args)) {
+    const kind = pipes().kindOf(pipes().ofContact(c), c.stage);
+    if (kind === 'won') row.paid += c.amount; else if (kind === 'open') row.pledged += c.amount;
+  }
   const byGroup = db.prepare(`SELECT group_name, COUNT(*) AS n, SUM(COALESCE(amount,0)) AS amount FROM contacts ${W} GROUP BY group_name ORDER BY n DESC`).all(...bf.args);
   const tf = biz().filter(b, 'c.group_name');
   const tasksDue = db.prepare(`SELECT COUNT(*) AS n FROM crm_tasks t LEFT JOIN contacts c ON c.id=t.contact_id
@@ -274,7 +287,7 @@ function importCsv(text) {
       map.forEach((f, j) => { if (f) body[f] = r[j]; });
       body.email_ok = yes(body.email_ok); body.do_not_contact = yes(body.do_not_contact);
       if (body.email_ok && !body.email_ok_source) body.email_ok = false; // never assume consent
-      if (body.stage) body.stage = STAGES.find((s) => s.toLowerCase() === String(body.stage).trim().toLowerCase()) || 'New';
+      if (body.stage) body.stage = pipes().allStageNames().find((s) => s.toLowerCase() === String(body.stage).trim().toLowerCase()) || null;
       const email = String(body.email || '').trim();
       if (email && db.prepare('SELECT 1 FROM contacts WHERE lower(email)=lower(?)').get(email)) { skipped++; return; }
       try { createContact(body, { source: 'import' }); imported++; } catch (e) { errors.push(`Row ${i + 2}: ${e.message}`); }
@@ -511,7 +524,8 @@ router.get('/meta', (req, res) => {
   const b = req.query.biz;
   // With a business picked, only its groups are offered.
   const groups = b && b !== 'all' ? (biz().groupsOf(b, GROUPS) || every) : every;
-  res.json({ groups, stages: STAGES, summary: summary(b) });
+  const pipelines = pipes().forBiz(b);
+  res.json({ groups, stages: [...new Set(pipelines.flatMap(pipes().stageNames))], pipelines, summary: summary(b) });
 });
 router.get('/contacts', wrap((req, res) => res.json(listContacts(req.query))));
 router.post('/contacts', wrap((req, res) => { biz().claim(req.query.biz, (req.body || {}).group_name); res.json(createContact(req.body || {})); }));
@@ -550,4 +564,5 @@ router.get('/export.csv', wrap((req, res) => {
   res.send('﻿' + exportCsv({ emailList }));
 }));
 
-module.exports = { events, emit, html: { page, esc, nl }, router, listTasks, saveTask, saveTemplate, fillTemplate, prepareMessage, saveForm, submitForm, tooMany, createContact, updateContact, getContact, listContacts, logActivity, importCsv, exportCsv, parseCsv, summary, sendFollowUpReminder, GROUPS, STAGES };
+module.exports = { events, emit, html: { page, esc, nl }, router, listTasks, saveTask, saveTemplate, fillTemplate, prepareMessage, saveForm, submitForm, tooMany, createContact, updateContact, getContact, listContacts, logActivity, importCsv, exportCsv, parseCsv, summary, sendFollowUpReminder, GROUPS,
+  get STAGES() { return pipes().allStageNames(); } };
