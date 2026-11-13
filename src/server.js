@@ -18,7 +18,6 @@ const automations = require('./automations');
 const campaigns = require('./campaigns');
 const gcal = require('./gcal');
 const clipper = require('./clipper');
-const ads = require('./ads');
 const compression = require('compression');
 const { thumbFor } = require('./thumbs');
 const apps = require('./apps');
@@ -129,12 +128,6 @@ app.get('/thumb/:file', async (req, res) => {
 
 // Finished clips from the Clips tab (only for signed-in users).
 app.get('/clipfile/:job/:file', clipper.serveFile);
-// Finished ads and the Ads Studio library (photos, videos, logos, music).
-app.get('/adfile/:id/:file', ads.serveAdFile);
-app.get('/adlib/:file', ads.serveLibFile);
-
-// The free face finder (Google's MediaPipe) that runs in the browser for talking photos.
-app.use('/vendor/face', express.static(path.join(__dirname, '..', 'node_modules', '@mediapipe', 'tasks-vision'), { maxAge: '7d' }));
 // The app's own files: the page names each file with a fingerprint of its contents
 // (app.js?v=1a2b3c), so the browser and phone keep them and don't ask the Mac again on every
 // open. After an update the fingerprint changes, so the new version still loads right away.
@@ -148,7 +141,7 @@ function fingerprint(file) {
   }
   return fingerprints.get(file);
 }
-// Each app (Viral Post, Viral Touch CRM, Viral Clips, Viral Ads Studio) has its own address,
+// Each app (Viral Post, Viral Touch CRM, Viral Clips) has its own address,
 // name, icon and menu. They share one page file; the server fills in which app it is.
 let indexHtml = null;
 const appPages = new Map();
@@ -364,11 +357,8 @@ api.post('/posts', upload.single('media'), (req, res) => {
   const caption = (req.body.caption || '').trim();
   const accountIds = [].concat(req.body.accountIds || []).flatMap((v) => String(v).split(',')).filter(Boolean).map(Number);
   // A clip from the Clips tab can be used instead of an uploaded file.
-  // ...and so can a finished ad from Viral Ads Studio.
-  const clipFile = req.file ? null
-    : req.body.clipId ? clipper.copyClipToMedia(Number(req.body.clipId))
-    : req.body.adRef ? ads.copyAdToMedia(req.body.adRef) : null;
-  if (!req.file && (req.body.clipId || req.body.adRef) && !clipFile) return res.status(400).json({ error: `That ${req.body.adRef ? 'ad' : 'clip'} is not ready yet. Try again in a minute.` });
+  const clipFile = req.file ? null : req.body.clipId ? clipper.copyClipToMedia(Number(req.body.clipId)) : null;
+  if (!req.file && req.body.clipId && !clipFile) return res.status(400).json({ error: 'That clip is not ready yet. Try again in a minute.' });
   const mediaType = req.file ? (req.file.mimetype.startsWith('video') ? 'video' : 'image') : clipFile ? 'video' : null;
   let error = validatePost({ caption, scheduledAt: req.body.scheduledAt, accountIds, mediaType });
   if (!error && req.file?.mimetype === 'image/png' && accountIds.length &&
@@ -495,7 +485,6 @@ api.post('/analytics/refresh', async (req, res) => {
 });
 
 app.use('/api/clips', clipper.router);
-app.use('/api/ads', ads.router);
 app.use('/api/crm/forms', forms.router);
 app.use('/api/crm/booking', booking.router);
 app.use('/api/crm/automations', automations.router);
@@ -515,14 +504,13 @@ app.use((err, req, res, next) => {
 });
 
 // Each app runs its own background work: Viral Post publishes posts, Viral Touch CRM runs
-// follow-ups, automations and emails, Viral Clips and Viral Ads Studio make videos.
+// follow-ups, automations and emails, Viral Clips makes videos.
 // One program with no APP (customer copies) runs all of it.
 function startApp() {
   const runs = (key) => !ownApp || ownApp.key === key;
   if (runs('scheduler')) scheduler.start();
   if (runs('crm') && appsOnKeys.has('crm')) scheduler.startCrm();
   if (runs('clips') && appsOnKeys.has('clips')) clipper.start();
-  if (runs('ads') && appsOnKeys.has('ads')) ads.start();
   const port = ownApp && !process.env.PORT ? apps.portOf(ownApp) : config.port;
   const args = config.host ? [port, config.host] : [port];
   app.listen(...args, () => console.log(`${ownApp ? ownApp.name : 'Viral Post'} running at http://localhost:${port}`));

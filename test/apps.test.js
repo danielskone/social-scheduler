@@ -1,4 +1,4 @@
-// Viral Post, Viral Touch CRM, Viral Clips and Viral Ads Studio are separate apps in one install.
+// Viral Post, Viral Touch CRM and Viral Clips are separate apps in one install.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -9,14 +9,15 @@ const apps = require('../src/apps');
 
 test('APPS picks which apps are on; Viral Post is always on', () => {
   const keys = (env) => apps.enabledApps(env).map((a) => a.key);
-  assert.deepStrictEqual(keys({}), ['scheduler', 'crm', 'clips', 'ads']);
-  assert.deepStrictEqual(keys({ APPS: 'all' }), ['scheduler', 'crm', 'clips', 'ads']);
+  assert.deepStrictEqual(keys({}), ['scheduler', 'crm', 'clips']);
+  assert.deepStrictEqual(keys({ APPS: 'all' }), ['scheduler', 'crm', 'clips']);
   assert.deepStrictEqual(keys({ APPS: 'scheduler' }), ['scheduler']);
-  assert.deepStrictEqual(keys({ APPS: 'crm, ads' }), ['scheduler', 'crm', 'ads']);
+  assert.deepStrictEqual(keys({ APPS: 'crm, clips' }), ['scheduler', 'crm', 'clips']);
+  assert.deepStrictEqual(keys({ APPS: 'crm, ads' }), ['scheduler', 'crm'], 'Viral Ads Studio was removed');
   // every page of the old single app belongs to exactly one app
   const views = apps.APPS.flatMap((a) => a.views);
   assert.strictEqual(new Set(views).size, views.length);
-  for (const v of ['calendar', 'compose', 'analytics', 'accounts', 'contacts', 'clips', 'ads']) assert.ok(views.includes(v), v);
+  for (const v of ['calendar', 'compose', 'analytics', 'accounts', 'contacts', 'clips']) assert.ok(views.includes(v), v);
 });
 
 test('each app manifest has its own name, address and icon', () => {
@@ -65,18 +66,18 @@ test('each app opens at its own address with its own name and icon', async () =>
     assert.match(crm, /<span class="app-name">Viral Touch CRM<\/span>/);
     const info = JSON.parse(crm.match(/window\.VP_APPS = (.*?);<\/script>/)[1]);
     assert.strictEqual(info.app, 'crm');
-    assert.deepStrictEqual(info.apps.map((a) => a.key), ['scheduler', 'crm', 'clips', 'ads']);
+    assert.deepStrictEqual(info.apps.map((a) => a.key), ['scheduler', 'crm', 'clips']);
 
     assert.match(await (await fetch(`${base}/clips/`)).text(), /<title>Viral Clips<\/title>/);
-    assert.match(await (await fetch(`${base}/ads/`)).text(), /<title>Viral Ads Studio<\/title>/);
 
     const noSlash = await fetch(`${base}/crm`, { redirect: 'manual' });
     assert.strictEqual(noSlash.status, 302);
     assert.strictEqual(noSlash.headers.get('location'), '/crm/');
 
-    const man = await (await fetch(`${base}/manifest-ads.webmanifest`)).json();
-    assert.strictEqual(man.name, 'Viral Ads Studio');
-    assert.strictEqual(man.start_url, '/ads/#ads');
+    const man = await (await fetch(`${base}/manifest-clips.webmanifest`)).json();
+    assert.strictEqual(man.name, 'Viral Clips');
+    // Viral Ads Studio is gone
+    assert.strictEqual((await fetch(`${base}/api/ads/brands`)).status, 404);
 
     // all apps still share the same data
     assert.strictEqual((await fetch(`${base}/api/crm/meta`)).status, 200);
@@ -94,7 +95,6 @@ test('Viral Post can run on its own (APPS=scheduler)', async () => {
     assert.strictEqual(crm.headers.get('location'), '/');
     assert.strictEqual((await fetch(`${base}/api/crm/meta`)).status, 404);
     assert.strictEqual((await fetch(`${base}/api/clips`)).status, 404);
-    assert.strictEqual((await fetch(`${base}/api/ads/brands`)).status, 404);
     assert.strictEqual((await fetch(`${base}/api/posts`)).status, 200);
   });
 });
@@ -106,12 +106,12 @@ test('on the Mac each app is its own program on its own port (APP=crm)', async (
     assert.match(page, /data-app="crm"/);
     const info = JSON.parse(page.match(/window\.VP_APPS = (.*?);<\/script>/)[1]);
     assert.strictEqual(info.app, 'crm');
-    assert.deepStrictEqual(info.apps.map((a) => [a.key, a.port]), [['scheduler', 3000], ['crm', 3001], ['clips', 3002], ['ads', 3003]]);
+    assert.deepStrictEqual(info.apps.map((a) => [a.key, a.port]), [['scheduler', 3000], ['crm', 3001], ['clips', 3002]]);
     // old /crm/ link inside this program -> its home; another app's link -> that app's program
     const self = await fetch(`${base}/crm/`, { redirect: 'manual' });
     assert.strictEqual(self.headers.get('location'), '/');
-    const ads = await fetch(`${base}/ads/`, { redirect: 'manual' });
-    assert.strictEqual(ads.headers.get('location'), 'http://127.0.0.1:3003/');
+    const clips = await fetch(`${base}/clips/`, { redirect: 'manual' });
+    assert.strictEqual(clips.headers.get('location'), 'http://127.0.0.1:3002/');
     const man = await (await fetch(`${base}/manifest-crm.webmanifest`)).json();
     assert.strictEqual(man.start_url, '/#contacts');
     assert.match(await (await fetch(`${base}/login.html`)).text(), /<h1>Viral Touch CRM<\/h1>/);

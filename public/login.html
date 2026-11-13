@@ -32,8 +32,8 @@
   <script>
     const q = new URLSearchParams(location.search);
     const e = q.get('error');
-    // Signing in from Viral Touch CRM, Viral Clips or Viral Ads Studio goes back to that app.
-    const apps = { '/crm/': ['Viral Touch CRM', 'crm'], '/clips/': ['Viral Clips', 'clips'], '/ads/': ['Viral Ads Studio', 'ads'] };
+    // Signing in from Viral Touch CRM or Viral Clips goes back to that app.
+    const apps = { '/crm/': ['Viral Touch CRM', 'crm'], '/clips/': ['Viral Clips', 'clips'] };
     const next = q.get('next');
     if (apps[next]) {
       document.getElementById('next').value = next;
