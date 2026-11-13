@@ -757,3 +757,8 @@ button.sl-chip.sl-save { border-style: dashed; color: var(--accent, #4f46e5); }
 .bulk-bar .btn.ghost.danger { color: #fca5a5; }
 @media (prefers-color-scheme: dark) { .tag { color: #5eead4; } }
 @media (max-width: 700px) { .bulk-bar { bottom: 74px; } .bulk-acts { overflow-x: auto; flex-wrap: nowrap; width: 100%; } .bulk-acts .btn { white-space: nowrap; } }
+
+/* ===== Gift cards and points ===== */
+.gc-uses { list-style: none; padding: 0; margin: 8px 0 14px; }
+.gc-uses li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.gc-uses li .small { grid-column: 1 / -1; }

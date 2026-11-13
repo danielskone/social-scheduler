@@ -45,7 +45,7 @@
   const pill = (l) => `<span class="pay-pill" style="--c:${LABEL[l][1]}">${LABEL[l][0]}</span>`;
   let payFilter = '';
   let payMode = store.get('pay-mode', 'invoices');
-  const modeBar = () => `<div class="seg pay-seg" role="group" aria-label="Show"><button type="button" data-mode="invoices" class="${payMode === 'invoices' ? 'on' : ''}">Invoices</button><button type="button" data-mode="quotes" class="${payMode === 'quotes' ? 'on' : ''}">Quotes</button><button type="button" data-mode="products" class="${payMode === 'products' ? 'on' : ''}">Products</button><button type="button" data-mode="coupons" class="${payMode === 'coupons' ? 'on' : ''}">Coupons</button><button type="button" data-mode="referrals" class="${payMode === 'referrals' ? 'on' : ''}">Referrals</button><button type="button" data-mode="plans" class="${payMode === 'plans' ? 'on' : ''}">Plans</button><button type="button" data-mode="contracts" class="${payMode === 'contracts' ? 'on' : ''}">Contracts</button></div>`;
+  const modeBar = () => `<div class="seg pay-seg" role="group" aria-label="Show"><button type="button" data-mode="invoices" class="${payMode === 'invoices' ? 'on' : ''}">Invoices</button><button type="button" data-mode="quotes" class="${payMode === 'quotes' ? 'on' : ''}">Quotes</button><button type="button" data-mode="products" class="${payMode === 'products' ? 'on' : ''}">Products</button><button type="button" data-mode="coupons" class="${payMode === 'coupons' ? 'on' : ''}">Coupons</button><button type="button" data-mode="referrals" class="${payMode === 'referrals' ? 'on' : ''}">Referrals</button><button type="button" data-mode="plans" class="${payMode === 'plans' ? 'on' : ''}">Plans</button><button type="button" data-mode="contracts" class="${payMode === 'contracts' ? 'on' : ''}">Contracts</button><button type="button" data-mode="gifts" class="${payMode === 'gifts' ? 'on' : ''}">Gift cards</button><button type="button" data-mode="points" class="${payMode === 'points' ? 'on' : ''}">Points</button></div>`;
   async function renderPayments(opts = {}) {
     const root = q$('#pay-root');
     const switchMode = (e) => { const m = e.target.closest('[data-mode]'); if (!m) return false; payMode = m.dataset.mode; store.set('pay-mode', payMode); renderPayments(); return true; };
@@ -55,6 +55,11 @@
       const handle = await window.VTExtra4[payMode === 'plans' ? 'renderPlans' : 'renderContracts'](root, modeBar());
       root.onclick = (e) => { if (!switchMode(e)) handle(e); };
       if (opts.contractFor) window.VTExtra4.editContract(null, opts.contractFor, () => renderPayments());
+      return;
+    }
+    if (payMode === 'gifts' || payMode === 'points') {
+      const handle = await window.VTExtra6[payMode === 'gifts' ? 'renderGiftCards' : 'renderPoints'](root, modeBar());
+      root.onclick = (e) => { if (!switchMode(e)) handle(e); };
       return;
     }
     if (payMode === 'coupons' || payMode === 'referrals') {

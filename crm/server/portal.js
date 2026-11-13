@@ -87,7 +87,7 @@ input{width:100%;font:inherit;color:inherit;background:var(--panel);border:1px s
 const when = (iso) => require('./booking').niceWhen(iso);
 const day = (iso) => (iso ? new Date(iso.length === 10 ? `${iso}T12:00:00` : iso.replace(' ', 'T') + (iso.length === 19 ? 'Z' : '')).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '');
 
-function home(c, token) {
+function home(c, token, notice) {
   const b = bizOf(c);
   const base = esc(token);
   const courses = (() => { try { return require('./courses').forContact(c.id); } catch { return []; } })();
@@ -101,12 +101,18 @@ function home(c, token) {
   const plans = (() => { try { return require('./plans').forContact(c.id); } catch { return []; } })();
   const contracts = (() => { try { return require('./contracts').forContact(c.id); } catch { return []; } })();
   const tickets = (() => { try { return require('./events').forContact(c.id); } catch { return []; } })();
+  const gifts = (() => { try { return require('./giftcards').forContact(c.id); } catch { return []; } })();
+  const pts = (() => { try { return require('./loyalty').status(c.id); } catch { return { on: false, points: 0 }; } })();
   const per = (e) => ({ week: 'a week', month: 'a month', year: 'a year' }[e] || 'a month');
   const sec = (title, items, emptyText) => `<h2>${title}</h2>${items.length ? items.join('') : `<div class="empty">${emptyText}</div>`}`;
   const body = `<h1>Hi ${esc(String(c.name).split(' ')[0])}</h1><div class="muted">Everything you have with ${esc(b.name || 'us')}, in one place.</div>
 ${due.length ? `<div class="note"><b>You have ${due.length} invoice${due.length > 1 ? 's' : ''} to pay</b> (${money(due.reduce((s, i) => s + i.total, 0))}).</div>` : ''}
 ${courses.length ? sec('Your courses', courses.map((k) => `<div class="card"><div class="row"><div><b>${esc(k.title)}</b><div class="muted small">${k.done} of ${k.lessons} lessons done</div></div>
 <a class="btn" href="${base}?course=${k.id}">${k.done ? 'Keep going' : 'Start'}</a></div><div class="prog"><i style="width:${k.lessons ? Math.round(k.done / k.lessons * 100) : 0}%"></i></div></div>`), '') : ''}
+${notice ? `<div class="${notice.ok ? 'note' : 'err'}">${esc(notice.text)}</div>` : ''}
+${pts.on || pts.points > 0 ? `<h2>Your points</h2><div class="card"><div class="row"><div><b style="font-size:1.5rem">${pts.points}</b> points<div class="muted small">${pts.on ? (pts.can ? `You can turn ${pts.need} points into a ${money(pts.value)} gift card.` : `${pts.toGo} more for a ${money(pts.value)} gift card. You earn points every time you pay.`) : 'Points are paused right now.'}</div></div>
+${pts.can ? `<form method="post" action="${base}/redeem"><button class="btn" type="submit">Get my ${money(pts.value)} gift card</button></form>` : ''}</div>${pts.on ? `<div class="prog"><i style="width:${Math.min(100, Math.round(pts.points / pts.need * 100))}%"></i></div>` : ''}</div>` : ''}
+${gifts.length ? sec('Your gift cards', gifts.map((g) => `<div class="card"><div class="row"><div><b>${money(g.balance)} left</b> <span class="pill ok">${esc(g.code)}</span><div class="muted small">Type this code when you pay an invoice or buy online.</div></div><a class="btn ghost" href="../gift/card/${esc(g.code)}">View</a></div></div>`), '') : ''}
 ${tickets.length ? sec('Your tickets', tickets.map((t) => `<div class="card"><div class="row"><div><b>${esc(t.title)}</b> <span class="pill ok">${esc(t.type_name)}</span>
 <div class="muted small">${esc(t.when)}${t.location ? ` · ${esc(t.location)}` : ''}</div></div><a class="btn" href="../e/ticket/${esc(t.code)}">Show ticket</a></div></div>`), '') : ''}
 ${plans.length ? sec('Your plans', plans.map((s) => `<div class="card"><div class="row"><div><b>${esc(s.name)} · ${money(s.amount)} ${per(s.every)}</b>
@@ -160,7 +166,16 @@ function publicRouter() {
       const html = require('./courses').coursePage(c, req.params.token, req.query.course, req.query.lesson, req.query.tab);
       return html ? page(res, html) : res.redirect(303, encodeURIComponent(req.params.token));
     }
-    page(res, home(c, req.params.token));
+    const notice = req.query.reward ? { ok: true, text: 'Done! Your gift card is below, and we emailed it to you too.' } : req.query.rerr ? { ok: false, text: String(req.query.rerr).slice(0, 200) } : null;
+    page(res, home(c, req.params.token, notice));
+  });
+  // Points turn into a gift card.
+  r.post('/:token/redeem', async (req, res) => {
+    const c = contactFor(req.params.token);
+    if (!c) return page(res, gone(), 404);
+    const back = `../${encodeURIComponent(req.params.token)}`;
+    try { await require('./loyalty').redeem(c.id); res.redirect(303, `${back}?reward=1`); }
+    catch (e) { res.redirect(303, `${back}?rerr=${encodeURIComponent(e.message)}`); }
   });
   r.post('/:token/done', (req, res) => {
     const c = contactFor(req.params.token);
