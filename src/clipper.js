@@ -15,6 +15,7 @@ const express = require('express');
 const multer = require('multer');
 const config = require('./config');
 const db = require('./db');
+const linkimport = require('./linkimport');
 
 const clipsDir = path.join(config.dataDir, 'clips');
 const modelDir = path.join(config.dataDir, 'models');
@@ -53,6 +54,12 @@ CREATE TABLE IF NOT EXISTS clips (
   error TEXT
 );
 `);
+
+// Added later: a small, light copy of each clip for watching in the app (fast on a phone or a
+// slow connection). The full-quality file is still used for saving and posting.
+if (!db.prepare('PRAGMA table_info(clips)').all().some((c) => c.name === 'preview')) {
+  db.exec('ALTER TABLE clips ADD COLUMN preview TEXT');
+}
 
 const LENGTHS = { short: [15, 35], medium: [30, 60], long: [55, 90] };
 const FRAMINGS = ['center', 'left', 'right', 'fit'];
@@ -312,28 +319,67 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 }
 
 // ---------- Making a clip ----------
+// fps=30 comes first, so a 60 fps phone video only has half the frames to crop and resize.
 function videoFilter({ width, height }, framing) {
   const W = 1080, H = 1920;
   if (framing === 'fit') {
-    return `[0:v]split=2[a][b];[a]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=28:3,eq=brightness=-0.08[bg];` +
-      `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease,setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,fps=30,format=yuv420p[v]`;
+    return `[0:v]fps=30,split=2[a][b];[a]scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bilinear,crop=${W}:${H},boxblur=28:3,eq=brightness=-0.08[bg];` +
+      `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease,setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[v]`;
   }
   const pos = { left: 0.15, center: 0.5, right: 0.85 }[framing] ?? 0.5;
   const cropW = `min(iw\\,ih*9/16)`;
   const cropH = `min(ih\\,iw*16/9)`;
-  return `[0:v]crop=${cropW}:${cropH}:(iw-${cropW})*${pos}:(ih-${cropH})/2,scale=${W}:${H},setsar=1,fps=30,format=yuv420p[v]`;
+  return `[0:v]fps=30,crop=${cropW}:${cropH}:(iw-${cropW})*${pos}:(ih-${cropH})/2,scale=${W}:${H},setsar=1,format=yuv420p[v]`;
 }
+
+// The full clip and its small preview are made in one go: the video is read once and the
+// picture is split in two at the end.
+const withPreview = (filter) => `${filter.replace(/\[v\]$/, '[vv]')};[vv]split=2[v][pv0];[pv0]scale=540:960:flags=bilinear[pv]`;
 
 const RENDER_THREADS = Math.max(1, Math.floor((os.cpus()?.length || 2) / 2));
 const escFilterPath = (p) => p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+
+// Macs have a built-in video chip (VideoToolbox) that makes MP4s several times faster than the
+// processor alone. If this Mac's ffmpeg can use it, it does; if it ever fails, the normal way is used.
+let hwEncoder = null;
+function hasHardwareEncoder() {
+  if (hwEncoder !== null) return Promise.resolve(hwEncoder);
+  if (process.env.CLIPS_HW === '1') return Promise.resolve((hwEncoder = true)); // tests: pretend it's there
+  if (process.platform !== 'darwin' || process.env.CLIPS_HW === '0') return Promise.resolve((hwEncoder = false));
+  return new Promise((resolve) => {
+    execFile(ffmpegPath(), ['-hide_banner', '-encoders'], { maxBuffer: 4 << 20 }, (err, stdout) => resolve((hwEncoder = !err && /h264_videotoolbox/.test(String(stdout)))));
+  });
+}
+
+// Size caps keep files small enough to play and save quickly, even over a phone connection,
+// while staying sharp for Reels, Shorts and TikTok (all re-compress uploads anyway).
+const fullVideo = (hw) => (hw
+  ? ['-c:v', 'h264_videotoolbox', '-b:v', '5M', '-maxrate', '6M', '-bufsize', '10M', '-profile:v', 'high', '-allow_sw', '1']
+  : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-maxrate', '6M', '-bufsize', '10M', '-profile:v', 'high', '-level', '4.1']);
+const smallVideo = (hw) => (hw
+  ? ['-c:v', 'h264_videotoolbox', '-b:v', '900k', '-maxrate', '1200k', '-bufsize', '2M', '-profile:v', 'main', '-allow_sw', '1']
+  : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-maxrate', '1200k', '-bufsize', '2M', '-profile:v', 'main']);
+
+function renderArgs({ source, start, len, filter, file, preview, hw }) {
+  return ['-hide_banner', '-y', '-ss', String(start), '-t', String(len.toFixed(2)), '-i', source,
+    '-filter_complex', withPreview(filter),
+    '-map', '[v]', '-map', '0:a?', ...fullVideo(hw), '-pix_fmt', 'yuv420p', '-g', '60',
+    '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', file,
+    '-map', '[pv]', '-map', '0:a?', ...smallVideo(hw), '-pix_fmt', 'yuv420p', '-g', '60',
+    '-c:a', 'aac', '-b:a', '64k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', preview,
+    // Use only half of the Mac's processor so everything else stays smooth while clips are made.
+    '-threads', String(RENDER_THREADS), '-filter_complex_threads', String(RENDER_THREADS)];
+}
 
 async function renderClip(job, clip, transcript) {
   const dir = path.join(clipsDir, String(job.id));
   const tag = crypto.randomBytes(3).toString('hex');
   const file = `clip-${clip.n}-${tag}.mp4`;
+  const preview = `clip-${clip.n}-${tag}-small.mp4`;
   const poster = `clip-${clip.n}-${tag}.jpg`;
   const len = clip.end - clip.start;
-  let filter = videoFilter(job, clip.framing);
+  const plain = videoFilter(job, clip.framing);
+  let filter = plain;
   let assFile = null;
   if (clip.captions !== 'none' && transcript.segments.length) {
     const words = captionWords(transcript.segments, clip.start, clip.end, clip.text_edited ? clip.text : null);
@@ -343,24 +389,48 @@ async function renderClip(job, clip, transcript) {
       filter = filter.replace(/\[v\]$/, `[pre];[pre]ass=filename='${assFile}':fontsdir='${escFilterPath(fontsDir)}'[v]`);
     }
   }
-  const args = ['-hide_banner', '-y', '-ss', String(clip.start), '-t', String(len.toFixed(2)), '-i', job.source_file,
-    '-filter_complex', filter, '-map', '[v]', '-map', '0:a?',
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-profile:v', 'high', '-level', '4.1',
-    '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart',
-    // Use only half of the Mac's processor so everything else stays smooth while clips are made.
-    '-threads', String(RENDER_THREADS), '-filter_complex_threads', String(RENDER_THREADS), file];
+  const hw = await hasHardwareEncoder();
+  const make = (f, useHw) => run(ffmpegPath(), renderArgs({ source: job.source_file, start: clip.start, len, filter: f, file, preview, hw: useHw }), { cwd: dir });
+  // Try the fast way first; if anything goes wrong, the slower ways that always work.
+  const tries = [[filter, hw], ...(hw ? [[filter, false]] : []), ...(assFile ? [[plain, false]] : [])];
   try {
-    await run(ffmpegPath(), args, { cwd: dir });
-  } catch (err) {
-    if (!assFile) throw err;
-    // If captions can't be drawn on this computer, still make the clip without them.
-    await run(ffmpegPath(), args.map((a) => (a === filter ? videoFilter(job, clip.framing) : a)), { cwd: dir });
-    clip.captionNote = 'Captions could not be added on this computer.';
+    for (let i = 0; i < tries.length; i++) {
+      try {
+        await make(...tries[i]);
+        if (tries[i][0] === plain && assFile) clip.captionNote = 'Captions could not be added on this computer.';
+        if (hw && !tries[i][1]) hwEncoder = false; // the video chip didn't work here: don't try it again
+        break;
+      } catch (err) {
+        if (i === tries.length - 1) throw err;
+      }
+    }
   } finally {
     if (assFile) fs.rmSync(path.join(dir, assFile), { force: true });
   }
   await run(ffmpegPath(), ['-hide_banner', '-y', '-ss', String(Math.min(1, len / 3)), '-i', file, '-frames:v', '1', '-vf', 'scale=360:-2', '-q:v', '4', poster], { cwd: dir }).catch(() => {});
-  return { file, poster: fs.existsSync(path.join(dir, poster)) ? poster : null };
+  return {
+    file,
+    preview: fs.existsSync(path.join(dir, preview)) ? preview : null,
+    poster: fs.existsSync(path.join(dir, poster)) ? poster : null,
+  };
+}
+
+// Clips made before previews existed get a small copy made from the finished clip.
+async function makeMissingPreviews() {
+  const rows = db.prepare(`SELECT * FROM clips WHERE status='ready' AND file IS NOT NULL AND preview IS NULL ORDER BY id DESC LIMIT 50`).all();
+  for (const c of rows) {
+    const dir = path.join(clipsDir, String(c.job_id));
+    if (!fs.existsSync(path.join(dir, c.file))) continue;
+    const preview = c.file.replace(/\.mp4$/, '-small.mp4');
+    try {
+      await run(ffmpegPath(), ['-hide_banner', '-y', '-i', c.file, '-vf', 'scale=540:960:flags=bilinear', ...smallVideo(false), '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '64k', '-movflags', '+faststart', '-threads', String(RENDER_THREADS), preview], { cwd: dir });
+      db.prepare('UPDATE clips SET preview=? WHERE id=? AND file=?').run(preview, c.id, c.file);
+    } catch (err) {
+      console.error(`[clips] preview for clip ${c.id}: ${err.message}`);
+      db.prepare(`UPDATE clips SET preview='' WHERE id=?`).run(c.id); // don't keep trying
+    }
+  }
 }
 
 // ---------- The work queue ----------
@@ -375,6 +445,13 @@ async function processJob(job) {
   const settings = JSON.parse(job.settings || '{}');
   const step = (text, progress) => setJob(job.id, progress == null ? { step: text } : { step: text, progress });
   let transcript = job.transcript ? JSON.parse(job.transcript) : null;
+  if (!transcript && settings.link && !fs.existsSync(job.source_file)) {
+    // A video from a link: get it first (official ways only, see linkimport.js).
+    step('Getting the video from your account…', 1);
+    const found = await linkimport.findVideo(settings.link);
+    if (found.kind === 'none') throw new Error(found.why);
+    await linkimport.saveVideo(found, job.source_file, (f) => step(`Getting the video from ${found.from || 'your account'}… ${Math.round(f * 100)}%`, 1));
+  }
   if (!transcript) {
     step('Checking the video…', 2);
     const info = await probe(job.source_file);
@@ -416,11 +493,11 @@ async function renderPending(jobId) {
     setJob(jobId, { step: `Making clip ${done + 1} of ${total}…` });
     db.prepare(`UPDATE clips SET status='rendering', error=NULL WHERE id=?`).run(clip.id);
     try {
-      const old = [clip.file, clip.poster].filter(Boolean);
+      const old = [clip.file, clip.poster, clip.preview].filter(Boolean);
       const out = await renderClip(job, clip, transcript);
       const still = db.prepare('SELECT id FROM clips WHERE id=?').get(clip.id);
       if (!still) continue;
-      db.prepare(`UPDATE clips SET status='ready', file=?, poster=?, error=? WHERE id=? AND status='rendering'`).run(out.file, out.poster, clip.captionNote || null, clip.id);
+      db.prepare(`UPDATE clips SET status='ready', file=?, poster=?, preview=?, error=? WHERE id=? AND status='rendering'`).run(out.file, out.poster, out.preview, clip.captionNote || null, clip.id);
       if (db.prepare('SELECT status FROM clips WHERE id=?').get(clip.id).status === 'ready') {
         old.forEach((f) => fs.rmSync(path.join(clipsDir, String(jobId), f), { force: true }));
       }
@@ -438,7 +515,7 @@ async function work() {
     for (;;) {
       const job = db.prepare(`SELECT * FROM clip_jobs WHERE status IN ('queued','working') ORDER BY id LIMIT 1`).get()
         || db.prepare(`SELECT j.* FROM clip_jobs j WHERE j.status='ready' AND EXISTS (SELECT 1 FROM clips c WHERE c.job_id=j.id AND c.status IN ('pending','rendering')) ORDER BY j.id LIMIT 1`).get();
-      if (!job) break;
+      if (!job) { await makeMissingPreviews().catch((e) => console.error('[clips] previews', e.message)); break; }
       try {
         if (job.status !== 'ready') {
           setJob(job.id, { status: 'working', error: null });
@@ -474,6 +551,7 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, /^video\//.test(file.mimetype) || /\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(file.originalname)),
 });
 
+const fileSize = (f) => { try { return fs.statSync(f).size; } catch { return null; } };
 function clipOut(c) {
   const base = `/clipfile/${c.job_id}/`;
   return {
@@ -481,6 +559,8 @@ function clipOut(c) {
     score: c.score, reason: c.reason, title: c.title, caption: firstSentence(c.text, 300) || c.title, text: c.text, text_edited: Boolean(c.text_edited),
     framing: c.framing, captions: c.captions, status: c.status, error: c.error,
     url: c.file ? base + c.file : null, poster_url: c.poster ? base + c.poster : null,
+    preview_url: c.preview ? base + c.preview : (c.file ? base + c.file : null),
+    size: c.file ? fileSize(path.join(clipsDir, String(c.job_id), c.file)) : null,
   };
 }
 
@@ -498,12 +578,7 @@ router.get('/', (req, res) => {
 
 router.post('/', upload.single('video'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Pick a video file first (MP4, MOV, M4V, WebM or MKV).' });
-  const settings = {
-    length: LENGTHS[req.body.length] ? req.body.length : 'medium',
-    framing: FRAMINGS.includes(req.body.framing) ? req.body.framing : 'center',
-    captions: CAPTIONS.includes(req.body.captions) ? req.body.captions : 'bold',
-    count: Math.max(1, Math.min(20, Number(req.body.count) || 8)),
-  };
+  const settings = readSettings(req.body);
   const name = String(req.body.name || path.parse(req.file.originalname).name || 'Video').trim().slice(0, 120);
   const { lastInsertRowid: id } = db.prepare('INSERT INTO clip_jobs (name, source_file, settings) VALUES (?,?,?)').run(name, '', JSON.stringify(settings));
   const dir = path.join(clipsDir, String(id));
@@ -512,6 +587,35 @@ router.post('/', upload.single('video'), async (req, res) => {
   db.prepare('UPDATE clip_jobs SET source_file=? WHERE id=?').run(path.join(dir, req.file.filename), id);
   work();
   res.status(201).json(jobOut(getJob(id)));
+});
+
+const readSettings = (b = {}) => ({
+  length: LENGTHS[b.length] ? b.length : 'medium',
+  framing: FRAMINGS.includes(b.framing) ? b.framing : 'center',
+  captions: CAPTIONS.includes(b.captions) ? b.captions : 'bold',
+  count: Math.max(1, Math.min(20, Number(b.count) || 8)),
+});
+
+// A video from a link to your own post (see linkimport.js for which links work and why).
+router.post('/link', async (req, res) => {
+  const link = String(req.body?.url || '').trim().slice(0, 2000);
+  if (!link) return res.status(400).json({ error: 'Paste a link first.' });
+  let found;
+  try { found = await linkimport.findVideo(link); } catch (err) { return res.status(502).json({ error: `Couldn't check that link right now (${err.message}). Try again in a minute.` }); }
+  if (found.kind === 'none') return res.status(422).json({ error: found.why, platform: found.platform });
+  const settings = { ...readSettings(req.body), link };
+  const name = String(req.body?.name || found.name || `${{ youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook' }[found.platform] || 'Linked'} video`).trim().slice(0, 120);
+  const { lastInsertRowid: id } = db.prepare('INSERT INTO clip_jobs (name, source_file, settings) VALUES (?,?,?)').run(name, '', JSON.stringify(settings));
+  const dir = path.join(clipsDir, String(id));
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const source = path.join(dir, `source${path.extname(found.file || '').toLowerCase() || '.mp4'}`);
+  db.prepare('UPDATE clip_jobs SET source_file=? WHERE id=?').run(source, id);
+  if (found.kind === 'local') {
+    try { await linkimport.saveVideo(found, source); } catch { /* the worker tries again */ }
+  }
+  work();
+  res.status(201).json({ ...jobOut(getJob(id)), how: found.kind === 'local' ? 'local' : 'api', from: found.from || null });
 });
 
 router.get('/clip/:id', (req, res) => {
@@ -564,7 +668,7 @@ router.delete('/clip/:id', (req, res) => {
   const c = db.prepare('SELECT * FROM clips WHERE id=?').get(req.params.id);
   if (!c) return res.status(404).json({ error: 'Clip not found.' });
   db.prepare('DELETE FROM clips WHERE id=?').run(c.id);
-  [c.file, c.poster].filter(Boolean).forEach((f) => fs.rmSync(path.join(clipsDir, String(c.job_id), f), { force: true }));
+  [c.file, c.poster, c.preview].filter(Boolean).forEach((f) => fs.rmSync(path.join(clipsDir, String(c.job_id), f), { force: true }));
   res.json({ ok: true });
 });
 
@@ -580,11 +684,12 @@ router.post('/:id/retry', (req, res) => {
 // Finished clip files and their preview pictures (signed-in users only).
 function serveFile(req, res) {
   const { job, file } = req.params;
-  if (!/^\d+$/.test(job) || !/^clip-\d+-[0-9a-f]+\.(mp4|jpg)$/.test(file)) return res.status(404).end();
+  if (!/^\d+$/.test(job) || !/^clip-\d+-[0-9a-f]+(-small)?\.(mp4|jpg)$/.test(file)) return res.status(404).end();
   const full = path.join(clipsDir, job, file);
   if (!fs.existsSync(full)) return res.status(404).end();
   if (req.query.download) res.attachment(file);
-  res.sendFile(full, { maxAge: '7d' });
+  // Every new version of a clip gets a new file name, so the browser may keep each file.
+  res.sendFile(full, { maxAge: '30d', immutable: true });
 }
 
 // For the composer: copies a finished clip into the post media folder (so deleting the post

@@ -124,12 +124,24 @@ $('#clip-jobs').addEventListener('mouseover', (e) => {
   const c = findClip(Number(thumb.dataset.clipView));
   if (!c?.url) return;
   const v = document.createElement('video');
-  Object.assign(v, { src: c.url, muted: true, loop: true, playsInline: true, preload: 'auto' });
+  Object.assign(v, { src: c.preview_url || c.url, muted: true, loop: true, playsInline: true, preload: 'auto' });
   v.addEventListener('playing', () => v.classList.add('on'), { once: true });
   thumb.appendChild(v);
   v.play().catch(() => {});
   thumb.addEventListener('mouseleave', () => { v.pause(); v.removeAttribute('src'); v.load(); v.remove(); }, { once: true });
 });
+
+const fmtSize = (b) => (b >= 1e6 ? `${(b / 1e6).toFixed(b >= 1e7 ? 0 : 1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`);
+
+// If a clip can't start playing, say why instead of spinning forever.
+function watchPlayback(video, note) {
+  if (!video || !note) return;
+  const say = (t) => { note.textContent = t; note.hidden = !t; };
+  const slow = setTimeout(() => { if (video.readyState < 3) say('Still loading. The connection to your Mac is slow right now. On the Mac itself, clips open right away.'); }, 8000);
+  video.addEventListener('playing', () => { clearTimeout(slow); say(''); });
+  video.addEventListener('canplay', () => { clearTimeout(slow); say(''); });
+  video.addEventListener('error', () => { clearTimeout(slow); say("This clip couldn't play here. Try Save to download it, or open Viral Clips on your Mac."); });
+}
 
 function findClip(id) {
   for (const j of clipState.jobs) { const c = j.clips.find((x) => x.id === id); if (c) return c; }
@@ -143,7 +155,8 @@ function openClipViewer(id) {
   const dlg = $('#clip-dialog');
   dlg.className = 'clip-viewer';
   dlg.innerHTML = `<div class="cv-grid">
-      <video src="${c.url}" poster="${c.poster_url || ''}" controls autoplay playsinline></video>
+      <div class="cv-video"><video src="${c.preview_url || c.url}" poster="${c.poster_url || ''}" controls autoplay playsinline preload="auto"></video>
+        <p class="cv-slow" hidden></p></div>
       <div class="cv-side">
         <button type="button" class="iconbtn cv-close" data-close aria-label="Close">✕</button>
         <span class="clip-score${c.score >= 90 ? ' hot' : ''} static">${CI.flame}${c.score}</span>
@@ -154,13 +167,15 @@ function openClipViewer(id) {
         <div class="cv-actions">
           <a class="btn primary" href="#compose?clip=${c.id}" data-close>Schedule this clip</a>
           <button type="button" class="btn ghost" data-edit>${CI.edit}Edit</button>
-          <a class="btn ghost" href="${c.url}?download=1" download>${CI.save}Save</a>
+          <a class="btn ghost" href="${c.url}?download=1" download>${CI.save}Save${c.size ? ` (${fmtSize(c.size)})` : ''}</a>
         </div>
+        <p class="muted small">You're watching a light copy so it starts fast. Save and Schedule use the full-quality clip.</p>
       </div>
     </div>`;
   dlg.onclick = (e) => { if (e.target === dlg) dlg.close(); }; // tap outside to close
   dlg.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => dlg.close()));
   dlg.querySelector('[data-edit]').onclick = () => { dlg.close(); openClipEditor(id); };
+  watchPlayback(dlg.querySelector('video'), dlg.querySelector('.cv-slow'));
   dlg.showModal();
 }
 
@@ -261,7 +276,7 @@ function openClipEditor(id) {
   dlg.onclick = null;
   dlg.innerHTML = `<form method="dialog" class="clip-edit">
     <h2>Edit clip</h2>
-    ${c.url ? `<video src="${c.url}" poster="${c.poster_url || ''}" controls playsinline></video>` : ''}
+    ${c.url ? `<video src="${c.preview_url || c.url}" poster="${c.poster_url || ''}" controls playsinline preload="metadata"></video>` : ''}
     <div class="clip-times">
       <label class="field"><span>Starts at <small id="ce-start-f">${fmtSec(c.start)}</small></span>
         <div class="nudge"><button type="button" data-nudge="start" data-by="-1">−1s</button><input type="number" name="start" step="0.1" min="0" value="${c.start}"><button type="button" data-nudge="start" data-by="1">+1s</button></div></label>
@@ -311,8 +326,8 @@ function openClipEditor(id) {
 $('#clip-dialog').addEventListener('close', () => { const d = $('#clip-dialog'); if (!d.open) d.innerHTML = ''; }); // stops a playing preview
 
 // ---------- "Paste a link" helper ----------
-// Viral Post never downloads from YouTube, TikTok, Instagram or Facebook (their rules don't allow
-// it). For your own videos, this shows the official way to get the file from each one.
+// YouTube and TikTok don't let apps download videos, so for those (and for posts that aren't on
+// a connected account) this shows the official way to get the file from each one.
 function youtubeId(url) {
   const m = url.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/|studio\.youtube\.com\/video\/)([\w-]{11})/i);
   return m ? m[1] : null;
@@ -349,4 +364,37 @@ function linkSteps(raw) {
   }
   return '<p>Use the original video file from your phone, camera or computer, then click <b>Choose a long video</b> above.</p>';
 }
-$('#clip-link-input').addEventListener('input', (e) => { $('#clip-link-steps').innerHTML = linkSteps(e.target.value); });
+// "Get video": brings the video in through the official ways (see src/linkimport.js). If there
+// is none for this link, the official steps to get the file are shown instead.
+async function getLinkedVideo() {
+  const input = $('#clip-link-input');
+  const out = $('#clip-link-steps');
+  const btn = $('#clip-link-go');
+  const url = input.value.trim();
+  if (!url) { out.innerHTML = '<p>Paste a link first.</p>'; return; }
+  btn.disabled = true;
+  out.innerHTML = '<p class="muted">Checking the link…</p>';
+  try {
+    const res = await fetch('/api/clips/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, length: clipChoice.length, captions: clipChoice.captions, framing: clipForm.framing.value, count: clipForm.count.value }),
+    });
+    if (res.status === 401) { location.href = '/login.html'; return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const steps = res.status === 422 && ['youtube', 'tiktok', 'instagram', 'facebook'].includes(data.platform) && !/connect your/i.test(data.error || '') ? linkSteps(url) : '';
+      out.innerHTML = `<p class="why">${esc(data.error || `That didn't work (${res.status}).`)}</p>${steps}`;
+      return;
+    }
+    input.value = '';
+    out.innerHTML = `<p class="why">Got it! ${data.how === 'local' ? 'This video was posted by Viral Post, so the original file was already on your Mac.' : `Bringing it in from ${esc(data.from || 'your account')}.`} Your clips will show up below.</p>`;
+    await loadClipJobs();
+    renderClips();
+  } catch {
+    out.innerHTML = '<p class="why">Could not reach your Mac. Check the connection and try again.</p>';
+  } finally { btn.disabled = false; }
+}
+$('#clip-link-go').onclick = getLinkedVideo;
+$('#clip-link-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); getLinkedVideo(); } });
+$('#clip-link-input').addEventListener('input', () => { $('#clip-link-steps').innerHTML = ''; });
