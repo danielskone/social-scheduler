@@ -43,6 +43,8 @@ function open(dir) {
   );
   CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
   `);
+  // Team logins: a teammate signs in with their own email and opens the owner's app copy.
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='team_of'").get()) db.exec('ALTER TABLE users ADD COLUMN team_of INTEGER REFERENCES users(id) ON DELETE CASCADE');
   return db;
 }
 
@@ -153,6 +155,19 @@ function createStore(dir, { trialDays = 14, adminEmail = '' } = {}) {
       const user = q.byId.get(info.lastInsertRowid);
       return { user, token: store.createReset(user.id, 14 * 864e5) };
     },
+    // ---- team logins: the account owner adds helpers who use the same app copy ----
+    teamOf: (ownerId) => db.prepare('SELECT * FROM users WHERE team_of = ? ORDER BY id').all(ownerId),
+    inviteTeammate(ownerId, { email, name }) {
+      email = String(email || '').trim();
+      if (!EMAIL_RE.test(email) || email.length > 200) throw new Error('Please enter a real email address.');
+      if (q.byEmail.get(email)) throw new Error('That email already has a login. Use a different email for them.');
+      if (store.teamOf(ownerId).length >= 10) throw new Error('A team can have up to 10 people.');
+      const info = db.prepare(`INSERT INTO users (email, name, password_hash, role, status, team_of)
+        VALUES (?, ?, ?, 'customer', 'free', ?)`).run(email, String(name || '').trim().slice(0, 100), hashPassword(token()), ownerId);
+      const user = q.byId.get(info.lastInsertRowid);
+      return { user, token: store.createReset(user.id, 14 * 864e5) };
+    },
+    removeTeammate(ownerId, id) { db.prepare('DELETE FROM users WHERE id = ? AND team_of = ?').run(id, ownerId); },
     acceptTerms: (userId) => db.prepare("UPDATE users SET accepted_terms_at = datetime('now') WHERE id = ? AND accepted_terms_at IS NULL").run(userId),
     useReset(t, password) {
       const r = db.prepare('SELECT * FROM password_resets WHERE token_hash = ? AND used = 0').get(sha(t || ''));

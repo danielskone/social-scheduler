@@ -143,7 +143,21 @@ const STATUS = {
 const statusPill = (s) => { const [t, c] = STATUS[s] || [s, '']; return `<span class="pill ${c}">${esc(t)}</span>`; };
 const day = (iso) => (iso ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '');
 
-function account({ user, access, billingEnabled, priceLabel, settings, error = '', ok = '', isAdmin }) {
+function account({ user, access, billingEnabled, priceLabel, settings, error = '', ok = '', isAdmin, teammate, owner, team = [], teamInvite = null }) {
+  if (teammate) {
+    return layout('Your account', `
+<div class="top"><h1>Your account</h1><div>${access.ok ? '<a class="btn primary" href="/">Open Viral Post</a> ' : ''}<a class="btn" href="/logout">Sign out</a></div></div>
+${msg(error, ok)}
+<div class="card"><h2>Team</h2><p>You're on <b>${esc((owner && (owner.name || owner.email)) || 'a')}</b>'s team. You use their apps and their plan.</p>
+${access.ok ? '' : '<p class="err">Their plan needs attention. Ask them to open their Account page.</p>'}</div>
+<form class="card" method="post" action="/account/password">
+  <h2>Change password</h2>
+  <label for="current">Current password</label><input id="current" type="password" name="current" autocomplete="current-password" required>
+  <label for="password">New password</label><input id="password" type="password" name="password" autocomplete="new-password" minlength="8" required>
+  <button class="btn full" type="submit">Change password</button>
+</form>
+<p class="muted small">Signed in as ${esc(user.email)} · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>`);
+  }
   const trialLeft = user.trial_ends_at ? Math.ceil((Date.parse(user.trial_ends_at) - Date.now()) / 864e5) : 0;
   let plan = '';
   if (user.status === 'trialing') plan = trialLeft > 0 ? `<p>Your free trial has <b>${trialLeft} day${trialLeft === 1 ? '' : 's'}</b> left (until ${day(user.trial_ends_at)}).</p>` : '<p class="err">Your free trial has ended. Subscribe to keep posting.</p>';
@@ -182,6 +196,18 @@ ${msg(error, ok)}
   ${field('BOOKING_TIMEZONE', 'Your time zone', 'text', 'America/New_York')}
   <button class="btn primary full" type="submit">Save email settings</button>
 </form>
+<div class="card"><h2>Your team</h2>
+  <p class="muted small">Add the people who help you. Each one gets their own login and uses your apps, contacts and plan. They can't see this page's billing or email settings. Up to 10 people.</p>
+  ${teamInvite ? `<p class="ok">${esc(teamInvite.user.email)} was added. ${teamInvite.emailed ? 'An invite email is on its way. You can also send them this link:' : 'Send them this link to pick their password (works for 14 days):'}</p>
+  <textarea readonly rows="3" style="width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text)" onclick="this.select()">${esc(teamInvite.link)}</textarea>` : ''}
+  ${team.length ? `<table style="width:100%;margin:8px 0">${team.map((t) => `<tr><td><b>${esc(t.name || '-')}</b><br><span class="muted small">${esc(t.email)} · ${t.last_login_at ? `last in ${day(t.last_login_at)}` : 'not signed in yet'}</span></td>
+    <td style="text-align:right"><form method="post" action="/account/team/${t.id}/remove" onsubmit="return confirm('Remove ${esc(t.email)} from your team?')"><button class="btn" type="submit">Remove</button></form></td></tr>`).join('')}</table>` : '<p class="muted">Nobody yet.</p>'}
+  <form method="post" action="/account/team">
+    <label for="tm-name">Their name</label><input id="tm-name" type="text" name="name" maxlength="100">
+    <label for="tm-email">Their email</label><input id="tm-email" type="email" name="email" maxlength="200" required>
+    <button class="btn primary full" type="submit">Add to my team</button>
+  </form>
+</div>
 <form class="card" method="post" action="/account/password">
   <h2>Change password</h2>
   <label for="current">Current password</label><input id="current" type="password" name="current" autocomplete="current-password" required>

@@ -237,8 +237,10 @@
         <div class="set-info"><b>${h(b.name)}</b><span class="muted small">${b.contacts} ${b.contacts === 1 ? 'person' : 'people'} · groups: ${h((b.allGroups || []).join(', ') || 'none yet')}</span>
           <span class="muted small">${[b.phone, b.email, b.website].filter(Boolean).map(h).join(' · ') || 'No phone, email or website yet'}</span></div>
         <button class="btn ghost" data-edit>Edit</button></div>`).join('')}</div>
+      <div id="set-more"></div>
       <h2 style="margin-top:26px">Connections</h2>
       <p class="muted">Phone alerts, your email, Google Calendar and website forms are all on the <a href="#contacts/launchpad">Launchpad</a>, with a button for each one.</p>`;
+    window.VTMore.settingsSections(meta, () => renderSettings(meta)).catch((e) => say(e.message, true));
     root.onclick = (e) => {
       if (e.target.closest('[data-new]')) return editBusiness(null, allGroups);
       const row = e.target.closest('.set-biz');
@@ -259,6 +261,7 @@
         <label class="field"><span>Email</span><input name="email" type="email" value="${h(b ? b.email || '' : '')}"></label></div>
       <label class="field"><span>Website</span><input name="website" value="${h(b ? b.website || '' : '')}" placeholder="https://" style="width:100%"></label>
       <label class="field"><span>Address</span><input name="address" value="${h(b ? b.address || '' : '')}" style="width:100%"></label>
+      <label class="field"><span>Review link <small class="muted">(where customers leave a review, for example your Google review link)</small></span><input name="review_url" value="${h(b ? b.review_url || '' : '')}" placeholder="https://g.page/r/..." style="width:100%"></label>
       <div class="field"><span>Which groups of people belong to this business?</span>
         <p class="muted small" style="margin:0 0 6px">People, forms and booking pages in these groups show up under this business. A group can only belong to one business.</p>
         <div class="biz-groups">${allGroups.map((g) => `<label class="bg-row"><input type="checkbox" name="groups" value="${h(g)}"${mine.includes(g) ? ' checked' : ''}><span>${h(g)}${owner(g) && !mine.includes(g) ? `<small class="muted">Now in ${h(owner(g).name)}</small>` : ''}</span></label>`).join('')}</div>
@@ -279,7 +282,7 @@
       const groups = f.getAll('groups');
       const extra = String(f.get('newgroup') || '').trim();
       if (extra) groups.push(extra);
-      const body = { name: f.get('name'), color: f.get('color'), phone: f.get('phone'), email: f.get('email'), website: f.get('website'), address: f.get('address'), groups };
+      const body = { name: f.get('name'), color: f.get('color'), phone: f.get('phone'), email: f.get('email'), website: f.get('website'), address: f.get('address'), review_url: f.get('review_url'), groups };
       try {
         const saved = await call(b ? `/businesses/${b.id}` : '/businesses', { method: b ? 'PUT' : 'POST', json: body, noBiz: true });
         dlg.close();
@@ -292,6 +295,6 @@
 
   window.VTHome = {
     init(fn) { onSwitch = fn; return loadBusinesses(); },
-    current, loadBusinesses, renderLaunchpad, renderDashboard, renderSettings,
+    current, loadBusinesses, renderLaunchpad, renderDashboard, renderSettings, list: () => list,
   };
 })();

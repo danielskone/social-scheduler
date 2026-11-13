@@ -26,6 +26,7 @@ const GROUPS = config.ownerStarters
   : ['Lead', 'Customer', 'Partner', 'Vendor', 'Other'];
 // Pipeline steps live in pipelines.js; each business can name its own.
 const pipes = () => require('./pipelines');
+const fieldsMod = () => require('./fields'); // custom fields (contacts.custom)
 const FIELDS = ['name', 'company', 'email', 'phone', 'website', 'address', 'group_name', 'stage', 'amount',
   'next_follow_up', 'email_ok', 'email_ok_source', 'do_not_contact', 'notes', 'pipeline_id'];
 
@@ -100,6 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_activities_contact ON contact_activities(contact_
 CREATE INDEX IF NOT EXISTS idx_tasks_contact ON crm_tasks(contact_id);
 CREATE INDEX IF NOT EXISTS idx_form_entries_form ON crm_form_entries(form_id);
 `);
+fieldsMod(); // adds contacts.custom before anything is saved
 // Tasks can carry a message template (automations use this), ready to open with one tap.
 if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_tasks') WHERE name='template_id'").get()) {
   db.exec('ALTER TABLE crm_tasks ADD COLUMN template_id INTEGER REFERENCES crm_templates(id) ON DELETE SET NULL');
@@ -153,10 +155,11 @@ function clean(body, existing = {}) {
   // Remember when consent was given; clear it when it's taken away.
   c.email_ok_at = c.email_ok ? (existing.email_ok ? existing.email_ok_at : new Date().toISOString()) : null;
   if (!c.email_ok) c.email_ok_source = null;
+  c.custom = fieldsMod().cleanValues(body.custom, existing.custom);
   return c;
 }
 
-const cols = [...FIELDS, 'email_ok_at'];
+const cols = [...FIELDS, 'email_ok_at', 'custom'];
 
 // opts.source: 'manual', 'form', 'booking' or 'import'. Imports don't start automations,
 // so loading an old spreadsheet can't create hundreds of tasks at once.
@@ -186,6 +189,7 @@ function getContact(id) {
   const c = db.prepare('SELECT * FROM contacts WHERE id=?').get(id);
   if (!c) return null;
   c.pipeline = pipes().ofContact(c).id;
+  c.custom = fieldsMod().readCustom(c.custom);
   c.activities = db.prepare('SELECT * FROM contact_activities WHERE contact_id=? ORDER BY happened_on DESC, id DESC').all(id);
   c.tasks = db.prepare('SELECT t.*, (SELECT name FROM crm_templates WHERE id=t.template_id) AS template_name FROM crm_tasks t WHERE contact_id=? ORDER BY (done_at IS NOT NULL), (due_on IS NULL), due_on, id').all(id);
   return c;
@@ -371,7 +375,8 @@ function saveTask(body, id) {
 // Messages app, one person at a time, so nothing is ever bulk-sent from your accounts.
 function fillTemplate(text, c) {
   const first = String(c.name || '').split(/\s+/)[0] || 'there';
-  return String(text || '').replace(/\{(first_name|name|company)\}/g, (_, k) => (k === 'first_name' ? first : k === 'company' ? c.company || c.name || 'your business' : c.name || ''));
+  const out = String(text || '').replace(/\{(first_name|name|company)\}/g, (_, k) => (k === 'first_name' ? first : k === 'company' ? c.company || c.name || 'your business' : c.name || ''));
+  return c.custom ? fieldsMod().fill(out, c) : out;
 }
 function saveTemplate(body, id) {
   const t = { name: String(body.name || '').trim(), channel: body.channel === 'text' ? 'text' : 'email', subject: String(body.subject || '').trim() || null, body: String(body.body || '').trim() };
@@ -525,7 +530,7 @@ router.get('/meta', (req, res) => {
   // With a business picked, only its groups are offered.
   const groups = b && b !== 'all' ? (biz().groupsOf(b, GROUPS) || every) : every;
   const pipelines = pipes().forBiz(b);
-  res.json({ groups, stages: [...new Set(pipelines.flatMap(pipes().stageNames))], pipelines, summary: summary(b) });
+  res.json({ groups, stages: [...new Set(pipelines.flatMap(pipes().stageNames))], pipelines, fields: fieldsMod().forBiz(b), summary: summary(b) });
 });
 router.get('/contacts', wrap((req, res) => res.json(listContacts(req.query))));
 router.post('/contacts', wrap((req, res) => { biz().claim(req.query.biz, (req.body || {}).group_name); res.json(createContact(req.body || {})); }));

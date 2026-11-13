@@ -242,3 +242,26 @@ test('Stripe checkout sends people to Stripe\'s own page', async () => {
   assert.strictEqual(seen.body.get('client_reference_id'), '7');
   assert.strictEqual(seen.body.get('success_url'), 'https://app.example/account?paid=1');
 });
+
+test('team logins: an owner adds a teammate, who opens the same app copy and can\'t change billing', { timeout: 60000 }, async () => {
+  const carol = browser();
+  await signup(carol, 'carol@example.com');
+  await carol('/api/crm/contacts', { method: 'POST', json: { name: 'Carol Customer', email: 'cc@carol.test' } });
+  const made = await carol('/account/team', { method: 'POST', form: { name: 'Dan Helper', email: 'dan@example.com' } });
+  const link = made.text.match(/\/invite\?token=([\w-]+)/);
+  assert.ok(link, made.text.slice(0, 400));
+  const dan = browser();
+  const done = await dan('/invite', { method: 'POST', form: { token: link[1], password: 'dan-pass-123', terms: '1' } });
+  assert.strictEqual(done.location, '/');
+  // Same contacts as Carol (her app copy), not a new empty one.
+  assert.ok((await dan('/api/crm/contacts')).data.some((c) => c.name === 'Carol Customer'));
+  const acct = await dan('/account');
+  assert.match(acct.text, /team/);
+  assert.doesNotMatch(acct.text, /Email sending|Subscribe/);
+  assert.strictEqual((await dan('/account/email', { method: 'POST', form: { EMAIL_FROM: 'x@y.com' } })).location, '/account');
+  // No copy of their own was made, and removing them signs them out of Carol's app.
+  const danUser = g.store.getUserByEmail('dan@example.com');
+  assert.ok(!fs.existsSync(path.join(dir, 'tenants', String(danUser.id))));
+  await carol(`/account/team/${danUser.id}/remove`, { method: 'POST' });
+  assert.strictEqual((await dan('/api/crm/contacts', { headers: { Accept: 'application/json' } })).status, 401);
+});

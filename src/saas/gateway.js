@@ -97,10 +97,10 @@ function createGateway(opts = {}) {
   app.get('/privacy', (req, res) => res.sendFile(path.join(docs, 'privacy.html')));
   app.use('/icons', express.static(path.join(__dirname, '..', '..', 'public', 'icons'), { maxAge: '7d' }));
 
-  // ---- Public links of each customer: pictures for Instagram, sign-up forms, booking pages ----
+  // ---- Public links of each customer: pictures for Instagram, sign-up forms, booking pages, invoices, review links ----
   app.use('/w/:id', (req, res, next) => {
     const id = Number(req.params.id);
-    const m = req.url.match(/^\/(media|f|book)(\/.*)?$/);
+    const m = req.url.match(/^\/(media|f|book|invoice|r)(\/.*)?$/);
     const owner = id && store.getUser(id);
     if (!m || !owner || !access(owner).ok) return res.status(404).send('Not found');
     tenants.proxy(id, req, res, { pathOverride: req.url, publicIp: req.ip }).catch(next);
@@ -176,7 +176,8 @@ function createGateway(opts = {}) {
       store.acceptTerms(user.id);
       if (req.body.name && !user.name) store.update(user.id, { name: String(req.body.name).trim().slice(0, 100) });
       setSession(res, store.createSession(user.id));
-      if (access(store.getUser(user.id)).ok) tenants.start(user.id).catch(() => {});
+      const owner = ownerOf(store.getUser(user.id));
+      if (access(owner).ok) tenants.start(owner.id).catch(() => {});
       res.redirect(303, '/');
     } catch (e) {
       res.status(400).send(pages.invite({ token: req.body.token, user, beta, error: e.message }));
@@ -204,13 +205,31 @@ function createGateway(opts = {}) {
 
   app.get('/welcome', (req, res) => res.send(pages.welcome({ priceLabel, trialDays, signupsOpen, beta })));
 
+  // A teammate uses their team owner's app copy and plan.
+  const ownerOf = (u) => (u && u.team_of ? store.getUser(u.team_of) : u);
   const accountPage = (req, res, extra = {}) => {
+    const owner = ownerOf(req.user);
+    if (req.user.team_of) return res.send(pages.account({ user: req.user, owner, access: access(owner), teammate: true, ...extra }));
     const settings = tenants.readSettings(req.user.id);
-    res.send(pages.account({ user: req.user, access: access(req.user), billingEnabled: billing.enabled, priceLabel, settings, isAdmin: req.user.role === 'admin', ok: req.query.paid ? 'Payment received. Thank you!' : '', ...extra }));
+    res.send(pages.account({ user: req.user, access: access(req.user), billingEnabled: billing.enabled, priceLabel, settings, isAdmin: req.user.role === 'admin', team: store.teamOf(req.user.id), ok: req.query.paid ? 'Payment received. Thank you!' : '', ...extra }));
   };
+  const notTeammate = (req, res, next) => (req.user.team_of ? res.redirect(303, '/account') : next());
+  // Add a teammate: they get an invite link to pick their own password.
+  app.post('/account/team', sameSite, needUser, notTeammate, form, (req, res) => {
+    try {
+      const { user, token } = store.inviteTeammate(req.user.id, { email: req.body.email, name: req.body.name });
+      const link = `${publicUrl}/invite?token=${token}`;
+      if (mailer) mailer({ to: user.email, subject: `${req.user.name || req.user.email} added you to their team`, text: pages.inviteText({ name: user.name, link }) }).catch((e) => console.error('[team invite]', e.message));
+      accountPage(req, res, { teamInvite: { user, link, emailed: Boolean(mailer) } });
+    } catch (e) { accountPage(req, res, { error: e.message }); }
+  });
+  app.post('/account/team/:id/remove', sameSite, needUser, notTeammate, (req, res) => {
+    store.removeTeammate(req.user.id, Number(req.params.id));
+    res.redirect(303, '/account');
+  });
   app.get('/account', needUser, (req, res) => accountPage(req, res));
 
-  app.post('/account/email', sameSite, needUser, form, async (req, res) => {
+  app.post('/account/email', sameSite, needUser, notTeammate, form, async (req, res) => {
     const current = tenants.readSettings(req.user.id);
     const next = { ...current };
     for (const k of TENANT_SETTINGS) {
@@ -240,7 +259,7 @@ function createGateway(opts = {}) {
     }
   });
 
-  app.post('/billing/checkout', sameSite, needUser, async (req, res) => {
+  app.post('/billing/checkout', sameSite, needUser, notTeammate, async (req, res) => {
     if (!billing.enabled) return res.redirect(303, '/account');
     try { res.redirect(303, await billing.checkoutUrl(req.user, publicUrl)); } catch (e) { accountPage(req, res, { error: `Couldn't open the payment page: ${e.message}` }); }
   });
@@ -287,10 +306,11 @@ function createGateway(opts = {}) {
 
   // ---- The app itself: passed on to this customer's own copy ----
   app.use(needUser, (req, res, next) => {
-    const ok = access(req.user);
-    if (!ok.ok) return wantsHtml(req) ? res.redirect('/account') : res.status(402).json({ error: 'Your Viral Post plan needs attention. Open Account to continue.' });
-    if (req.method !== 'GET' && req.method !== 'HEAD') return sameSite(req, res, () => tenants.proxy(req.user.id, req, res, { signedIn: true }).catch(next));
-    tenants.proxy(req.user.id, req, res, { signedIn: true }).catch(next);
+    const owner = ownerOf(req.user);
+    const ok = access(owner);
+    if (!owner || !ok.ok) return wantsHtml(req) ? res.redirect('/account') : res.status(402).json({ error: 'Your Viral Post plan needs attention. Open Account to continue.' });
+    if (req.method !== 'GET' && req.method !== 'HEAD') return sameSite(req, res, () => tenants.proxy(owner.id, req, res, { signedIn: true }).catch(next));
+    tenants.proxy(owner.id, req, res, { signedIn: true }).catch(next);
   });
 
   app.use((err, req, res, next) => {
@@ -301,7 +321,7 @@ function createGateway(opts = {}) {
 
   // Keep each customer's copy running only while their plan allows it.
   function syncTenant(user) {
-    if (!user) return;
+    if (!user || user.team_of) return; // teammates use their owner's copy
     if (access(user).ok) tenants.start(user.id).catch((e) => console.error(`[customer ${user.id}]`, e.message));
     else tenants.stop(user.id);
   }

@@ -133,6 +133,8 @@ function launchpad(q = {}) {
       { key: 'form', title: 'Make a form', done: formsN > 0, text: 'A sign-up form you can share as a link or QR code.', go: '#contacts/forms' },
       { key: 'booking', title: 'Make a booking page', done: pagesN > 0, text: 'A link people use to book a call with you.', go: '#contacts/appointments' },
       { key: 'automation', title: 'Switch on an automation', done: flows > 0, text: 'Your helper that makes tasks and sends welcome emails by itself.', go: '#contacts/automations' },
+      { key: 'reviews', title: 'Add your review link', done: Boolean(b ? b.review_url : biz.all().some((x) => x.review_url)), text: 'So you can ask happy customers for a Google review with one press.', go: '#contacts/settings' },
+      { key: 'payments', title: 'Get paid online', done: (() => { try { const st = require('./invoices').settings(); return st.stripe || Boolean(st.payNote); } catch { return false; } })(), text: 'Connect your own Stripe so invoices have a Pay with card button, or add how people can pay you.', go: '#contacts/payments' },
   ];
   return { business: b, saas, items };
 }
