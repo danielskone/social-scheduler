@@ -96,8 +96,8 @@ function createStore(dir, { trialDays = 14, adminEmail = '' } = {}) {
       if (q.byEmail.get(email)) throw new Error('That email already has an account. Try signing in.');
       const role = adminEmail && email.toLowerCase() === adminEmail.toLowerCase() ? 'admin' : 'customer';
       const status = role === 'admin' ? 'free' : 'trialing';
-      const info = db.prepare(`INSERT INTO users (email, name, password_hash, role, status, trial_ends_at, accepted_terms_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`).run(email, String(name || '').trim().slice(0, 100), hashPassword(password), role, status, iso(Date.now() + trialDays * 864e5));
+      const info = db.prepare(`INSERT INTO users (email, name, password_hash, role, status, trial_ends_at, accepted_terms_at, last_login_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`).run(email, String(name || '').trim().slice(0, 100), hashPassword(password), role, status, iso(Date.now() + trialDays * 864e5));
       return q.byId.get(info.lastInsertRowid);
     },
 

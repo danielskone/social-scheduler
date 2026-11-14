@@ -227,7 +227,7 @@ function admin({ users, running, billingEnabled, beta, notice = '', invite: inv 
     .map((a) => { const [act, label] = a.split(':'); return `<form method="post" action="/admin/users/${u.id}"><input type="hidden" name="action" value="${act}"><button class="btn" type="submit">${label}</button></form>`; }).join(' ')}</td>
 </tr>`).join('');
   return layout('Customers', `
-<div class="top"><h1>${beta ? 'Beta testers' : 'Customers'} (${users.length})</h1><div><a class="btn primary" href="/">Open Viral Post</a> <a class="btn" href="/account">Your account</a></div></div>
+<div class="top"><h1>${beta ? 'Beta testers' : 'Customers'} (${users.length})</h1><div><a class="btn primary" href="/">Open Viral Post</a> <a class="btn" href="/crm/">Open Viral Touch CRM</a> <a class="btn" href="/account">Your account</a></div></div>
 ${notice ? `<div class="card"><p class="ok">${notice}</p></div>` : ''}
 ${inv ? `<div class="card"><p class="ok">${esc(inv.user.email)} can now sign in.</p>
 <p>${inv.emailed ? 'An invite email is on its way to them. You can also send them this message yourself:' : 'Copy this message and send it to them by text or email:'}</p>
