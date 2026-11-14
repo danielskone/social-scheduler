@@ -227,3 +227,11 @@ test('paste a link: brings in your own Facebook and Instagram videos through the
   job = await waitReady(made.id);
   assert.strictEqual(job.status, 'ready', job.error);
 });
+
+test('a long video can give 15 or 20 clips, and the page offers both', () => {
+  const loudness = Array.from({ length: 1800 }, (_, i) => ({ t: i, db: -30 + (i % 7) }));
+  assert.strictEqual(clipper.pickClips({ segments: [], loudness, duration: 1800, length: 'short', count: 20 }).length, 20);
+  assert.strictEqual(clipper.pickClips({ segments: [], loudness, duration: 1800, length: 'short', count: 15 }).length, 15);
+  const html = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  assert.match(html, /<option>15<\/option><option>20<\/option>/);
+});
