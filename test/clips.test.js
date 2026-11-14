@@ -235,3 +235,35 @@ test('a long video can give 15 or 20 clips, and the page offers both', () => {
   const html = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'index.html'), 'utf8');
   assert.match(html, /<option>15<\/option><option>20<\/option>/);
 });
+
+const config = () => require('../src/config');
+test('Schedule all: every clip gets its own time on every picked account, and is marked scheduled', async () => {
+  const job = db.prepare(`INSERT INTO clip_jobs (name, source_file, settings, status) VALUES ('Weekend batch','', '{}', 'done')`).run().lastInsertRowid;
+  fs.mkdirSync(path.join(path.join(config().dataDir, 'clips'), String(job)), { recursive: true });
+  const ids = [1, 2, 3].map((n) => {
+    const file = `clip-${n}-abc${n}.mp4`;
+    fs.writeFileSync(path.join(path.join(config().dataDir, 'clips'), String(job), file), 'video');
+    return db.prepare(`INSERT INTO clips (job_id, n, start, end, score, title, text, file, status) VALUES (?,?,?,?,?,?,?,?, 'ready')`).run(job, n, n * 10, n * 10 + 30, 90 - n, `Clip ${n}`, `Words ${n}.`, file).lastInsertRowid;
+  });
+  const fb = db.prepare(`INSERT INTO accounts (platform, external_id, name, access_token) VALUES ('facebook','sa1','Page S','x')`).run().lastInsertRowid;
+  const tt = db.prepare(`INSERT INTO accounts (platform, external_id, name, access_token) VALUES ('tiktok','sa2','TT S','x')`).run().lastInsertRowid;
+  const at = (h) => new Date(Date.now() + h * 3600e3).toISOString();
+  const send = (body) => fetch(`${root}/api/posts/from-clips`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  // A time in the past is refused and nothing is saved.
+  let r = await send({ accountIds: [fb, tt], posts: [{ clipId: ids[0], caption: 'a', scheduledAt: at(-3) }] });
+  assert.strictEqual(r.status, 400);
+  r = await send({ accountIds: [fb, tt], posts: ids.map((id, i) => ({ clipId: id, caption: `Caption ${i}\n\nVisit us`, title: `Clip ${i}`, scheduledAt: at(24 + i * 4) })) });
+  assert.strictEqual(r.status, 201);
+  assert.strictEqual((await r.json()).created, 3);
+  const posts = db.prepare(`SELECT * FROM posts WHERE caption LIKE 'Caption %' ORDER BY scheduled_at`).all();
+  assert.strictEqual(posts.length, 3);
+  assert.strictEqual(new Set(posts.map((p) => p.scheduled_at)).size, 3, 'each clip at its own time');
+  assert.ok(posts.every((p) => p.media_type === 'video' && fs.existsSync(path.join(config().mediaDir, p.media_file))));
+  assert.strictEqual(db.prepare(`SELECT COUNT(*) n FROM post_targets WHERE post_id IN (${posts.map((p) => p.id).join(',')})`).get().n, 6);
+  const out = await (await fetch(`${root}/api/clips/clip/${ids[1]}`)).json();
+  assert.ok(out.scheduled_at, 'clip shows it is scheduled');
+  // The page has the button and the planner.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'public', 'clips.js'), 'utf8');
+  assert.match(page, /Schedule all/);
+  assert.match(page, /\/posts\/from-clips/);
+});

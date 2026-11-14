@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS clips (
 if (!db.prepare('PRAGMA table_info(clips)').all().some((c) => c.name === 'preview')) {
   db.exec('ALTER TABLE clips ADD COLUMN preview TEXT');
 }
+// Added later: when the clip was last put on the calendar ("Schedule all" skips these by default).
+if (!db.prepare('PRAGMA table_info(clips)').all().some((c) => c.name === 'scheduled_at')) {
+  db.exec('ALTER TABLE clips ADD COLUMN scheduled_at TEXT');
+}
 
 const LENGTHS = { short: [15, 35], medium: [30, 60], long: [55, 90] };
 const FRAMINGS = ['center', 'left', 'right', 'fit'];
@@ -557,7 +561,7 @@ function clipOut(c) {
   return {
     id: c.id, job_id: c.job_id, n: c.n, start: c.start, end: c.end, length: +(c.end - c.start).toFixed(1),
     score: c.score, reason: c.reason, title: c.title, caption: firstSentence(c.text, 300) || c.title, text: c.text, text_edited: Boolean(c.text_edited),
-    framing: c.framing, captions: c.captions, status: c.status, error: c.error,
+    framing: c.framing, captions: c.captions, status: c.status, error: c.error, scheduled_at: c.scheduled_at || null,
     url: c.file ? base + c.file : null, poster_url: c.poster ? base + c.poster : null,
     preview_url: c.preview ? base + c.preview : (c.file ? base + c.file : null),
     size: c.file ? fileSize(path.join(clipsDir, String(c.job_id), c.file)) : null,
@@ -702,6 +706,8 @@ function copyClipToMedia(clipId) {
   return name;
 }
 
+const markScheduled = (clipId, when) => db.prepare('UPDATE clips SET scheduled_at=? WHERE id=?').run(when, clipId);
+
 // Pick up where it left off after the Mac restarts.
 function start() {
   db.prepare(`UPDATE clips SET status='pending' WHERE status='rendering'`).run();
@@ -709,4 +715,4 @@ function start() {
   work();
 }
 
-module.exports = { router, serveFile, copyClipToMedia, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };
+module.exports = { router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };
