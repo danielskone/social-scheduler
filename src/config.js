@@ -2,7 +2,9 @@ const path = require('path');
 
 // Customer copies (started by the sign-up gateway, see src/saas/) get TENANT_KEY. They must
 // not read the owner's .env; their own settings (email, phone alerts) live in their folder.
-if (process.env.TENANT_KEY) {
+// The owner's own copy on the sign-up site (OWNER_COPY=1) opens the owner's real data and settings.
+const ownerCopy = Boolean(process.env.TENANT_KEY) && process.env.OWNER_COPY === '1';
+if (process.env.TENANT_KEY && !ownerCopy) {
   if (process.env.DATA_DIR) require('dotenv').config({ path: path.join(process.env.DATA_DIR, 'settings.env'), quiet: true });
 } else {
   require('dotenv').config({ quiet: true });
@@ -33,7 +35,8 @@ module.exports = {
   tenantKey: process.env.TENANT_KEY || '',
   // Daniel's own ready-made forms, emails and booking page (parade, Viral Attraction, car
   // business). Customers start with a clean CRM instead.
-  ownerStarters: !process.env.TENANT_KEY,
+  ownerStarters: !process.env.TENANT_KEY || ownerCopy,
+  ownerCopy,
   get publicBaseUrl() { return publicBaseUrl || sharedPublicUrl() || 'http://localhost:3000'; },
   set publicBaseUrl(v) { publicBaseUrl = String(v || '').replace(/\/$/, ''); },
   publicUrlFile,

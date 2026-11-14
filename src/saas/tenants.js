@@ -58,6 +58,9 @@ function writeSettings(file, values) {
   fs.writeFileSync(file, `${lines.join('\n')}\n`, { mode: 0o600 });
 }
 
+// Copy number 0 is the owner's real Viral Post (customers are numbered from 1).
+const OWNER = 0;
+
 function createTenants({ dir, basePort = 4100, publicBaseUrl, env = process.env, log = console.log } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const running = new Map(); // userId -> { child, port, key, ready, stopping, restarts }
@@ -75,6 +78,22 @@ function createTenants({ dir, basePort = 4100, publicBaseUrl, env = process.env,
 
   function childEnv(id, key) {
     const e = {};
+    if (Number(id) === OWNER) {
+      // The owner's own copy: the real data folder and settings, with no background work.
+      for (const k of SHARED_ENV) if (env[k] !== undefined) e[k] = env[k];
+      return {
+        ...e,
+        TENANT_KEY: key,
+        OWNER_COPY: '1',
+        NO_JOBS: '1',
+        DATA_DIR: env.DATA_DIR || path.join(__dirname, '..', '..', 'data'),
+        PORT: String(portFor(id)),
+        HOST: '127.0.0.1',
+        OAUTH_BASE_URL: publicBaseUrl,
+        TIKTOK_REDIRECT_URI: `${publicBaseUrl}/auth/tiktok/callback`,
+        APPS: 'all',
+      };
+    }
     for (const k of SHARED_ENV) if (env[k] !== undefined && !blocked.includes(k)) e[k] = env[k];
     return {
       ...e,
@@ -111,7 +130,7 @@ function createTenants({ dir, basePort = 4100, publicBaseUrl, env = process.env,
     id = Number(id);
     const have = running.get(id);
     if (have) return have.ready;
-    fs.mkdirSync(folder(id), { recursive: true });
+    if (id !== OWNER) fs.mkdirSync(folder(id), { recursive: true });
     const key = crypto.randomBytes(24).toString('hex');
     const t = { port: portFor(id), key, stopping: false, restarts };
     t.child = spawn(process.execPath, [SERVER], { env: childEnv(id, key), cwd: path.join(__dirname, '..', '..'), stdio: ['ignore', 'pipe', 'pipe'] });
@@ -185,7 +204,7 @@ function createTenants({ dir, basePort = 4100, publicBaseUrl, env = process.env,
   }
 
   return {
-    start, stop, stopAll, proxy, folder,
+    start, stop, stopAll, proxy, folder, OWNER,
     isRunning: (id) => running.has(Number(id)),
     settingsFile: (id) => path.join(folder(id), 'settings.env'),
     readSettings: (id) => readSettings(path.join(folder(id), 'settings.env')),

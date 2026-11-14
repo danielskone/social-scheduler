@@ -20,6 +20,8 @@
 //                          funnel address must be added in Google's / TikTok's settings first)
 //   SAAS_META_LIVE         "on" once the Meta app passed App Review and is Live: anyone can connect
 //                          Facebook and Instagram (until then only people added as Testers can)
+//   SAAS_OWNER_REAL        "on" (default): the owner's login opens the owner's real Viral Post, CRM
+//                          and Clips (the Mac's own data); "off" gives the owner an empty copy too
 //   SAAS_APPS              which apps customers get: "all" (default) or e.g. "scheduler" for Viral Post
 //                          on its own, or "scheduler,crm" (crm, clips)
 //   SAAS_SMTP_HOST/PORT/USER/PASS, SAAS_EMAIL_FROM  to email password-reset links (optional)
@@ -121,7 +123,7 @@ function createGateway(opts = {}) {
     try {
       const user = store.createUser({ email: req.body.email, name: req.body.name, password: req.body.password, acceptedTerms: req.body.terms === '1' });
       setSession(res, store.createSession(user.id));
-      tenants.start(user.id).catch(() => {});
+      tenants.start(copyFor(user)).catch(() => {});
       res.redirect(303, '/');
     } catch (e) {
       res.status(400).send(pages.signup({ error: e.message, values: { name: req.body.name, email: req.body.email }, trialDays, signupsOpen: true, owner }));
@@ -140,7 +142,7 @@ function createGateway(opts = {}) {
     const user = store.verifyLogin(email, req.body.password);
     if (!user) return res.status(401).send(pages.login({ error: 'That email and password don\'t match.', email, signupsOpen }));
     setSession(res, store.createSession(user.id));
-    if (access(user).ok) tenants.start(user.id).catch(() => {});
+    if (access(user).ok) tenants.start(copyFor(user)).catch(() => {});
     res.redirect(303, '/');
   });
   app.all('/logout', (req, res) => {
@@ -177,7 +179,7 @@ function createGateway(opts = {}) {
       if (req.body.name && !user.name) store.update(user.id, { name: String(req.body.name).trim().slice(0, 100) });
       setSession(res, store.createSession(user.id));
       const owner = ownerOf(store.getUser(user.id));
-      if (access(owner).ok) tenants.start(owner.id).catch(() => {});
+      if (access(owner).ok) tenants.start(copyFor(owner)).catch(() => {});
       res.redirect(303, '/');
     } catch (e) {
       res.status(400).send(pages.invite({ token: req.body.token, user, beta, error: e.message }));
@@ -207,6 +209,9 @@ function createGateway(opts = {}) {
 
   // A teammate uses their team owner's app copy and plan.
   const ownerOf = (u) => (u && u.team_of ? store.getUser(u.team_of) : u);
+  // Which copy an account opens: the owner's real one, or the customer's own.
+  const ownerReal = !/^(0|off|no|false)$/i.test(String(env.SAAS_OWNER_REAL || 'on'));
+  const copyFor = (u) => { const o = ownerOf(u); return o && ownerReal && o.role === 'admin' ? tenants.OWNER : o && o.id; };
   const accountPage = (req, res, extra = {}) => {
     const owner = ownerOf(req.user);
     if (req.user.team_of) return res.send(pages.account({ user: req.user, owner, access: access(owner), teammate: true, ...extra }));
@@ -269,7 +274,7 @@ function createGateway(opts = {}) {
   });
 
   // ---- Owner's Customers page ----
-  const adminPage = (res, extra = {}) => res.send(pages.admin({ users: store.listUsers(), running: tenants.isRunning, billingEnabled: billing.enabled, beta, ...extra }));
+  const adminPage = (res, extra = {}) => res.send(pages.admin({ users: store.listUsers(), running: (id) => tenants.isRunning(id) || (copyFor(store.getUser(id)) === tenants.OWNER && tenants.isRunning(tenants.OWNER)), billingEnabled: billing.enabled, beta, ...extra }));
   app.get('/admin', needUser, needAdmin, (req, res) => adminPage(res));
   // Add a beta tester: makes their login and an invite link (good for 14 days) to send them.
   app.post('/admin/invite', sameSite, needUser, needAdmin, form, (req, res) => {
@@ -309,8 +314,9 @@ function createGateway(opts = {}) {
     const owner = ownerOf(req.user);
     const ok = access(owner);
     if (!owner || !ok.ok) return wantsHtml(req) ? res.redirect('/account') : res.status(402).json({ error: 'Your Viral Post plan needs attention. Open Account to continue.' });
-    if (req.method !== 'GET' && req.method !== 'HEAD') return sameSite(req, res, () => tenants.proxy(owner.id, req, res, { signedIn: true }).catch(next));
-    tenants.proxy(owner.id, req, res, { signedIn: true }).catch(next);
+    const copy = copyFor(owner);
+    if (req.method !== 'GET' && req.method !== 'HEAD') return sameSite(req, res, () => tenants.proxy(copy, req, res, { signedIn: true }).catch(next));
+    tenants.proxy(copy, req, res, { signedIn: true }).catch(next);
   });
 
   app.use((err, req, res, next) => {
@@ -322,6 +328,7 @@ function createGateway(opts = {}) {
   // Keep each customer's copy running only while their plan allows it.
   function syncTenant(user) {
     if (!user || user.team_of) return; // teammates use their owner's copy
+    if (copyFor(user) === tenants.OWNER) { tenants.stop(user.id); tenants.start(tenants.OWNER).catch((e) => console.error('[owner copy]', e.message)); return; }
     if (access(user).ok) tenants.start(user.id).catch((e) => console.error(`[customer ${user.id}]`, e.message));
     else tenants.stop(user.id);
   }
