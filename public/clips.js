@@ -64,6 +64,7 @@ const CI = {
   trash: '<svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7"/></svg>',
   play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>',
   flame: '<svg viewBox="0 0 24 24"><path d="M12 2.5c.6 3.2 4.8 5.3 4.8 10a4.8 4.8 0 0 1-9.6 0c0-2.2 1.2-3.6 2.2-4.6.2 1.6.9 2.6 1.9 2.9-.6-2.6-.1-5.6.7-8.3z"/></svg>',
+  cal: '<svg viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/></svg>',
   retry: '<svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v4h4"/></svg>',
 };
 
@@ -82,6 +83,7 @@ function jobHead(job) {
         <span class="muted">${job.duration ? fmtLen(job.duration) + ' video · ' : ''}${esc(date)}</span></div>
       ${status}
       ${job.status === 'failed' ? `<button class="btn ghost" data-job-retry="${job.id}">${CI.retry}Try again</button>` : ''}
+      ${!working && ready ? `<button class="btn primary" data-job-plan="${job.id}">${CI.cal}Schedule all</button>` : ''}
       <button class="iconbtn danger" data-job-del="${job.id}" title="Delete this video and its clips" aria-label="Delete this video and its clips">${CI.trash}</button>
     </div>
     ${working || making ? `<div class="clip-progress"><div class="bar"><i style="width:${Math.max(3, pct)}%"></i></div>
@@ -105,6 +107,7 @@ function clipCard(c) {
       <b class="clip-title" title="${esc(c.title)}">${esc(c.title)}</b>
       <span class="clip-meta">${esc(fmtSec(c.start))}–${esc(fmtSec(c.end))}${c.reason ? ` · ${esc(c.reason.split(' · ')[0])}` : ''}</span>
       ${ready && c.error ? `<span class="clip-warn">${esc(c.error)}</span>` : ''}
+      ${c.scheduled_at ? `<span class="clip-sched">${CI.cal}Scheduled ${esc(fmtWhen(c.scheduled_at))}</span>` : ''}
       <div class="clip-actions">
         <a class="btn primary${ready ? '' : ' disabled'}" ${ready ? `href="#compose?clip=${c.id}"` : 'aria-disabled="true" tabindex="-1"'}>Schedule</a>
         <button type="button" class="iconbtn" data-clip-edit="${c.id}" title="Edit" aria-label="Edit clip">${CI.edit}</button>
@@ -249,9 +252,10 @@ clipForm.onsubmit = (e) => {
 
 // ---------- Buttons on clips and videos ----------
 $('#clip-jobs').addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-job-del],[data-job-retry],[data-clip-edit],[data-clip-del],[data-clip-view],[data-clip-remake]');
+  const t = e.target.closest('[data-job-plan],[data-job-del],[data-job-retry],[data-clip-edit],[data-clip-del],[data-clip-view],[data-clip-remake]');
   if (!t) return;
   if (t.dataset.clipView) { openClipViewer(Number(t.dataset.clipView)); return; }
+  if (t.dataset.jobPlan) { openSchedulePlanner(Number(t.dataset.jobPlan)); return; }
   try {
     if (t.dataset.clipRemake) await api(`/clips/clip/${t.dataset.clipRemake}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     if (t.dataset.jobDel) {
@@ -398,3 +402,145 @@ async function getLinkedVideo() {
 $('#clip-link-go').onclick = getLinkedVideo;
 $('#clip-link-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); getLinkedVideo(); } });
 $('#clip-link-input').addEventListener('input', () => { $('#clip-link-steps').innerHTML = ''; });
+
+// ---------- "Schedule all": every clip of a video, spread over the days you pick ----------
+const fmtWhen = (iso) => new Date(iso).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const dayIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const PLAN_KEY = 'vc-plan';
+const planPrefs = () => { try { return JSON.parse(localStorage.getItem(PLAN_KEY) || '{}'); } catch { return {}; } };
+
+// Saturday of this weekend (today if it is already Saturday or Sunday).
+function weekendStart(now = new Date()) {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dow = d.getDay();
+  if (dow !== 0 && dow !== 6) d.setDate(d.getDate() + (6 - dow));
+  return d;
+}
+
+// The time for each clip: as even as possible across the days, and across the hours of each day.
+// Best clips go first. Times already gone today are skipped.
+function planTimes(n, firstDay, lastDay, from, to, now = new Date()) {
+  const [fh, fm] = from.split(':').map(Number), [th, tm] = to.split(':').map(Number);
+  const days = [];
+  for (let d = new Date(firstDay + 'T00:00'); dayIso(d) <= lastDay && days.length < 60; d.setDate(d.getDate() + 1)) {
+    let start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), fh, fm);
+    const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), th, tm);
+    const soon = new Date(Math.ceil((now.getTime() + 20 * 60e3) / (15 * 60e3)) * 15 * 60e3);
+    if (start < soon) start = soon;
+    if (end >= start) days.push([start, end]);
+  }
+  if (!days.length || !n) return [];
+  const out = [];
+  days.forEach(([start, end], i) => {
+    const k = Math.floor(n / days.length) + (i < n % days.length ? 1 : 0);
+    const gap = k > 1 ? (end - start) / (k - 1) : 0;
+    for (let j = 0; j < k; j++) {
+      const t = new Date(start.getTime() + Math.round((gap * j) / (5 * 60e3)) * 5 * 60e3);
+      out.push(k === 1 ? new Date(start.getTime() + Math.round((end - start) / 2 / (5 * 60e3)) * 5 * 60e3) : t);
+    }
+  });
+  return out;
+}
+
+function openSchedulePlanner(jobId) {
+  const job = clipState.jobs.find((j) => j.id === jobId);
+  if (!job) return;
+  const ready = job.clips.filter((c) => c.status === 'ready' && c.url);
+  const prefs = planPrefs();
+  const sat = weekendStart();
+  const lastDefault = new Date(sat); lastDefault.setDate(sat.getDate() + 6);
+  const accts = (typeof accounts !== 'undefined' ? accounts : []);
+  const dlg = $('#clip-dialog');
+  dlg.className = 'clip-planner';
+  dlg.onclick = null;
+  dlg.innerHTML = `<form method="dialog" class="cp-form">
+    <h2>Schedule all clips</h2>
+    <p class="muted small">Each clip gets its own time. The best clips go first.</p>
+    <div class="field"><span>Post to</span>
+      <div class="cp-accts">${accts.length ? accts.map((a) => `<label><input type="checkbox" name="acct" value="${a.id}" data-platform="${a.platform}"${!prefs.accts || prefs.accts.includes(a.id) ? ' checked' : ''}>${icon(a.platform)}${esc(a.username ? '@' + a.username : a.name)}</label>`).join('') : '<span class="muted">No accounts yet. Connect one in Viral Post first.</span>'}</div></div>
+    <div class="field"><span>When</span>
+      <div class="seg seg-sm" id="cp-quick"><button type="button" data-days="2">This weekend</button><button type="button" data-days="7" class="on">7 days</button><button type="button" data-days="14">14 days</button></div></div>
+    <div class="cp-grid">
+      <label class="field"><span>First day</span><input type="date" name="first" value="${dayIso(sat)}" required></label>
+      <label class="field"><span>Last day</span><input type="date" name="last" value="${dayIso(lastDefault)}" required></label>
+      <label class="field"><span>Earliest time</span><input type="time" name="from" value="${prefs.from || '09:00'}" required></label>
+      <label class="field"><span>Latest time</span><input type="time" name="to" value="${prefs.to || '21:00'}" required></label>
+    </div>
+    <label class="field"><span>Add to every caption <small>(optional, like your website or hashtags)</small></span>
+      <textarea name="extra" rows="2" placeholder="Example: Learn more at yourwebsite.com #shorts">${esc(prefs.extra || '')}</textarea></label>
+    <p class="cp-pace" id="cp-pace" aria-live="polite"></p>
+    <div class="cp-head"><b id="cp-count"></b><label class="cp-again"><input type="checkbox" id="cp-again"> Include clips already scheduled</label></div>
+    <ol class="cp-list" id="cp-list"></ol>
+    <div class="row"><button class="btn primary" value="go" id="cp-go">Schedule</button><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><span class="muted" id="cp-msg"></span></div>
+  </form>`;
+  const f = dlg.querySelector('form');
+  const captions = new Map(ready.map((c) => [c.id, c.caption || c.title || '']));
+  const skipped = new Set();
+  const chosen = () => ready.filter((c) => !skipped.has(c.id) && ($('#cp-again').checked || !c.scheduled_at));
+  const draw = () => {
+    const list = chosen();
+    const times = planTimes(list.length, f.first.value, f.last.value, f.from.value, f.to.value);
+    const nDays = new Set(times.map(dayIso)).size || 1;
+    const perDay = Math.ceil(list.length / nDays);
+    const yt = [...f.querySelectorAll('[name=acct]:checked')].some((x) => x.dataset.platform === 'youtube');
+    const pace = $('#cp-pace');
+    pace.className = 'cp-pace' + (perDay > 3 ? ' warn' : '');
+    pace.textContent = !list.length ? '' : times.length < list.length ? 'Pick days and times that are still ahead.'
+      : `About ${perDay} clip${perDay === 1 ? '' : 's'} a day on each account.` + (perDay > 3 ? ' That is a lot. Platforms like 1 to 3 posts a day, so more days is safer.' : ' A safe pace.')
+        + (yt && perDay > 6 ? ' YouTube only takes about 6 uploads a day, so some YouTube posts would fail.' : '');
+    $('#cp-count').textContent = `${list.length} clip${list.length === 1 ? '' : 's'}`;
+    const at = new Map(list.map((c, i) => [c.id, times[i]]));
+    $('#cp-list').innerHTML = ready.filter((c) => $('#cp-again').checked || !c.scheduled_at).map((c) => `<li class="${skipped.has(c.id) ? 'off' : ''}" data-id="${c.id}">
+        ${c.poster_url ? `<img src="${c.poster_url}" alt="" loading="lazy">` : '<span class="cp-noimg"></span>'}
+        <div class="cp-item"><div class="cp-item-top"><b>${esc(c.title)}</b><span class="cp-when">${skipped.has(c.id) ? 'Skipped' : at.get(c.id) ? esc(fmtWhen(at.get(c.id))) : ''}</span></div>
+          <textarea rows="2" data-cap="${c.id}" aria-label="Caption"${skipped.has(c.id) ? ' disabled' : ''}>${esc(captions.get(c.id))}</textarea></div>
+        <button type="button" class="iconbtn" data-skip="${c.id}" title="${skipped.has(c.id) ? 'Add back' : 'Leave this clip out'}" aria-label="${skipped.has(c.id) ? 'Add back' : 'Leave this clip out'}">${skipped.has(c.id) ? CI.retry : CI.trash}</button>
+      </li>`).join('') || '<li class="muted">All clips are already scheduled. Tick "Include clips already scheduled" to schedule them again.</li>';
+    $('#cp-go').disabled = !list.length || times.length < list.length;
+  };
+  const setDays = (n) => {
+    const first = new Date(f.first.value + 'T00:00');
+    const last = new Date(first); last.setDate(first.getDate() + n - 1);
+    f.last.value = dayIso(last);
+    draw();
+  };
+  $('#cp-quick').onclick = (e) => {
+    const b = e.target.closest('[data-days]'); if (!b) return;
+    $('#cp-quick').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    if (b.dataset.days === '2') f.first.value = dayIso(weekendStart());
+    setDays(Number(b.dataset.days));
+  };
+  f.addEventListener('input', (e) => {
+    if (e.target.dataset.cap) { captions.set(Number(e.target.dataset.cap), e.target.value); return; }
+    if (['first', 'last'].includes(e.target.name)) $('#cp-quick').querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+    if (e.target.name !== 'extra') draw();
+  });
+  $('#cp-list').onclick = (e) => {
+    const b = e.target.closest('[data-skip]'); if (!b) return;
+    const id = Number(b.dataset.skip);
+    skipped.has(id) ? skipped.delete(id) : skipped.add(id);
+    draw();
+  };
+  f.onsubmit = async (e) => {
+    if (e.submitter?.value !== 'go') return;
+    e.preventDefault();
+    const accountIds = [...f.querySelectorAll('[name=acct]:checked')].map((x) => Number(x.value));
+    const msg = $('#cp-msg');
+    if (!accountIds.length) { msg.textContent = 'Pick at least one account.'; return; }
+    const list = chosen();
+    const times = planTimes(list.length, f.first.value, f.last.value, f.from.value, f.to.value);
+    const extra = f.extra.value.trim();
+    try { localStorage.setItem(PLAN_KEY, JSON.stringify({ accts: accountIds, from: f.from.value, to: f.to.value, extra })); } catch { /* private mode */ }
+    const posts = list.map((c, i) => ({ clipId: c.id, title: c.title, scheduledAt: times[i].toISOString(), caption: [captions.get(c.id).trim(), extra].filter(Boolean).join('\n\n') }));
+    msg.textContent = 'Saving…';
+    $('#cp-go').disabled = true;
+    try {
+      const r = await api('/posts/from-clips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountIds, posts }) });
+      dlg.close();
+      banner(`Scheduled ${r.created} clip${r.created === 1 ? '' : 's'} on ${accountIds.length} account${accountIds.length === 1 ? '' : 's'}. First one goes out ${fmtWhen(r.first)}. See them in Viral Post's calendar.`);
+      await loadClipJobs();
+    } catch (err) { msg.textContent = err.message; $('#cp-go').disabled = false; }
+  };
+  draw();
+  dlg.showModal();
+}

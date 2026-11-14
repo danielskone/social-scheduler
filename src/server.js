@@ -464,9 +464,44 @@ api.post('/posts', upload.single('media'), (req, res) => {
       .run(caption, req.file?.filename || clipFile || null, mediaType, new Date(req.body.scheduledAt).toISOString(), (req.body.title || '').trim() || null);
     const ins = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
     accountIds.forEach((a) => ins.run(lastInsertRowid, a));
+    if (clipFile) clipper.markScheduled(Number(req.body.clipId), new Date(req.body.scheduledAt).toISOString());
     return lastInsertRowid;
   })();
   res.status(201).json(loadPost(id));
+});
+
+// "Schedule all" in Viral Clips: many clips at once, each at its own time, to the same accounts.
+// Body: { accountIds: [..], posts: [{ clipId, caption, title, scheduledAt }] }
+api.post('/posts/from-clips', (req, res) => {
+  const accountIds = [].concat(req.body?.accountIds || []).map(Number).filter(Boolean);
+  const list = Array.isArray(req.body?.posts) ? req.body.posts.slice(0, 50) : [];
+  if (!list.length) return res.status(400).json({ error: 'Pick at least one clip.' });
+  for (const p of list) {
+    const error = validatePost({ caption: String(p.caption || '').trim(), scheduledAt: p.scheduledAt, accountIds, mediaType: 'video' });
+    if (error) return res.status(400).json({ error });
+    if (Date.parse(p.scheduledAt) < Date.now() - 5 * 60e3) return res.status(400).json({ error: 'One of the times is in the past. Pick a later first day or start time.' });
+  }
+  const files = [];
+  try {
+    for (const p of list) {
+      const f = clipper.copyClipToMedia(Number(p.clipId));
+      if (!f) throw new Error('One of the clips is not ready yet. Try again in a minute.');
+      files.push(f);
+    }
+  } catch (err) {
+    files.forEach((f) => fs.rmSync(path.join(config.mediaDir, f), { force: true }));
+    return res.status(400).json({ error: err.message });
+  }
+  const ids = db.transaction(() => list.map((p, i) => {
+    const when = new Date(p.scheduledAt).toISOString();
+    const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title) VALUES (?,?,?,?,?)')
+      .run(String(p.caption || '').trim(), files[i], 'video', when, String(p.title || '').trim().slice(0, 100) || null);
+    const ins = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
+    accountIds.forEach((a) => ins.run(lastInsertRowid, a));
+    clipper.markScheduled(Number(p.clipId), when);
+    return lastInsertRowid;
+  }))();
+  res.status(201).json({ created: ids.length, first: list.map((p) => p.scheduledAt).sort()[0] });
 });
 
 api.get('/posts', (req, res) => {
