@@ -367,7 +367,7 @@ api.get('/status', (req, res) => {
   res.json({
     metaConfigured: Boolean(config.metaAppId && config.metaAppSecret),
     saas: Boolean(config.tenantKey), // a customer's copy: show Account / Sign out
-    metaTestersOnly: Boolean(config.tenantKey) && process.env.META_TESTERS_ONLY === '1',
+    metaTestersOnly: Boolean(config.tenantKey) && !config.ownerCopy && process.env.META_TESTERS_ONLY === '1',
     publicBaseUrl: config.publicBaseUrl,
     instagramReady: config.publicBaseUrl.startsWith('https://'),
     redirectUri: meta.redirectUri(),
@@ -386,7 +386,7 @@ const tutorialFile = path.join(config.dataDir, 'tutorial.json');
 const TUTORIAL_KEYS = /^(scheduler|clips)-(tour|start-hidden|home-screen)$/;
 const readTutorial = () => { try { return JSON.parse(fs.readFileSync(tutorialFile, 'utf8')) || {}; } catch { return {}; } };
 api.get('/tutorial', (req, res) => {
-  res.json({ saas: Boolean(config.tenantKey), metaTestersOnly: Boolean(config.tenantKey) && process.env.META_TESTERS_ONLY === '1', youtube: youtube.configured(), tiktok: tiktok.configured(), done: readTutorial() });
+  res.json({ saas: Boolean(config.tenantKey) && !config.ownerCopy, metaTestersOnly: Boolean(config.tenantKey) && !config.ownerCopy && process.env.META_TESTERS_ONLY === '1', youtube: youtube.configured(), tiktok: tiktok.configured(), done: readTutorial() });
 });
 api.post('/tutorial', (req, res) => {
   const key = String(req.body?.key || '');
@@ -632,7 +632,9 @@ app.use((err, req, res, next) => {
 // follow-ups, automations and emails, Viral Clips makes videos.
 // One program with no APP (customer copies) runs all of it.
 function startApp() {
-  const runs = (key) => !ownApp || ownApp.key === key;
+  // The owner's copy on the sign-up site only shows the real data: the Mac's own programs
+  // already publish posts and run the CRM, so it starts no background work (no double posting).
+  const runs = (key) => process.env.NO_JOBS !== '1' && (!ownApp || ownApp.key === key);
   if (runs('scheduler')) scheduler.start();
   if (runs('crm') && appsOnKeys.has('crm')) scheduler.startCrm();
   if (runs('clips') && appsOnKeys.has('clips')) clipper.start();

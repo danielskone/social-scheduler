@@ -318,7 +318,7 @@ async function syncUnsubscribes(opts = {}) {
 }
 
 async function hourly(opts) {
-  try { await syncUnsubscribes(opts); } catch (e) { console.error(`[campaigns] unsubscribes: ${e.message}`); }
+  try { await syncUnsubscribes(opts); } catch (e) { console.error(`[campaigns] unsubscribes: ${e.message}${e.responseText ? ` (mail server said: ${e.responseText})` : ''}`); }
   try { await refreshStats(opts); } catch (e) { console.error(`[campaigns] stats: ${e.message}`); }
 }
 
