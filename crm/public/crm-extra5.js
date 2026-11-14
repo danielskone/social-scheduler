@@ -121,10 +121,10 @@
     fi.oninput = () => { find = fi.value; clearTimeout(fi.t); fi.t = setTimeout(() => { reload().then(() => { const n = q$('#ev-find', root); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }); }, 250); };
     const gf = q$('#guest-form', root);
     let people = null;
-    gf.who.onfocus = async () => { if (people) return; people = await call('/contacts'); q$('#ev-people', root).innerHTML = people.map((p) => `<option value="${h(p.name)}">${h(p.email || '')}</option>`).join(''); };
+    gf.who.onfocus = async () => { if (people) return; people = await call('/contacts?lite=1'); q$('#ev-people', root).innerHTML = people.map((p) => `<option value="${h(p.name)}">${h(p.email || '')}</option>`).join(''); };
     gf.onsubmit = async (ev) => {
       ev.preventDefault();
-      people ||= await call('/contacts');
+      people ||= await call('/contacts?lite=1');
       const p = people.find((x) => x.name.toLowerCase() === gf.who.value.trim().toLowerCase());
       if (!p) return say('Pick someone from the list (add them on People first if they are new).', true);
       try { const r = await call(`/events/${id}/guests`, { method: 'POST', json: { contact_id: p.id } }); say(r.emailed ? `${p.name} is on the list. We emailed their ticket.` : `${p.name} is on the list.`); reload(); }

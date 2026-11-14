@@ -103,7 +103,7 @@
   }
 
   async function editInvoice(inv, contactId) {
-    const people = inv ? [] : (await call('/contacts')).map((c) => ({ id: c.id, name: c.name, email: c.email }));
+    const people = inv ? [] : (await call('/contacts?lite=1')).map((c) => ({ id: c.id, name: c.name, email: c.email }));
     const items = inv ? inv.items : [{ what: '', qty: 1, price: '' }];
     const d = dlg();
     const row = (i) => `<div class="inv-line"><input name="what" placeholder="What it's for, e.g. Gold sponsorship" value="${h(i.what)}" required>

@@ -35,7 +35,7 @@
   const copy = async (text) => { try { await navigator.clipboard.writeText(text); say('Link copied.'); } catch { prompt('Copy this:', text); } };
   const linkbox = (v) => `<div class="linkbox"><input readonly value="${h(v)}" aria-label="Link"><button class="btn" type="button" data-copy-val="${h(v)}">Copy link</button></div>`;
   const onCopy = (e) => { const b = e.target.closest('[data-copy-val]'); if (b) { copy(b.dataset.copyVal); return true; } return false; };
-  const people = async () => (await call('/contacts')).map((c) => ({ id: c.id, name: c.name, email: c.email }));
+  const people = async () => (await call('/contacts?lite=1')).map((c) => ({ id: c.id, name: c.name, email: c.email }));
 
   // ======================= Sites tab: Pages or Funnels =======================
   let siteMode = store.get('site-mode', 'pages');

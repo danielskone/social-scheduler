@@ -362,7 +362,7 @@
         <label class="wf-search">${ico('search')}<input id="wf-tq" placeholder="Search contacts"></label><div class="wf-tlist" id="wf-tlist"></div><div id="wf-tres"></div>
         <div class="row" style="margin-top:12px"><button class="btn ghost" data-tclose>Close</button></div>`;
       const search = async (q) => {
-        const list = await call(`/contacts?q=${encodeURIComponent(q)}`).catch(() => []);
+        const list = await call(`/contacts?lite=1&q=${encodeURIComponent(q)}`).catch(() => []);
         q$('#wf-tlist', tdlg).innerHTML = (Array.isArray(list) ? list : list.contacts || []).slice(0, 8).map((c) => `<button data-tc="${c.id}"><b>${h(c.name)}</b> <small>${h(c.group_name || '')} · ${h(c.stage || '')}</small></button>`).join('') || '<p class="muted">No contacts found.</p>';
       };
       tdlg.onclick = async (e) => {
