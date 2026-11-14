@@ -47,6 +47,22 @@ function ofContact(c) {
   const owner = c && c.group_name ? businesses().ownerOf(c.group_name) : null;
   return forBiz(owner ? owner.id : '')[0] || all()[0];
 }
+// A fast version of ofContact for long lists: reads the pipelines and businesses once.
+function resolver() {
+  const list = all();
+  const byId = new Map(list.map((p) => [p.id, p]));
+  const bizList = businesses().all();
+  const owners = new Map(), firsts = new Map();
+  return (c) => {
+    if (c && c.pipeline_id && byId.has(Number(c.pipeline_id))) return byId.get(Number(c.pipeline_id));
+    const g = c && c.group_name;
+    if (g && !owners.has(g)) owners.set(g, bizList.find((b) => b.groups.includes(g)) || bizList[0] || null);
+    const owner = g ? owners.get(g) : null;
+    const key = owner ? owner.id : '';
+    if (!firsts.has(key)) firsts.set(key, (key === '' ? list : list.filter((p) => p.business_id == null || p.business_id === key))[0] || list[0]);
+    return firsts.get(key);
+  };
+}
 const stageNames = (p) => p.stages.map((s) => s.name);
 const kindOf = (p, stage) => (p.stages.find((s) => s.name === stage) || {}).kind || 'open';
 // Every step name used anywhere (for filters, automations and email segments).
@@ -98,7 +114,8 @@ function save(body, id) {
 }
 
 function contactsIn(p) {
-  return db.prepare('SELECT id, stage, group_name, pipeline_id FROM contacts').all().filter((c) => ofContact(c).id === p.id);
+  const of = resolver();
+  return db.prepare('SELECT id, stage, group_name, pipeline_id FROM contacts').all().filter((c) => of(c).id === p.id);
 }
 
 // Removing a pipeline never removes people: they go to the first step of another pipeline.
@@ -122,4 +139,4 @@ router.post('/', wrap((req) => save({ business_id: req.query.biz, ...(req.body |
 router.put('/:id', wrap((req) => save(req.body || {}, Number(req.params.id))));
 router.delete('/:id', wrap((req) => remove(Number(req.params.id))));
 
-module.exports = { all, get, forBiz, ofContact, stageNames, kindOf, allStageNames, save, remove, contactsIn, router };
+module.exports = { all, get, forBiz, ofContact, resolver, stageNames, kindOf, allStageNames, save, remove, contactsIn, router };

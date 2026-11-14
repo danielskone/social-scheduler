@@ -172,3 +172,16 @@ test('activity history: who changed what, admins only', async () => {
   // Changes inside the smaller routers (team, backups) are named too.
   assert.ok(h.rows.some((x) => x.action === 'Added a team member' && x.detail === 'Pat Helper'));
 });
+
+test('big lists stay quick: light people lists and the fast pipeline lookup give the same answers', async () => {
+  const crm = require('../server/crm'), pipes = require('../server/pipelines');
+  await j('/contacts', { method: 'POST', json: { name: 'Light Test', email: 'light@x.com', group_name: 'Auto customer', notes: 'Long private notes' } });
+  const full = crm.listContacts({}), lite = (await j('/contacts?lite=1')).body;
+  assert.strictEqual(full.length, lite.length);
+  const row = lite.find((c) => c.email === 'light@x.com');
+  assert.strictEqual(row.notes, undefined, 'notes are left out of light lists');
+  assert.ok(row.name && row.stage && Array.isArray(row.tag_list) && row.pipeline);
+  const of = pipes.resolver();
+  for (const c of full) assert.strictEqual(of(c).id, pipes.ofContact(c).id);
+  assert.ok(crm.summary('').moved >= 0);
+});

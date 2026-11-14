@@ -219,7 +219,8 @@ const SHOWS = {
   no_follow_up: 'next_follow_up IS NULL AND do_not_contact=0',
   dnc: 'do_not_contact=1',
 };
-function listContacts({ q, group, stage, due, biz: b, pipeline, tag, show } = {}) {
+const LITE_DROP = ['notes', 'custom', 'address', 'website', 'email_ok_source', 'email_ok_at', 'created_at', 'updated_at', 'tags'];
+function listContacts({ q, group, stage, due, biz: b, pipeline, tag, show, lite } = {}) {
   const where = [], args = {};
   const bf = biz().filter(b);
   if (bf.sql) { let n = 0; where.push(bf.sql.replace(/\?/g, () => `@bg${n++}`)); bf.args.forEach((g, i) => { args[`bg${i}`] = g; }); }
@@ -232,7 +233,12 @@ function listContacts({ q, group, stage, due, biz: b, pipeline, tag, show } = {}
   const rows = db.prepare(`SELECT * FROM contacts ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY (next_follow_up IS NULL), next_follow_up, name COLLATE NOCASE`).all(args);
   // Which pipeline each person is in (people with none are in their business's first pipeline).
-  for (const r of rows) { const p = pipes().ofContact(r); r.pipeline = p.id; r.stage_kind = pipes().kindOf(p, r.stage); r.tag_list = tagList(r.tags); }
+  const of = pipes().resolver();
+  for (const r of rows) {
+    const p = of(r); r.pipeline = p.id; r.stage_kind = pipes().kindOf(p, r.stage); r.tag_list = tagList(r.tags);
+    // Lists and pickers only need the basics: leaving out notes and the rest keeps big lists quick.
+    if (lite) for (const k of LITE_DROP) delete r[k];
+  }
   return pipeline ? rows.filter((r) => r.pipeline === Number(pipeline)) : rows;
 }
 
@@ -251,19 +257,21 @@ function summary(b) {
   const W = bf.sql ? `WHERE ${bf.sql}` : '';
   const row = db.prepare(`SELECT COUNT(*) AS total,
       SUM(CASE WHEN next_follow_up IS NOT NULL AND next_follow_up <= ? THEN 1 ELSE 0 END) AS due,
-      SUM(CASE WHEN email_ok=1 AND do_not_contact=0 THEN 1 ELSE 0 END) AS emailable
+      SUM(CASE WHEN email_ok=1 AND do_not_contact=0 THEN 1 ELSE 0 END) AS emailable,
+      SUM(CASE WHEN stage<>'New' THEN 1 ELSE 0 END) AS moved
     FROM contacts ${W}`).get(t, ...bf.args);
   // Money: "open" steps add up as still to come, "won" steps as paid (each pipeline names its own steps).
   row.pledged = 0; row.paid = 0;
+  const of = pipes().resolver();
   for (const c of db.prepare(`SELECT stage, group_name, pipeline_id, amount FROM contacts ${W ? `${W} AND` : 'WHERE'} amount IS NOT NULL`).all(...bf.args)) {
-    const kind = pipes().kindOf(pipes().ofContact(c), c.stage);
+    const kind = pipes().kindOf(of(c), c.stage);
     if (kind === 'won') row.paid += c.amount; else if (kind === 'open') row.pledged += c.amount;
   }
   const byGroup = db.prepare(`SELECT group_name, COUNT(*) AS n, SUM(COALESCE(amount,0)) AS amount FROM contacts ${W} GROUP BY group_name ORDER BY n DESC`).all(...bf.args);
   const tf = biz().filter(b, 'c.group_name');
   const tasksDue = db.prepare(`SELECT COUNT(*) AS n FROM crm_tasks t LEFT JOIN contacts c ON c.id=t.contact_id
     WHERE t.done_at IS NULL AND t.due_on IS NOT NULL AND t.due_on <= ?${tf.sql ? ` AND (t.contact_id IS NULL OR ${tf.sql})` : ''}`).get(t, ...tf.args).n;
-  return { ...row, tasksDue, due: row.due || 0, emailable: row.emailable || 0, pledged: row.pledged || 0, paid: row.paid || 0, byGroup };
+  return { ...row, tasksDue, moved: row.moved || 0, due: row.due || 0, emailable: row.emailable || 0, pledged: row.pledged || 0, paid: row.paid || 0, byGroup };
 }
 
 // ---------- CSV ----------

@@ -31,7 +31,8 @@ function dashboard(q = {}) {
   const bf = biz.filter(q.biz);
   const and = bf.sql ? ` AND ${bf.sql}` : '';
   const people = db.prepare(`SELECT id, stage, COALESCE(amount,0) AS amount, group_name, pipeline_id, ${LOCAL_DAY} AS day FROM contacts WHERE 1=1${and}`).all(...bf.args);
-  people.forEach((p) => { p.pipe = pipes.ofContact(p); p.kind = pipes.kindOf(p.pipe, p.stage); });
+  const of = pipes.resolver();
+  people.forEach((p) => { p.pipe = of(p); p.kind = pipes.kindOf(p.pipe, p.stage); });
   const inRange = people.filter((p) => p.day >= r.from && p.day <= r.to);
   // The charts show one pipeline at a time (?pipeline=, or the business's first one).
   const choices = pipes.forBiz(q.biz);

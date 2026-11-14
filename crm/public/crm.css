@@ -869,3 +869,7 @@ button.sl-chip.sl-save { border-style: dashed; color: var(--accent, #4f46e5); }
   .au-row { grid-template-columns: 1fr; gap: 2px; }
   .au-time { order: 3; }
 }
+
+/* Big lists: "Show more" */
+.crm-more-row td { text-align: center; padding: 14px; }
+.col-more { width: 100%; margin-top: 6px; }

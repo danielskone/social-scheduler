@@ -206,10 +206,10 @@
     };
     const mf = q$('#member-form', root);
     let people = null;
-    mf.who.onfocus = async () => { if (people) return; people = await call('/contacts'); q$('#course-people', root).innerHTML = people.map((p) => `<option value="${h(p.name)}">${h(p.email || '')}</option>`).join(''); };
+    mf.who.onfocus = async () => { if (people) return; people = await call('/contacts?lite=1'); q$('#course-people', root).innerHTML = people.map((p) => `<option value="${h(p.name)}">${h(p.email || '')}</option>`).join(''); };
     mf.onsubmit = async (e) => {
       e.preventDefault();
-      people ||= await call('/contacts');
+      people ||= await call('/contacts?lite=1');
       const p = people.find((x) => x.name.toLowerCase() === mf.who.value.trim().toLowerCase());
       if (!p) return say('Pick someone from the list (add them on People first if they are new).', true);
       try { const r = await call(`/courses/${id}/members`, { method: 'POST', json: { contact_id: p.id } }); say(r.emailed ? `${p.name} is in. We emailed their link.` : `${p.name} is in. Press "Their link" to send it.`); reload(); }

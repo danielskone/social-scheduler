@@ -46,7 +46,7 @@
   const tile = (label, value, ico, c, sub) => `<div class="tile"><div class="tile-ico" style="--c:${c}">${svg(ico)}</div><div><div class="label">${label}</div><div class="value">${value}</div>${sub ? `<div class="muted small">${sub}</div>` : ''}</div></div>`;
   const dlg = (wide) => { const d = q$('#crm-edit-dialog'); d.classList.toggle('wide', Boolean(wide)); return d; };
   const copy = async (text) => { try { await navigator.clipboard.writeText(text); say('Link copied.'); } catch { prompt('Copy this link:', text); } };
-  const people = async () => (await call('/contacts')).map((c) => ({ id: c.id, name: c.name, email: c.email }));
+  const people = async () => (await call('/contacts?lite=1')).map((c) => ({ id: c.id, name: c.name, email: c.email }));
   const pickPerson = (list, name) => list.find((x) => x.name.toLowerCase() === String(name || '').trim().toLowerCase());
 
   // ======================= Quotes (a mode of the Payments tab) =======================

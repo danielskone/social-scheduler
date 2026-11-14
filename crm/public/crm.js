@@ -163,7 +163,7 @@
     if (store.get('start-hidden', false)) { box.innerHTML = ''; return; }
     const [tasks, email] = await Promise.all([call('/tasks').catch(() => []), call('/email').catch(() => null)]);
     const people = meta.summary.total || 0;
-    const moved = people && (await call('/contacts').catch(() => [])).some((c) => c.stage !== 'New');
+    const moved = (meta.summary.moved || 0) > 0;
     const steps = [
       ['Take the 1-minute tour', store.get('tour-done', false), startTour],
       ['Add your first contact', people > 0, () => openContact(null)],
@@ -242,9 +242,16 @@
   const refresh = () => renderContacts(tab);
 
   // ---------- People ----------
-  async function renderList() {
-    const rows = await call(`/contacts?${window.VTLists.params()}`);
-    q$('#crm-table tbody').innerHTML = rows.map((c) => `<tr data-id="${c.id}">
+  // Big lists draw 200 rows at a time so the page stays quick; "Show more" draws the next ones.
+  const PAGE = 200;
+  let listShown = PAGE, listKey = '';
+  async function renderList(more) {
+    const key = window.VTLists.params();
+    if (more !== true && key !== listKey) listShown = PAGE;
+    listKey = key;
+    const rows = await call(`/contacts?lite=1&${key}`);
+    const page = rows.slice(0, listShown);
+    q$('#crm-table tbody').innerHTML = (page.map((c) => `<tr data-id="${c.id}">
       <td class="sel"><input type="checkbox" data-sel aria-label="Pick ${h(c.name)}"></td>
       <td><div class="crm-person">${avatar(c.name)}<div class="who"><b>${h(c.name)}</b>${c.company && c.company !== c.name ? `<div class="muted">${h(c.company)}</div>` : ''}${c.do_not_contact || (c.tag_list || []).length ? `<div class="tag-row">${c.do_not_contact ? '<span class="pill off">Do not contact</span>' : ''}${(c.tag_list || []).map((t) => `<span class="tag">${h(t)}</span>`).join('')}</div>` : ''}</div></div></td>
       <td>${groupPill(c.group_name)}</td>
@@ -252,13 +259,14 @@
       <td><b>${money(c.amount)}</b></td>
       <td><div class="crm-acts">${c.phone ? `<a class="crm-act" href="tel:${h(c.phone)}" title="Call ${h(c.phone)}">${svg('phone')}<span>${h(c.phone)}</span></a>` : ''}${c.email ? `<a class="crm-act" href="mailto:${h(c.email)}" title="${c.email_ok ? 'Said yes to email' : 'Email'}">${svg('email')}<span>${h(c.email)}</span>${c.email_ok ? '<span class="ok">✓</span>' : ''}</a>` : ''}</div></td>
       <td><span class="due ${dueClass(c.next_follow_up)}">${c.next_follow_up ? (dueClass(c.next_follow_up) === 'overdue' ? 'Late · ' : dueClass(c.next_follow_up) === 'due-today' ? 'Today · ' : '') + niceDate(c.next_follow_up) : '<span class="muted">—</span>'}</span></td>
-    </tr>`).join('') || `<tr><td colspan="7" class="crm-empty muted">${meta.summary.total ? '<span class="big">🔍</span>Nobody matches that search. Try fewer words or pick "All groups".' : '<span class="big">👋</span><b>No contacts yet.</b><br>Press "+ Add contact", bring in a spreadsheet with "Import CSV", or share a sign-up form.'}</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="7" class="crm-empty muted">${meta.summary.total ? '<span class="big">🔍</span>Nobody matches that search. Try fewer words or pick "All groups".' : '<span class="big">👋</span><b>No contacts yet.</b><br>Press "+ Add contact", bring in a spreadsheet with "Import CSV", or share a sign-up form.'}</td></tr>`)
+      + (rows.length > page.length ? `<tr class="crm-more-row"><td colspan="7"><button type="button" class="btn ghost" data-more>Show ${Math.min(PAGE, rows.length - page.length)} more</button> <span class="muted small">Showing ${page.length} of ${rows.length}. Search to find someone fast.</span></td></tr>` : '');
     renderStart();
     window.VTLists.after(rows, { render: renderList });
   }
   q$('#crm-q').oninput = () => { clearTimeout(timer); timer = setTimeout(renderList, 200); };
   ['#crm-group', '#crm-stage', '#crm-due', '#crm-tag', '#crm-show'].forEach((s) => (q$(s).onchange = renderList));
-  q$('#crm-table tbody').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr && !e.target.closest('a') && !e.target.closest('td.sel')) openContact(Number(tr.dataset.id)); };
+  q$('#crm-table tbody').onclick = (e) => { if (e.target.closest('[data-more]')) { listShown += PAGE; renderList(true); return; } const tr = e.target.closest('tr[data-id]'); if (tr && !e.target.closest('a') && !e.target.closest('td.sel')) openContact(Number(tr.dataset.id)); };
   q$('#crm-add').onclick = () => openContact(null);
   q$('#crm-task-add').onclick = () => editTask({});
 
@@ -280,22 +288,25 @@
   // With nothing picked yet, a business opens on its own pipeline before the shared one.
   const curPipe = () => { const b = window.VTHome.current();
     return meta.pipelines.find((x) => x.id === Number(store.get(pipeKey(), 0))) || (b && meta.pipelines.find((x) => x.business_id === b.id)) || meta.pipelines[0]; };
+  const boardOpen = new Set(); // steps with every card shown (big steps show 50 at first)
   async function renderBoard() {
     const pl = curPipe();
     q$('#pipe-pick').innerHTML = meta.pipelines.map((x) => `<option value="${x.id}"${x.id === pl.id ? ' selected' : ''}>${h(x.name)}</option>`).join('');
     q$('#pipe-pick').hidden = meta.pipelines.length < 2;
     const group = q$('#pipe-group').value;
-    const rows = await call(`/contacts?pipeline=${pl.id}${group ? `&group=${encodeURIComponent(group)}` : ''}`);
+    const rows = await call(`/contacts?lite=1&pipeline=${pl.id}${group ? `&group=${encodeURIComponent(group)}` : ''}`);
     const open = rows.filter((c) => c.stage_kind === 'open').reduce((n, c) => n + (c.amount || 0), 0);
     q$('#pipe-total').textContent = `${rows.length} ${rows.length === 1 ? 'person' : 'people'} · ${money(open)} still open`;
     q$('#pipe-board').innerHTML = pl.stages.map(({ name: st, kind }) => {
       const cards = rows.filter((c) => c.stage === st);
       const total = cards.reduce((n, c) => n + (c.amount || 0), 0);
+      const cap = boardOpen.has(st) ? cards.length : 50, extra = cards.length - cap;
       return `<div class="col ${kind}" data-stage="${h(st)}" style="--c:${stageC(st)}"><h3>${h(st)}${kind !== 'open' ? ` <small class="kind">${kind === 'won' ? 'Won' : 'Lost'}</small>` : ''}</h3><div class="muted">${cards.length} ${cards.length === 1 ? 'person' : 'people'} · ${money(total)}</div>
-        ${cards.map((c) => `<div class="card" draggable="true" data-id="${c.id}"><div class="top">${avatar(c.company || c.name, 'sm')}<div><b>${h(c.company || c.name)}</b>
+        ${cards.slice(0, cap).map((c) => `<div class="card" draggable="true" data-id="${c.id}"><div class="top">${avatar(c.company || c.name, 'sm')}<div><b>${h(c.company || c.name)}</b>
           ${c.company && c.company !== c.name ? `<div class="muted small">${h(c.name)}</div>` : ''}</div></div>
           ${c.amount ? `<div class="amt">${money(c.amount)}</div>` : ''}
           <div class="meta">${groupPill(c.group_name)}${c.next_follow_up ? ` <span class="${dueClass(c.next_follow_up)}">${niceDate(c.next_follow_up)}</span>` : ''}</div></div>`).join('') || '<div class="empty-col">Drag a card here</div>'}
+        ${extra > 0 ? `<button type="button" class="btn ghost col-more" data-col-more="${h(st)}">Show ${extra} more</button>` : ''}
       </div>`;
     }).join('');
   }
@@ -369,7 +380,7 @@
     try { await call(`/contacts/${id}`, { method: 'PUT', json: { stage: col.dataset.stage, pipeline_id: curPipe().id } }); } catch (err) { say(err.message, true); }
     refresh();
   });
-  board.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c) openContact(Number(c.dataset.id)); });
+  board.addEventListener('click', (e) => { const m = e.target.closest('[data-col-more]'); if (m) { boardOpen.add(m.dataset.colMore); renderBoard(); return; } const c = e.target.closest('.card'); if (c) openContact(Number(c.dataset.id)); });
 
   // ---------- Tasks ----------
   const taskRow = (t, showWho = true) => `<li class="${t.done_at ? 'done' : ''}" data-task="${t.id}">
@@ -406,7 +417,7 @@
   q$('#task-list').onclick = (e) => taskClick(e, refresh);
 
   async function editTask(t, after = refresh) {
-    const [people, team] = await Promise.all([call('/contacts'), call('/taskboard/people').catch(() => [])]);
+    const [people, team] = await Promise.all([call('/contacts?lite=1'), call('/taskboard/people').catch(() => [])]);
     const dlg = q$('#crm-edit-dialog');
     dlg.innerHTML = `<form id="task-form"><h1>${t.id ? 'Edit task' : 'New task'}</h1>
       <label class="field"><span>To do</span><input name="title" required value="${h(t.title)}" placeholder="e.g. Call about their invoice" style="width:100%"></label>

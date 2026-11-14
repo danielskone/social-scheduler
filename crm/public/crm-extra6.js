@@ -29,8 +29,8 @@
   const linkbox = (v) => `<div class="linkbox"><input readonly value="${h(v)}" aria-label="Link"><button class="btn" type="button" data-copy-val="${h(v)}">Copy link</button></div>`;
   const SRC = { sold: ['Sold', '#16a34a'], given: ['Given', '#2563eb'], points: ['Points reward', '#d97706'] };
   let people = null;
-  const pickPerson = async (name) => { people ||= await call('/contacts'); return people.find((x) => x.name.toLowerCase() === String(name).trim().toLowerCase()); };
-  const peopleList = async (el) => { people ||= await call('/contacts'); el.innerHTML = people.map((p) => `<option value="${h(p.name)}">${h(p.email || '')}</option>`).join(''); };
+  const pickPerson = async (name) => { people ||= await call('/contacts?lite=1'); return people.find((x) => x.name.toLowerCase() === String(name).trim().toLowerCase()); };
+  const peopleList = async (el) => { people ||= await call('/contacts?lite=1'); el.innerHTML = people.map((p) => `<option value="${h(p.name)}">${h(p.email || '')}</option>`).join(''); };
 
   // ---------- Gift cards ----------
   async function renderGiftCards(root, modeBar) {
