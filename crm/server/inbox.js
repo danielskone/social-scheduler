@@ -120,7 +120,7 @@ async function check(opts = {}) {
       setState('last_check', new Date().toISOString());
       setState('last_error', '');
     } catch (e) {
-      const msg = /auth|login|credentials/i.test(e.message) ? 'Your mailbox said the email or password is wrong.' : `Could not read your inbox (${e.message}).`;
+      const msg = /auth|login|credentials/i.test(e.message) ? 'Your mailbox said the email or password is wrong.' : `Could not read your inbox (${e.message}${e.responseText ? `: ${e.responseText}` : ''}).`;
       setState('last_error', msg);
       return { ok: false, added: 0, error: msg };
     }
