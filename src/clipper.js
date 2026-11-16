@@ -326,16 +326,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 // ---------- Making a clip ----------
 // fps=30 comes first, so a 60 fps phone video only has half the frames to crop and resize.
 // posExpr: for "Follow faces", where the tall frame sits over time (0 = left edge, 1 = right edge).
+// SHARPEN: the picture is made bigger with the sharpest resizer (lanczos), then lightly sharpened
+// (only the brightness, not the colors, so no colored halos), so clips look crisp on Instagram,
+// Facebook and TikTok even after they compress them again.
+const SHARPEN = 'unsharp=5:5:0.9:5:5:0.0';
 function videoFilter({ width, height }, framing, posExpr) {
   const W = 1080, H = 1920;
   if (framing === 'fit') {
     return `[0:v]fps=30,split=2[a][b];[a]scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bilinear,crop=${W}:${H},boxblur=28:3,eq=brightness=-0.08[bg];` +
-      `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease,setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[v]`;
+      `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease:flags=lanczos,${SHARPEN},setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[v]`;
   }
   const pos = posExpr ? `(${posExpr})` : ({ left: 0.15, center: 0.5, right: 0.85 }[framing] ?? 0.5);
   const cropW = `min(iw\\,ih*9/16)`;
   const cropH = `min(ih\\,iw*16/9)`;
-  return `[0:v]fps=30,crop=${cropW}:${cropH}:(iw-${cropW})*${pos}:(ih-${cropH})/2,scale=${W}:${H},setsar=1,format=yuv420p[v]`;
+  return `[0:v]fps=30,crop=${cropW}:${cropH}:(iw-${cropW})*${pos}:(ih-${cropH})/2,scale=${W}:${H}:flags=lanczos,${SHARPEN},setsar=1,format=yuv420p[v]`;
 }
 
 // The full clip and its small preview are made in one go: the video is read once and the
@@ -360,8 +364,8 @@ function hasHardwareEncoder() {
 // Size caps keep files small enough to play and save quickly, even over a phone connection,
 // while staying sharp for Reels, Shorts and TikTok (all re-compress uploads anyway).
 const fullVideo = (hw) => (hw
-  ? ['-c:v', 'h264_videotoolbox', '-b:v', '5M', '-maxrate', '6M', '-bufsize', '10M', '-profile:v', 'high', '-allow_sw', '1']
-  : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-maxrate', '6M', '-bufsize', '10M', '-profile:v', 'high', '-level', '4.1']);
+  ? ['-c:v', 'h264_videotoolbox', '-b:v', '8M', '-maxrate', '10M', '-bufsize', '16M', '-profile:v', 'high', '-allow_sw', '1']
+  : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '19', '-maxrate', '10M', '-bufsize', '16M', '-profile:v', 'high', '-level', '4.1']);
 const smallVideo = (hw) => (hw
   ? ['-c:v', 'h264_videotoolbox', '-b:v', '900k', '-maxrate', '1200k', '-bufsize', '2M', '-profile:v', 'main', '-allow_sw', '1']
   : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-maxrate', '1200k', '-bufsize', '2M', '-profile:v', 'main']);
