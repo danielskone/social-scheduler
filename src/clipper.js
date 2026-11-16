@@ -169,63 +169,83 @@ function pickClips({ segments = [], loudness = [], duration, length = 'medium', 
     const xs = loudness.slice(Math.floor(a * 2), Math.ceil(b * 2));
     return xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0;
   };
-  const candidates = [];
+  const findCandidates = (minLen) => {
+    const candidates = [];
 
-  if (segments.length) {
-    for (let i = 0; i < segments.length; i++) {
-      // Start on a sentence, not in the middle of someone's thought.
-      if (i > 0 && !/[.!?]["']?$/.test(segments[i - 1].text) && segments[i].start - segments[i - 1].end < 1.2) continue;
-      for (let j = i; j < segments.length; j++) {
-        const start = Math.max(0, segments[i].start - 0.25);
-        const end = Math.min(duration, segments[j].end + 0.35);
-        const len = end - start;
-        if (len > maxLen) break;
-        if (len < minLen) continue;
-        const parts = segments.slice(i, j + 1);
-        const text = parts.map((s) => s.text).join(' ');
-        const words = text.split(/\s+/).filter(Boolean).length;
-        const talking = parts.reduce((s, p) => s + (p.end - p.start), 0);
-        let gaps = 0;
-        for (let k = i + 1; k <= j; k++) gaps = Math.max(gaps, segments[k].start - segments[k - 1].end);
-        const reasons = [];
-        let score = 40;
-        const first = parts[0].text.replace(FILLER, '');
-        if (STRONG_START.test(first) || /\?$/.test(parts[0].text)) { score += 14; reasons.push('Strong opening line'); }
-        const hooks = (text.match(HOOKS) || []).length;
-        score += Math.min(14, hooks * 1.2);
-        if (hooks >= 6) reasons.push('Grabby words');
-        const qs = (text.match(/[?!]/g) || []).length;
-        score += Math.min(8, qs * 2.5);
-        if (qs >= 2) reasons.push('Questions and big moments');
-        if (/\d/.test(text)) { score += 4; reasons.push('Specific numbers'); }
-        const wps = words / len;
-        if (wps > 2.2) { score += 8; reasons.push('Fast, lively delivery'); } else if (wps < 1.3) score -= 10;
-        if (talking / len > 0.85) score += 6; else if (talking / len < 0.6) score -= 10;
-        if (gaps > 2.5) score -= 8;
-        if (avgLoud && loudAt(start, end) > avgLoud * 1.15) { score += 6; reasons.push('High energy'); }
-        if (/[.!?]["']?$/.test(parts[parts.length - 1].text)) { score += 6; reasons.push('Ends on a full thought'); } else score -= 6;
-        candidates.push({ start, end, score, reasons, text });
+    if (segments.length) {
+      for (let i = 0; i < segments.length; i++) {
+        // Start on a sentence, not in the middle of someone's thought.
+        if (i > 0 && !/[.!?]["']?$/.test(segments[i - 1].text) && segments[i].start - segments[i - 1].end < 1.2) continue;
+        for (let j = i; j < segments.length; j++) {
+          const start = Math.max(0, segments[i].start - 0.25);
+          const end = Math.min(duration, segments[j].end + 0.35);
+          const len = end - start;
+          if (len > maxLen) break;
+          if (len < minLen) continue;
+          const parts = segments.slice(i, j + 1);
+          const text = parts.map((s) => s.text).join(' ');
+          const words = text.split(/\s+/).filter(Boolean).length;
+          const talking = parts.reduce((s, p) => s + (p.end - p.start), 0);
+          let gaps = 0;
+          for (let k = i + 1; k <= j; k++) gaps = Math.max(gaps, segments[k].start - segments[k - 1].end);
+          const reasons = [];
+          let score = 40;
+          const first = parts[0].text.replace(FILLER, '');
+          if (STRONG_START.test(first) || /\?$/.test(parts[0].text)) { score += 14; reasons.push('Strong opening line'); }
+          const hooks = (text.match(HOOKS) || []).length;
+          score += Math.min(14, hooks * 1.2);
+          if (hooks >= 6) reasons.push('Grabby words');
+          const qs = (text.match(/[?!]/g) || []).length;
+          score += Math.min(8, qs * 2.5);
+          if (qs >= 2) reasons.push('Questions and big moments');
+          if (/\d/.test(text)) { score += 4; reasons.push('Specific numbers'); }
+          const wps = words / len;
+          if (wps > 2.2) { score += 8; reasons.push('Fast, lively delivery'); } else if (wps < 1.3) score -= 10;
+          if (talking / len > 0.85) score += 6; else if (talking / len < 0.6) score -= 10;
+          if (gaps > 2.5) score -= 8;
+          if (avgLoud && loudAt(start, end) > avgLoud * 1.15) { score += 6; reasons.push('High energy'); }
+          if (/[.!?]["']?$/.test(parts[parts.length - 1].text)) { score += 6; reasons.push('Ends on a full thought'); } else score -= 6;
+          candidates.push({ start, end, score, reasons, text });
+        }
       }
     }
-  }
 
-  // No talking (music, b-roll): use the most energetic stretches instead.
-  if (!candidates.length && duration) {
-    const len = Math.min(maxLen, Math.max(minLen, Math.round((minLen + maxLen) / 2)), duration);
-    for (let s = 0; s + len <= duration + 0.01; s += Math.max(2, len / 4)) {
-      const e = loudAt(s, s + len);
-      candidates.push({ start: s, end: s + len, score: 50 + (avgLoud ? Math.round(Math.min(20, ((e / avgLoud) - 1) * 40)) : 0), reasons: ['Most energetic part'], text: '' });
+    // No talking (music, b-roll): use the most energetic stretches instead.
+    if (!candidates.length && duration) {
+      const len = Math.min(maxLen, Math.max(minLen, Math.round((minLen + maxLen) / 2)), duration);
+      for (let s = 0; s + len <= duration + 0.01; s += Math.max(2, len / 4)) {
+        const e = loudAt(s, s + len);
+        candidates.push({ start: s, end: s + len, score: 50 + (avgLoud ? Math.round(Math.min(20, ((e / avgLoud) - 1) * 40)) : 0), reasons: ['Most energetic part'], text: '' });
+      }
+      if (!candidates.length) candidates.push({ start: 0, end: Math.min(duration, maxLen), score: 50, reasons: ['Whole video'], text: '' });
     }
-    if (!candidates.length) candidates.push({ start: 0, end: Math.min(duration, maxLen), score: 50, reasons: ['Whole video'], text: '' });
-  }
 
-  candidates.sort((a, b) => b.score - a.score || a.start - b.start);
+    candidates.sort((a, b) => b.score - a.score || a.start - b.start);
+    return candidates;
+  };
+
+  // Best clips first, each from a different part of the video. If the video is too short to give
+  // that many separate clips, the rest may share part of their time with another clip (each still
+  // starts somewhere new), and if that's still not enough, shorter clips are allowed too.
+  // That way the number of clips asked for is always made when the video has enough talking.
+  const overlap = (a, b) => Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start));
+  const rules = [
+    (c, p) => overlap(c, p) <= 1,
+    (c, p) => overlap(c, p) <= (c.end - c.start) * 0.4 && Math.abs(c.start - p.start) >= 5,
+    (c, p) => Math.abs(c.start - p.start) >= 3 && Math.abs(c.end - p.end) >= 3,
+  ];
   const picked = [];
-  for (const c of candidates) {
-    if (picked.length >= count) break;
-    if (picked.some((p) => c.start < p.end - 1 && c.end > p.start + 1)) continue;
-    picked.push(c);
-  }
+  const fill = (candidates) => {
+    for (const ok of rules) {
+      for (const c of candidates) {
+        if (picked.length >= count) return;
+        if (picked.includes(c) || !picked.every((p) => ok(c, p))) continue;
+        picked.push(c);
+      }
+    }
+  };
+  fill(findCandidates(minLen));
+  if (picked.length < count && minLen > 8) fill(findCandidates(Math.min(8, minLen)));
   return picked.map((c) => ({
     start: +c.start.toFixed(2),
     end: +c.end.toFixed(2),

@@ -267,3 +267,13 @@ test('Schedule all: every clip gets its own time on every picked account, and is
   assert.match(page, /Schedule all/);
   assert.match(page, /\/posts\/from-clips/);
 });
+
+test('Clips: a 6 minute talk still gives all 20 clips asked for (some share a little time)', () => {
+  const segments = [];
+  for (let t = 0; t < 360; t += 12) segments.push({ start: t, end: t + 11.8, text: `Here is a longer sentence number ${t / 12} about the parade and the floats.` });
+  const picks = clipper.pickClips({ segments, loudness: [], duration: 360, length: 'short', count: 20 });
+  assert.strictEqual(picks.length, 20);
+  const starts = new Set(picks.map((p) => Math.round(p.start)));
+  assert.strictEqual(starts.size, 20, 'every clip starts somewhere different');
+  assert.ok(picks.every((p) => p.end - p.start >= 8 && p.end - p.start <= 35));
+});
