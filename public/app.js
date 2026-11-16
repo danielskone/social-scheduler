@@ -54,7 +54,14 @@ const THIS_APP = VP.apps.find((a) => a.key === VP.app) || VP.apps[0];
 const appForView = (view) => VP.apps.find((a) => a.views.includes(view));
 const appIcon = (a) => `/icons/${a.icon}-192.png`;
 // On the Mac each app is its own program on its own port (same computer, same address).
-const appHref = (a) => (a.port ? `${location.protocol}//${location.hostname}:${a.port}/` : a.path);
+// Away from home (the public .ts.net address), Viral Post and Viral Clips are on the
+// HTTPS ports 8443 and 10000 instead of 3000 and 3002.
+const AWAY_PORTS = { 3000: 8443, 3002: 10000 };
+const appHref = (a) => {
+  if (!a.port) return a.path;
+  if (location.hostname.endsWith('.ts.net') && AWAY_PORTS[a.port]) return `https://${location.hostname}:${AWAY_PORTS[a.port]}/`;
+  return `${location.protocol}//${location.hostname}:${a.port}/`;
+};
 
 function buildAppMenu() {
   const nav = $('.sidebar nav');
