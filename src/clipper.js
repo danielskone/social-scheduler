@@ -412,7 +412,10 @@ async function renderClip(job, clip, transcript) {
   if (clip.framing === 'face') {
     // Find the faces and follow them. If anything goes wrong, the middle of the picture is used.
     try {
-      const fp = await facePath({ ffmpeg: ffmpegPath(), source: job.source_file, start: clip.start, len, width: job.width, height: job.height });
+      // When words are said in this clip, so the frame follows the person who is talking.
+      const speech = (transcript.segments || []).flatMap((sg) => (sg.words?.length ? sg.words : [sg]))
+        .filter((w) => w.end > clip.start && w.start < clip.end).map((w) => [w.start - clip.start, w.end - clip.start]);
+      const fp = await facePath({ ffmpeg: ffmpegPath(), source: job.source_file, start: clip.start, len, width: job.width, height: job.height, speech });
       posExpr = fp?.expr || null;
     } catch (err) {
       console.warn('[clips] face finder:', err.message);
