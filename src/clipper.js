@@ -14,6 +14,7 @@ const { pipeline } = require('stream/promises');
 const express = require('express');
 const multer = require('multer');
 const config = require('./config');
+const { facePath } = require('./facetrack');
 const db = require('./db');
 const linkimport = require('./linkimport');
 
@@ -66,7 +67,7 @@ if (!db.prepare('PRAGMA table_info(clips)').all().some((c) => c.name === 'schedu
 }
 
 const LENGTHS = { short: [15, 35], medium: [30, 60], long: [55, 90] };
-const FRAMINGS = ['center', 'left', 'right', 'fit'];
+const FRAMINGS = ['face', 'center', 'left', 'right', 'fit'];
 const CAPTIONS = ['bold', 'clean', 'none'];
 
 // ---------- Small helpers ----------
@@ -324,13 +325,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 // ---------- Making a clip ----------
 // fps=30 comes first, so a 60 fps phone video only has half the frames to crop and resize.
-function videoFilter({ width, height }, framing) {
+// posExpr: for "Follow faces", where the tall frame sits over time (0 = left edge, 1 = right edge).
+function videoFilter({ width, height }, framing, posExpr) {
   const W = 1080, H = 1920;
   if (framing === 'fit') {
     return `[0:v]fps=30,split=2[a][b];[a]scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bilinear,crop=${W}:${H},boxblur=28:3,eq=brightness=-0.08[bg];` +
       `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease,setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[v]`;
   }
-  const pos = { left: 0.15, center: 0.5, right: 0.85 }[framing] ?? 0.5;
+  const pos = posExpr ? `(${posExpr})` : ({ left: 0.15, center: 0.5, right: 0.85 }[framing] ?? 0.5);
   const cropW = `min(iw\\,ih*9/16)`;
   const cropH = `min(ih\\,iw*16/9)`;
   return `[0:v]fps=30,crop=${cropW}:${cropH}:(iw-${cropW})*${pos}:(ih-${cropH})/2,scale=${W}:${H},setsar=1,format=yuv420p[v]`;
@@ -382,7 +384,17 @@ async function renderClip(job, clip, transcript) {
   const preview = `clip-${clip.n}-${tag}-small.mp4`;
   const poster = `clip-${clip.n}-${tag}.jpg`;
   const len = clip.end - clip.start;
-  const plain = videoFilter(job, clip.framing);
+  let posExpr = null;
+  if (clip.framing === 'face') {
+    // Find the faces and follow them. If anything goes wrong, the middle of the picture is used.
+    try {
+      const fp = await facePath({ ffmpeg: ffmpegPath(), source: job.source_file, start: clip.start, len, width: job.width, height: job.height });
+      posExpr = fp?.expr || null;
+    } catch (err) {
+      console.warn('[clips] face finder:', err.message);
+    }
+  }
+  const plain = videoFilter(job, clip.framing, posExpr);
   let filter = plain;
   let assFile = null;
   if (clip.captions !== 'none' && transcript.segments.length) {
@@ -481,7 +493,7 @@ async function processJob(job) {
     const picks = pickClips({ ...transcript, duration: job.duration, length: settings.length, count: settings.count });
     const ins = db.prepare(`INSERT INTO clips (job_id, n, start, end, score, reason, title, text, framing, captions)
       VALUES (@job_id, @n, @start, @end, @score, @reason, @title, @text, @framing, @captions)`);
-    db.transaction(() => picks.forEach((p, i) => ins.run({ ...p, job_id: job.id, n: i + 1, framing: settings.framing || 'center', captions: settings.captions || 'bold' })))();
+    db.transaction(() => picks.forEach((p, i) => ins.run({ ...p, job_id: job.id, n: i + 1, framing: settings.framing || 'face', captions: settings.captions || 'bold' })))();
   }
   setJob(job.id, { status: 'ready', step: null, progress: 100 });
 }
@@ -595,7 +607,7 @@ router.post('/', upload.single('video'), async (req, res) => {
 
 const readSettings = (b = {}) => ({
   length: LENGTHS[b.length] ? b.length : 'medium',
-  framing: FRAMINGS.includes(b.framing) ? b.framing : 'center',
+  framing: FRAMINGS.includes(b.framing) ? b.framing : 'face',
   captions: CAPTIONS.includes(b.captions) ? b.captions : 'bold',
   count: Math.max(1, Math.min(20, Number(b.count) || 8)),
 });

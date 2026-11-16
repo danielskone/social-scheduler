@@ -3,7 +3,7 @@
 const clipState = { jobs: [], shown: new Map(), timer: null };
 const fmtSec = (s) => { s = Math.max(0, Number(s) || 0); const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`; };
 const fmtLen = (s) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min` : s >= 60 ? `${Math.round(s / 60)} min` : `${Math.round(s)} s`);
-const FRAMING_NAMES = { center: 'Fill (center)', left: 'Fill (left side)', right: 'Fill (right side)', fit: 'Whole video' };
+const FRAMING_NAMES = { face: 'Follow faces', center: 'Fill (center)', left: 'Fill (left side)', right: 'Fill (right side)', fit: 'Whole video' };
 const CAPTION_NAMES = { bold: 'Bold captions', clean: 'Clean captions', none: 'No captions' };
 
 async function renderClips() {
