@@ -32,3 +32,22 @@ test('Follow faces: ffmpeg position expression walks through the stops', () => {
   assert.ok(Math.abs(evalAt(2.5) - 0.5) < 1e-6);
   assert.strictEqual(evalAt(5), 0.9);
 });
+
+test('Follow faces: with two people, follows the one talking and switches when the other talks', () => {
+  const { targets } = require('../src/facetrack');
+  const samples = [];
+  for (let i = 0; i < 72; i++) { // 12 seconds, 6 looks a second
+    const t = i / 6;
+    const leftTalks = t < 6;
+    samples.push({ t, faces: [
+      { x1: 0.15, y1: 0.3, x2: 0.22, y2: 0.45, score: 0.9, talk: leftTalks ? 6 : 0.3 },
+      { x1: 0.75, y1: 0.2, x2: 0.85, y2: 0.4, score: 0.9, talk: leftTalks ? 0.3 : 6 }, // bigger face, quiet at first
+    ] });
+  }
+  const pts = targets(samples);
+  assert.ok(pts[0].x < 0.3, 'starts on the person talking, not the bigger face');
+  assert.ok(pts.filter((p) => p.t > 1 && p.t < 5.5).every((p) => p.x < 0.3), 'stays on them while they talk');
+  assert.ok(pts.filter((p) => p.t > 7.5).every((p) => p.x > 0.7), 'moves to the other person once they talk');
+  const switches = pts.filter((p, i) => i && (p.x > 0.5) !== (pts[i - 1].x > 0.5)).length;
+  assert.strictEqual(switches, 1, 'no jumping back and forth');
+});

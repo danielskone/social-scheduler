@@ -3,12 +3,15 @@
 // on this computer (no internet, nothing to pay), and works out where the tall 9:16 frame
 // should sit so the person stays in the picture. The frame holds still while the person stays
 // inside it and glides over when they move, like a camera operator would.
+// When there is more than one person, it follows the one who is talking: it watches whose mouth
+// moves while words are being said, and only switches when someone else clearly takes over.
 const path = require('path');
 const { spawn } = require('child_process');
 
 const MODEL = path.join(__dirname, '..', 'assets', 'models', 'face-detector-rfb320.onnx');
 const IN_W = 320, IN_H = 240;
-const SAMPLES_PER_SEC = 3;
+const SAMPLES_PER_SEC = 6; // mouths are checked 6 times a second, faces are found 3 times a second
+const BIG_W = IN_W * 2, BIG_H = IN_H * 2; // bigger frames, so small mouths can be seen moving
 
 let sessionPromise = null;
 function session() {
@@ -75,9 +78,9 @@ function decode(scores, boxes, minScore = 0.7) {
 function readFrames(ffmpeg, source, start, len, onFrame) {
   return new Promise((resolve, reject) => {
     const args = ['-hide_banner', '-loglevel', 'error', '-ss', String(start), '-t', String(len), '-i', source,
-      '-an', '-vf', `fps=${SAMPLES_PER_SEC},scale=${IN_W}:${IN_H}:flags=bilinear`, '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-threads', '1', 'pipe:1'];
+      '-an', '-vf', `fps=${SAMPLES_PER_SEC},scale=${BIG_W}:${BIG_H}:flags=bilinear`, '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-threads', '1', 'pipe:1'];
     const child = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const size = IN_W * IN_H * 3;
+    const size = BIG_W * BIG_H * 3;
     let buf = Buffer.alloc(0);
     let n = 0;
     let chain = Promise.resolve();
@@ -97,48 +100,131 @@ function readFrames(ffmpeg, source, start, len, onFrame) {
   });
 }
 
+// How much a region of the picture changed since the last look (0..255), on brightness only.
+function regionChange(cur, prev, f, fx1, fy1, fx2, fy2) {
+  const w = f.x2 - f.x1, h = f.y2 - f.y1;
+  const x1 = Math.max(0, Math.floor((f.x1 + w * fx1) * BIG_W)), x2 = Math.min(BIG_W, Math.ceil((f.x1 + w * fx2) * BIG_W));
+  const y1 = Math.max(0, Math.floor((f.y1 + h * fy1) * BIG_H)), y2 = Math.min(BIG_H, Math.ceil((f.y1 + h * fy2) * BIG_H));
+  let sum = 0, n = 0;
+  for (let y = y1; y < y2; y++) for (let x = x1; x < x2; x++) { const i = y * BIG_W + x; sum += Math.abs(cur[i] - prev[i]); n++; }
+  return n ? sum / n : 0;
+}
+
+// Mouth movement for one face: change around the mouth, minus change around the eyes
+// (so a person turning their head or the camera moving doesn't count as talking).
+function mouthMovement(cur, prev, f) {
+  if (!prev) return 0;
+  const mouth = regionChange(cur, prev, f, 0.25, 0.62, 0.75, 0.98);
+  const eyes = regionChange(cur, prev, f, 0.15, 0.2, 0.85, 0.5);
+  return Math.max(0, mouth - eyes * 0.8);
+}
+
 async function detectFaces(ffmpeg, source, start, len) {
   const { ort, s } = await session();
   const input = new Float32Array(3 * IN_W * IN_H);
   const plane = IN_W * IN_H;
   const samples = [];
+  let prevLuma = null;
+  let faces = [];
+  let n = 0;
   await readFrames(ffmpeg, source, start, len, async (rgb, t) => {
-    for (let i = 0; i < plane; i++) {
-      input[i] = (rgb[i * 3] - 127) / 128;
-      input[plane + i] = (rgb[i * 3 + 1] - 127) / 128;
-      input[2 * plane + i] = (rgb[i * 3 + 2] - 127) / 128;
+    const luma = new Uint8Array(BIG_W * BIG_H);
+    for (let i = 0; i < luma.length; i++) luma[i] = (rgb[i * 3] * 77 + rgb[i * 3 + 1] * 150 + rgb[i * 3 + 2] * 29) >> 8;
+    if (n++ % 2 === 0) { // find faces on every other frame (half size picture for the face finder)
+      for (let y = 0; y < IN_H; y++) for (let x = 0; x < IN_W; x++) {
+        const o = y * IN_W + x;
+        for (let c = 0; c < 3; c++) {
+          const a = ((2 * y) * BIG_W + 2 * x) * 3 + c, b = a + BIG_W * 3;
+          input[c * plane + o] = ((rgb[a] + rgb[a + 3] + rgb[b] + rgb[b + 3]) / 4 - 127) / 128;
+        }
+      }
+      const out = await s.run({ [s.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, IN_H, IN_W]) });
+      const [scores, boxes] = s.outputNames.map((nm) => out[nm].data);
+      faces = decode(scores, boxes);
     }
-    const out = await s.run({ [s.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, IN_H, IN_W]) });
-    const [scores, boxes] = s.outputNames.map((n) => out[n].data);
-    samples.push({ t, faces: decode(scores, boxes) });
+    samples.push({ t, faces: faces.map((f) => ({ ...f, talk: mouthMovement(luma, prevLuma, f) })) });
+    prevLuma = luma;
   });
   return samples;
 }
 
 // Picks who to follow in each moment and returns the wanted middle of the frame (0..1) or null.
-// Prefers the biggest face, but sticks with the person already followed unless someone is clearly bigger.
-function targets(samples) {
-  let last = null;
-  return samples.map(({ t, faces }) => {
+// Faces are tracked as people from moment to moment. With one person, follow them. With more,
+// follow the one whose mouth moves while words are being said. Switch to someone else only when
+// they have clearly been the one talking for a moment, so the frame doesn't jump back and forth.
+// speaking(t) says if someone is talking at time t (from the words heard); no list = always.
+function targets(samples, speaking = () => true) {
+  const mid = (f) => (f.x1 + f.x2) / 2;
+  const area = (f) => (f.x2 - f.x1) * (f.y2 - f.y1);
+  let people = [];
+  let nextId = 1;
+  let cur = null;
+  let challenger = null, challengeFor = 0;
+  const dt = 1 / SAMPLES_PER_SEC;
+  // Who talks most in the first 2 seconds, so the clip starts on them right away.
+  const early = {};
+  for (const { t, faces } of samples) {
+    if (t > 2 || !speaking(t)) continue;
+    for (const f of faces) { const k = Math.round(mid(f) * 20); early[k] = (early[k] || 0) + (f.talk || 0); }
+  }
+  const firstKey = Object.keys(early).sort((a, b) => early[b] - early[a])[0];
+  const firstX = firstKey != null && early[firstKey] > 3 ? firstKey / 20 : null;
+  const out = [];
+  samples.forEach(({ t, faces }) => {
     const usable = faces.filter((f) => (f.x2 - f.x1) > 0.025);
-    if (!usable.length) return { t, x: null };
-    const area = (f) => (f.x2 - f.x1) * (f.y2 - f.y1);
-    const mid = (f) => (f.x1 + f.x2) / 2;
-    let pick = usable.reduce((a, b) => (area(b) > area(a) ? b : a));
-    if (last != null) {
-      const near = usable.reduce((a, b) => (Math.abs(mid(b) - last) < Math.abs(mid(a) - last) ? b : a));
-      if (area(near) * 1.8 > area(pick)) pick = near;
+    // Match faces to the people seen just before (nearest, not too far away).
+    const seen = new Set();
+    for (const f of usable.slice().sort((a, b) => area(b) - area(a))) {
+      let best = null;
+      for (const p of people) {
+        if (seen.has(p) || t - p.lastT > 1.5) continue;
+        const d = Math.abs(p.x - mid(f));
+        if (d < Math.max(0.15, (f.x2 - f.x1) * 2.5) && (!best || d < Math.abs(best.x - mid(f)))) best = p;
+      }
+      if (!best) { best = { id: nextId++, talk: 0, x: mid(f) }; people.push(best); }
+      best.x = mid(f); best.lastT = t; best.size = area(f); best.face = f;
+      seen.add(best);
+      // How much this person seems to be talking lately (about the last second).
+      const now = speaking(t) ? f.talk || 0 : 0;
+      best.talk = best.talk * 0.85 + now * 0.15;
     }
-    last = mid(pick);
-    return { t, x: last };
+    for (const p of people) if (!seen.has(p)) p.talk *= 0.9;
+    people = people.filter((p) => t - p.lastT <= 3);
+    const here = people.filter((p) => seen.has(p));
+    if (!here.length) { out.push({ t, x: null }); return; }
+    const loudest = here.reduce((a, b) => (b.talk > a.talk ? b : a));
+    const biggest = here.reduce((a, b) => (b.size > a.size ? b : a));
+    if (cur && !seen.has(cur) && here.length === 1) {
+      cur = here[0]; // only one person in view: it's the one we follow (they moved, or the shot changed)
+      challenger = null; challengeFor = 0;
+    } else if (!cur && firstX != null) {
+      cur = here.reduce((a, b) => (Math.abs(b.x - firstX) < Math.abs(a.x - firstX) ? b : a));
+    } else if (!cur || !people.includes(cur) || (t - cur.lastT > 1.5)) {
+      // Nobody followed yet (or they left): the one talking, else the biggest face.
+      cur = loudest.talk > 0.6 ? loudest : biggest;
+      challenger = null; challengeFor = 0;
+    } else if (loudest !== cur && loudest.talk > 0.6 && loudest.talk > cur.talk * 1.6) {
+      if (challenger !== loudest) { challenger = loudest; challengeFor = 0; }
+      challengeFor += dt;
+      if (challengeFor >= 0.8) {
+        // They started talking a moment ago: move over from when they started, not late.
+        const back = Math.round((challengeFor + 0.4) / dt);
+        for (let i = Math.max(0, out.length - back); i < out.length; i++) if (out[i].x != null) out[i].x = loudest.x;
+        cur = loudest; challenger = null; challengeFor = 0;
+      }
+    } else {
+      challenger = null; challengeFor = 0;
+    }
+    out.push({ t, x: seen.has(cur) ? cur.x : null });
   });
+  return out;
 }
 
 // Turns the face spots into a smooth camera path for the crop.
 // cropFrac = how much of the picture's width the tall frame covers (e.g. 0.316 for 16:9 video).
 // Returns keyframes [{t, x}] where x is the left edge of the frame as a share (0..1) of the free room.
-function cameraPath(samples, cropFrac) {
-  const pts = targets(samples);
+function cameraPath(samples, cropFrac, speaking) {
+  const pts = targets(samples, speaking);
   if (!pts.some((p) => p.x != null) || cropFrac >= 0.99) return null;
   // Fill gaps with the nearest seen face, so the frame waits where the person was.
   let prev = null;
@@ -199,12 +285,14 @@ function pathExpr(keys) {
 }
 
 // Main entry: returns an ffmpeg expression for the frame's position, or null (use the middle).
-async function facePath({ ffmpeg, source, start, len, width, height }) {
+// speech: optional list of [start, end] times (from the clip's start) when words are said.
+async function facePath({ ffmpeg, source, start, len, width, height, speech }) {
   if (!width || !height) return null;
   const cropFrac = Math.min(1, (height * 9 / 16) / width);
   if (cropFrac >= 0.99) return null; // already tall: nothing to follow
   const samples = await detectFaces(ffmpeg, source, start, len);
-  const keys = cameraPath(samples, cropFrac);
+  const speaking = speech && speech.length ? (t) => speech.some(([a, b]) => t >= a - 0.2 && t <= b + 0.2) : undefined;
+  const keys = cameraPath(samples, cropFrac, speaking);
   if (!keys) return null;
   // ffmpeg expressions can't be endless; very busy clips just use fewer stops.
   let k = keys;
@@ -212,4 +300,4 @@ async function facePath({ ffmpeg, source, start, len, width, height }) {
   return { expr: pathExpr(k), keys: k, faces: samples.filter((s) => s.faces.length).length, samples: samples.length };
 }
 
-module.exports = { facePath, cameraPath, pathExpr, decode, detectFaces };
+module.exports = { facePath, cameraPath, pathExpr, decode, detectFaces, targets };
