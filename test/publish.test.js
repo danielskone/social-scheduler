@@ -51,6 +51,7 @@ test.before(async () => {
     GRAPH_BASE: graph, GRAPH_VIDEO_BASE: graph,
     DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'sched-')),
     PUBLIC_BASE_URL: 'https://scheduler.example.com', APP_PASSWORD: '', SKIP_MEDIA_CHECK: '1',
+    POST_SPACING_MINUTES: '0', // most tests send several posts at once; spacing has its own test below
   });
   const app = require('../src/server');
   db = require('../src/db');
@@ -279,4 +280,28 @@ test('imports posts with media links and downloads the media before publishing',
   assert.equal(fs.readFileSync(path.join(process.env.DATA_DIR, 'media', after.media_file), 'utf8'), 'fakevideo');
   const t = db.prepare('SELECT status FROM post_targets WHERE post_id=?').get(row.id);
   assert.equal(t.status, 'published');
+});
+
+test('two posts for the same account at the same time go out spaced apart', async () => {
+  process.env.POST_SPACING_MINUTES = '15';
+  try {
+    db.prepare(`UPDATE post_targets SET status='failed' WHERE status='scheduled'`).run(); // start clean
+    const past = new Date(Date.now() - 1000).toISOString();
+    const a = await createPost({ caption: 'Same time A', scheduledAt: past, accountIds: '1' });
+    const b = await createPost({ caption: 'Same time B', scheduledAt: past, accountIds: '1' });
+    const other = await createPost({ caption: 'Other account', scheduledAt: past, accountIds: '3' });
+    db.prepare(`UPDATE post_targets SET published_at=? WHERE status='published'`).run(new Date(Date.now() - 3600e3).toISOString());
+    await scheduler.publishDue();
+    const get = async (id) => (await (await fetch(`${base}/api/posts/${id}`)).json()).targets[0];
+    const [ta, tb] = [await get(a.body.id), await get(b.body.id)];
+    assert.equal(ta.status, 'published');
+    assert.equal(tb.status, 'scheduled', 'second post waits');
+    const wait = (new Date(db.prepare('SELECT retry_at FROM post_targets WHERE id=?').get(tb.id).retry_at) - Date.now()) / 60e3;
+    assert.ok(wait > 14 && wait <= 15.1, `waits about 15 minutes (got ${wait.toFixed(1)})`);
+    assert.notEqual((await get(other.body.id)).status, 'scheduled', 'other accounts are not held back');
+    await scheduler.publishDue(new Date(Date.now() + 16 * 60e3));
+    assert.equal((await get(b.body.id)).status, 'published');
+  } finally {
+    process.env.POST_SPACING_MINUTES = '0';
+  }
 });
