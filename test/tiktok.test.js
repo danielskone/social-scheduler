@@ -55,6 +55,7 @@ test.before(async () => {
     DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'tt-')),
     TIKTOK_API_BASE: `http://127.0.0.1:${tk.address().port}`,
     TIKTOK_CLIENT_KEY: 'awkey12345', TIKTOK_CLIENT_SECRET: 'secret12345', APP_PASSWORD: '',
+    POST_SPACING_MINUTES: '0', // these tests send several posts to one account at once
   });
   const app = require('../src/server');
   db = require('../src/db');
