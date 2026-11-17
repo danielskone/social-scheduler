@@ -42,6 +42,10 @@ function retryable(err, platform) {
   return err.stage === 'media';
 }
 
+// Posts for the same account never go out at the same time: each one waits until at least
+// this many minutes after that account's last post (POST_SPACING_MINUTES=0 turns it off).
+const spacingMin = () => Math.max(0, Number(process.env.POST_SPACING_MINUTES ?? 15) || 0);
+
 async function publishDue(now = new Date()) {
   if (running) return; // don't overlap if a slow video upload is still going
   running = true;
@@ -55,8 +59,18 @@ async function publishDue(now = new Date()) {
       ORDER BY p.scheduled_at`).all(now.toISOString(), now.toISOString());
     const results = [];
     const tiktokFull = new Map(); // account id -> TikTok's "come back later" error, for this run
+    const lastPost = db.prepare(`SELECT MAX(published_at) AS at FROM post_targets WHERE account_id=? AND status='published'`);
 
     for (const row of due) {
+      if (spacingMin()) {
+        const last = lastPost.get(row.target_account)?.at;
+        const next = last ? new Date(new Date(last).getTime() + spacingMin() * 60e3) : null;
+        if (next && next > now) { // this account just posted: send this one a little later
+          db.prepare(`UPDATE post_targets SET retry_at=? WHERE id=?`).run(next.toISOString(), row.target_id);
+          console.log(`[publish] post ${row.id} -> ${row.platform} ${row.account_name}: spaced out, going at ${next.toISOString()}`);
+          continue;
+        }
+      }
       if (tiktokFull.has(row.target_account)) { // TikTok just said it's full: don't knock again this run
         holdTikTok(row, tiktokFull.get(row.target_account), now, false);
         continue;
