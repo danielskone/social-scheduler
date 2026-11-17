@@ -143,11 +143,11 @@
 .crm-coach-head h3 { margin: 0; font-size: 1.08rem; }
 .crm-coach p { margin: 0 0 8px; font-size: .93rem; line-height: 1.5; }
 .crm-coach .try { font-size: .86rem; background: var(--panel-2); border-radius: 11px; padding: 8px 10px; margin-bottom: 12px; }
-.crm-coach .dots { display: flex; gap: 5px; flex: 1; }
+.crm-coach .dots { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
 .crm-coach .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
 .crm-coach .dots i.on { background: var(--accent); width: 18px; border-radius: 99px; }
 .crm-coach .nav { display: flex; gap: 8px; align-items: center; }
-.crm-coach .nav .btn { padding: 7px 14px; }
+.crm-coach .nav .btn { padding: 7px 14px; white-space: nowrap; flex: none; }
 .crm-coach .skip { position: absolute; top: 12px; right: 12px; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: .82rem; }
 .crm-coach .skip:hover { color: var(--text); }
 
@@ -155,6 +155,8 @@
   .crm-sub { display: none; }
   .crm-help-btn span { display: none; }
   .crm-help-btn { padding: 9px 12px; }
+  .view-head .row .crm-help-btn { flex: none; }
+  .view-head .row .btn { white-space: nowrap; }
   #crm-tabs a { padding: 7px 10px; font-size: .85rem; }
   .crm-tip { padding: 12px; gap: 10px; }
   .crm-tip-ico { width: 32px; height: 32px; border-radius: 10px; }

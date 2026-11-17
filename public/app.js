@@ -456,6 +456,8 @@ function updatePreview() {
   $('#caption-count').textContent = `${caption.length}${hasIg ? ' / 2200' : ''}`;
   const first = accounts.find((a) => form.querySelector(`[name=accountIds][value="${a.id}"]:checked`));
   $('#preview-name').textContent = first ? (first.username ? '@' + first.username : first.name) : 'Your account';
+  const av = $('.preview-head .vp-avatar, .preview-head .acct-av');
+  if (av) av.outerHTML = first ? acctAvatar(first) : '<span class="vp-avatar"></span>';
   const file = form.media.files[0];
   const media = $('#preview-media');
   const clipKey = composeClip ? String(composeClip.id) : '';
@@ -690,7 +692,7 @@ function drawAnalytics() {
     const last = all[all.length - 1], first = inRange[0] ?? last, diff = last - first;
     const series = inRange.length > 1 ? inRange : all;
     const flat = Math.min(...series) === Math.max(...series);
-    const pic = a.picture_url ? `<img class="f-pic" src="${esc(a.picture_url)}" alt="" onerror="this.style.visibility='hidden'">` : '<span class="f-pic"></span>';
+    const pic = acctAvatar(a);
     return `<div class="tile follower"><div class="label"><span class="f-avatar">${pic}${icon(a.platform)}</span><span class="f-name">${esc(a.name)}</span></div>
       <div class="value">${last.toLocaleString()} <span class="chg ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '+' : ''}${diff ? diff.toLocaleString() : 'no change'}</span></div>
       ${flat ? '<div class="f-flat">Steady this period</div>' : sparkline(series)}</div>`;
@@ -768,6 +770,13 @@ async function openPostStats(tid) {
 }
 
 // ---------- Accounts ----------
+// A round picture for an account: its photo if it has one that loads, otherwise its initials
+// on the platform's color (Facebook Page photos often can't be loaded).
+function acctAvatar(a) {
+  const initials = String(a.name || '?').replace(/[^\p{L}\p{N} ]/gu, ' ').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+  return `<span class="acct-av ${esc(a.platform)}"><span>${esc(initials)}</span>${a.picture_url ? `<img src="${esc(a.picture_url)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}</span>`;
+}
+
 async function renderAccounts() {
   const status = await api('/status');
   const notes = [];
@@ -792,11 +801,12 @@ async function renderAccounts() {
   if (!status.tiktokConfigured) notes.push('To add TikTok: in Terminal run <code>npm run tiktok-keys</code>, then <code>npm run background:on</code>.');
   else notes.push(`TikTok mode: <b>${status.tiktokMode === 'direct' ? 'posts by itself' : 'sends to your TikTok inbox, then you tap Post'}</b>. TikTok redirect URI: <code>${esc(status.tiktokRedirectUri)}</code>.`);
   if (!status.instagramReady) notes.push('Instagram posting needs <code>PUBLIC_BASE_URL</code> to be a public https address. Facebook posts work without it.');
-  $('#setup-notes').innerHTML = `<div class="note">${notes.map((n) => `<div>${n}</div>`).join('')}</div>`;
+  // Technical setup lines are folded away so the page stays clean; open them only when needed.
+  $('#setup-notes').innerHTML = `<details class="note setup-help"><summary>Setup help</summary>${notes.map((n) => `<div>${n}</div>`).join('')}</details>`;
   }
 
   $('#account-list').innerHTML = accounts.map((a) => `<div class="account">
-      ${a.picture_url ? `<img src="${esc(a.picture_url)}" alt="">` : '<span class="avatar"></span>'}
+      ${acctAvatar(a)}
       <div class="grow"><b>${esc(a.name)}</b><div class="muted">${icon(a.platform)} ${a.platform === 'facebook' ? 'Facebook Page' : ({ youtube: 'YouTube channel', tiktok: 'TikTok' }[a.platform] || 'Instagram') + (a.username ? ' · @' + esc(a.username) : '')}</div></div>
       <button class="btn danger" data-remove="${a.id}">Remove</button></div>`).join('')
     || '<p class="muted">No accounts connected yet.</p>';

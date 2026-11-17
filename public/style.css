@@ -41,7 +41,7 @@ nav a.active { background: var(--accent-soft); color: var(--accent); }
 .legal a { color: var(--muted); }
 .appbar { display: none; }
 
-main { flex: 1; padding: 28px 36px 40px; min-width: 0; max-width: 1280px; }
+main { flex: 1; padding: 28px 36px 40px; min-width: 0; width: 100%; max-width: 1440px; margin: 0 auto; box-sizing: border-box; }
 .view-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 22px; flex-wrap: wrap; }
 
 /* Calendar header (month name, arrows, Month/Week) stays at the top while you scroll */
@@ -212,7 +212,7 @@ button.ov-card:disabled { cursor: default; }
 .account-picker input { margin: 0; accent-color: var(--accent); width: 16px; height: 16px; }
 .preview-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; position: sticky; top: 24px; box-shadow: var(--shadow); }
 .preview-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
-.avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--grad); opacity: .85; }
+.avatar, .vp-avatar { display: inline-block; flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--grad); opacity: .85; }
 .preview-media img, .preview-media video { width: 100%; display: block; }
 .preview-caption { padding: 12px 14px 16px; white-space: pre-wrap; margin: 0; font-size: .9rem; }
 .compose .row .btn { min-width: 120px; }
@@ -304,11 +304,25 @@ a.top-post[href]:hover { background: var(--panel-2); }
 @media (max-width: 1100px) { .an-grid { grid-template-columns: 1fr; } }
 
 /* ---------- Accounts ---------- */
-.account-list { display: grid; gap: 10px; max-width: 680px; }
+.account-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; max-width: 680px; }
 .account { display: flex; align-items: center; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
-.account img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; }
+.acct-av { position: relative; flex: none; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; overflow: hidden; color: #fff; font-weight: 700; font-size: .9rem; letter-spacing: .02em; background: var(--grad); }
+.acct-av.facebook { background: linear-gradient(135deg, #1877f2, #0b5bd3); }
+.acct-av.instagram { background: linear-gradient(135deg, #feda75, #d62976 45%, #4f5bd5); }
+.acct-av.tiktok { background: linear-gradient(135deg, #111, #333); box-shadow: inset -3px -3px 0 rgb(37 244 238 / .5), inset 3px 3px 0 rgb(254 44 85 / .45); }
+.acct-av.youtube { background: linear-gradient(135deg, #ff3b30, #c4130b); }
+.acct-av img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.setup-help { cursor: default; }
+.setup-help summary { cursor: pointer; font-weight: 650; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 8px; }
+.setup-help summary::-webkit-details-marker { display: none; }
+.setup-help summary::before { content: '›'; font-size: 1.2em; transition: transform .15s; display: inline-block; }
+.setup-help[open] summary { margin-bottom: 8px; }
+.setup-help[open] summary::before { transform: rotate(90deg); }
+code { overflow-wrap: anywhere; }
 .account .grow { flex: 1; min-width: 0; }
-.account .grow b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account .grow b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+
+@media (max-width: 800px) { .account .btn.danger { padding: 7px 12px; font-size: .86rem; } }
 .account .muted { display: flex; align-items: center; gap: 6px; font-size: .86rem; }
 .note { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: var(--radius-sm); padding: 12px 16px; margin-bottom: 16px; max-width: 680px; font-size: .9rem; }
 code { background: var(--panel-2); padding: 1px 6px; border-radius: 6px; font-size: .85em; }
@@ -776,7 +790,18 @@ button.top-post:active { transform: scale(.99); }
   .clip-job-title { flex-wrap: wrap; align-items: center; }
   /* Phone: the video's name gets its own full row, the chip and buttons go on the row below. */
   .clip-job-title .grow { flex: 1 0 100%; }
-  .clip-job-title .btn.primary { flex: 1; justify-content: center; }
+  .clip-job-title .btn.primary { flex: 1; justify-content: center; white-space: nowrap; padding-left: 10px; padding-right: 10px; min-width: 0; }
+  .clip-job-title .iconbtn { flex: none; }
 }
 .cp-accts label, .cp-again { display: inline-flex !important; flex-direction: row; align-items: center; width: auto; margin: 0; white-space: nowrap; }
 .cp-accts input[type=checkbox], .cp-again input[type=checkbox] { width: auto; min-width: 0; margin: 0; padding: 0; flex: none; }
+
+/* File pickers look like the rest of the app instead of the browser's plain button. */
+input[type=file]::file-selector-button { font: inherit; font-weight: 650; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 8px 14px; border-radius: 10px; margin-right: 12px; cursor: pointer; transition: background .15s, border-color .15s; }
+input[type=file]::file-selector-button:hover { border-color: var(--accent); background: var(--panel-2); }
+.f-avatar .acct-av { width: 30px; height: 30px; font-size: .66rem; }
+.preview-head .acct-av { width: 32px; height: 32px; font-size: .7rem; }
+@media (min-width: 1200px) {
+  .account-list { max-width: none; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #setup-notes .note { max-width: none; }
+}

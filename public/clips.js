@@ -97,7 +97,7 @@ function clipCard(c) {
   const hot = c.score >= 90 ? ' hot' : '';
   const media = ready
     ? `<button type="button" class="clip-thumb" data-clip-view="${c.id}" aria-label="Play clip">
-        ${c.poster_url ? `<img src="${c.poster_url}" alt="" loading="lazy" decoding="async">` : ''}
+        ${c.poster_url ? `<img src="${c.poster_url}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ''}
         <span class="clip-play">${CI.play}</span></button>`
     : `<div class="clip-wait">${c.status === 'failed' ? `<b>Couldn't make this clip</b><small>${esc(c.error || '')}</small><button class="btn ghost" data-clip-remake="${c.id}">${CI.retry}Try again</button>` : `<span class="spinner"></span><small>${c.status === 'rendering' ? 'Making it now…' : 'Waiting its turn…'}</small>`}</div>`;
   return `<div class="clip-media">${media}
