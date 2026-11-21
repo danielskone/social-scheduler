@@ -364,6 +364,25 @@ addEventListener('scroll', () => { const t = $('#hover-card'); if (t) t.hidden =
 let wasPhone = isPhone();
 addEventListener('resize', () => { if (isPhone() !== wasPhone) { wasPhone = isPhone(); if (!$('#view-calendar').hidden) renderCalendar(); } });
 
+// The look of a post, in its window: what it is, and whether the finished copy is ready.
+function lookLine(p, editable) {
+  const st = p.look_status;
+  const state = !st ? '' : st.status === 'ready' ? `✅ Ready${st.url ? ` · <a href="${esc(st.url)}" target="_blank" rel="noopener">See it</a>` : ''}`
+    : st.status === 'failed' ? `⚠️ Couldn't be made, the original will be posted${st.error ? ` (${esc(st.error)})` : ''}`
+    : st.status === 'working' ? `⏳ Being made now${st.progress != null ? ` (${st.progress}%)` : ''}`
+    : '⏳ Will be made before it posts';
+  const note = st?.note ? ` <small class="muted">${esc(st.note)}</small>` : '';
+  if (!editable) {
+    if (!p.look && !p.remove_text) return '';
+    return `<div class="dlg-look">🎬 ${p.look === 'light' ? 'Light look' : p.look ? 'Hollywood look' : 'No look'}${p.remove_text ? ' · words removed' : ''} ${state}${note}</div>`;
+  }
+  return `<div class="dlg-look"><label>🎬 Look <select id="dlg-look">
+      ${[['off', 'Off'], ['light', 'Light'], ['hollywood', 'Hollywood']].map(([v, n]) => `<option value="${v}"${(p.look || 'off') === v ? ' selected' : ''}>${n}</option>`).join('')}
+    </select></label>
+    <label class="check"><input type="checkbox" id="dlg-notext"${p.remove_text ? ' checked' : ''}> Remove words on screen</label>
+    <span>${state}${note}</span></div>`;
+}
+
 async function openPost(id) {
   const p = await api(`/posts/${id}`);
   const editable = p.targets.every((t) => t.status === 'scheduled' || t.status === 'failed') && !p.targets.some((t) => t.status === 'published');
@@ -375,6 +394,7 @@ async function openPost(id) {
     ${editable ? `<textarea id="dlg-caption" rows="5">${esc(p.caption)}</textarea>
       <p><input type="datetime-local" id="dlg-when" value="${toLocalInput(new Date(p.scheduled_at))}"></p>`
       : `<p style="white-space:pre-wrap">${esc(p.caption)}</p>`}
+    ${p.media_type ? lookLine(p, editable) : ''}
     ${p.targets.map((t) => `<div class="target">${icon(t.platform)}${esc(t.account_name)}
       <span class="status ${t.status}">${t.status}</span>
       ${t.permalink ? `<a href="${esc(t.permalink)}" target="_blank" rel="noopener">View</a>` : ''}
@@ -397,7 +417,8 @@ async function openPost(id) {
   if ($('#dlg-save')) $('#dlg-save').onclick = async () => {
     try {
       await api(`/posts/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ caption: $('#dlg-caption').value, scheduledAt: new Date($('#dlg-when').value).toISOString(), ...($('#dlg-title') ? { title: $('#dlg-title').value } : {}) }) });
+        body: JSON.stringify({ caption: $('#dlg-caption').value, scheduledAt: new Date($('#dlg-when').value).toISOString(), ...($('#dlg-title') ? { title: $('#dlg-title').value } : {}),
+          ...($('#dlg-look') ? { look: $('#dlg-look').value, removeText: $('#dlg-notext').checked } : {}) }) });
       dlg.close(); renderCalendar();
     } catch (e) { alert(e.message); }
   };
@@ -433,6 +454,105 @@ async function renderCompose(dateIso, clipId) {
   }
   showComposeClip();
   updatePreview();
+  api('/look/settings').then((st) => { lookState = st; showLook(); }).catch(() => showLook());
+}
+
+// ---------- Hollywood look (New post) ----------
+let lookState = { look: 'hollywood', removeText: false };
+const LOOK_ABOUT = {
+  off: 'Posted just as it is.',
+  light: 'A little sharper and brighter, colors a touch richer.',
+  hollywood: 'Sharper, brighter, more contrast and movie colors.',
+};
+function showLook() {
+  const hasMedia = Boolean(form.media.files[0] || composeClip);
+  $('#look-field').hidden = !hasMedia;
+  $('#look-seg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === lookState.look));
+  $('#look-notext').checked = Boolean(lookState.removeText);
+  $('#look-about').textContent = LOOK_ABOUT[lookState.look] || '';
+  if (hasMedia) refreshLookPreview();
+}
+function saveLook() { api('/look/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lookState) }).catch(() => {}); }
+$('#look-seg').onclick = (e) => {
+  const b = e.target.closest('button[data-v]');
+  if (!b) return;
+  lookState.look = b.dataset.v;
+  saveLook(); showLook();
+};
+$('#look-notext').onchange = (e) => { lookState.removeText = e.target.checked; saveLook(); showLook(); };
+$('#look-all').onclick = async () => {
+  const name = { off: 'no look', light: 'the Light look', hollywood: 'the Hollywood look' }[lookState.look];
+  if (!confirm(`Use ${name}${lookState.removeText ? ' and remove words on screen' : ''} on every photo and video post that hasn't gone out yet?`)) return;
+  try {
+    const r = await api('/look/apply-upcoming', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lookState) });
+    $('#look-msg').textContent = `Done. ${r.updated} upcoming post${r.updated === 1 ? '' : 's'} will use it.`;
+  } catch (err) { $('#look-msg').textContent = err.message; }
+};
+
+// One picture to show before and after: the photo itself, or one frame of the video.
+async function lookSourcePicture() {
+  const file = form.media.files[0];
+  const toJpeg = (el, w, h) => {
+    const s = Math.min(1, 1280 / Math.max(w, h));
+    const c = document.createElement('canvas');
+    c.width = Math.round(w * s); c.height = Math.round(h * s);
+    c.getContext('2d').drawImage(el, 0, 0, c.width, c.height);
+    return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.92));
+  };
+  if (file && file.type.startsWith('image')) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+      return await toJpeg(img, img.naturalWidth, img.naturalHeight);
+    } finally { URL.revokeObjectURL(url); }
+  }
+  const src = file ? URL.createObjectURL(file) : composeClip?.url;
+  if (!src) return null;
+  try {
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = src;
+    await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = rej; setTimeout(rej, 15000); });
+    v.currentTime = Math.min(v.duration / 3 || 0, 4);
+    await new Promise((res, rej) => { v.onseeked = res; v.onerror = rej; setTimeout(rej, 15000); });
+    return await toJpeg(v, v.videoWidth, v.videoHeight);
+  } finally { if (file) URL.revokeObjectURL(src); }
+}
+let lookPreviewRun = 0;
+async function refreshLookPreview() {
+  const run = ++lookPreviewRun;
+  const box = $('#look-preview'), msg = $('#look-msg');
+  msg.textContent = '';
+  if (lookState.look === 'off' && !lookState.removeText) { box.hidden = true; return; }
+  let pic;
+  try { pic = await lookSourcePicture(); } catch { pic = null; }
+  if (run !== lookPreviewRun) return;
+  if (!pic) { box.hidden = true; return; }
+  const before = $('#look-before'), after = $('#look-after');
+  if (before.dataset.url) URL.revokeObjectURL(before.dataset.url);
+  before.dataset.url = URL.createObjectURL(pic);
+  before.src = before.dataset.url;
+  box.hidden = false;
+  after.classList.add('busy');
+  msg.textContent = 'Making the preview…';
+  const fd = new FormData();
+  fd.set('frame', pic, 'frame.jpg');
+  fd.set('look', lookState.look);
+  fd.set('removeText', lookState.removeText ? '1' : '0');
+  try {
+    const res = await fetch('/api/look/preview', { method: 'POST', body: fd });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'The preview could not be made.');
+    const blob = await res.blob();
+    if (run !== lookPreviewRun) return;
+    if (after.dataset.url) URL.revokeObjectURL(after.dataset.url);
+    after.dataset.url = URL.createObjectURL(blob);
+    after.src = after.dataset.url;
+    msg.textContent = form.media.files[0]?.type.startsWith('image') ? '' : 'One moment from the video. The whole video gets the same look before it posts.';
+  } catch (err) {
+    if (run === lookPreviewRun) msg.textContent = err.message;
+  } finally {
+    if (run === lookPreviewRun) after.classList.remove('busy');
+  }
 }
 
 function showComposeClip() {
@@ -444,8 +564,8 @@ function showComposeClip() {
   box.querySelector('b').textContent = composeClip.title;
   box.querySelector('small').textContent = `Clip · ${Math.round(composeClip.length)} seconds · vertical 9:16`;
 }
-form.media.addEventListener('change', () => { if (form.media.files[0] && composeClip) { composeClip = null; showComposeClip(); } });
-$('#compose-clip-remove').onclick = () => { composeClip = null; showComposeClip(); updatePreview(); };
+form.media.addEventListener('change', () => { if (form.media.files[0] && composeClip) { composeClip = null; showComposeClip(); } showLook(); });
+$('#compose-clip-remove').onclick = () => { composeClip = null; showComposeClip(); updatePreview(); showLook(); };
 
 function updatePreview() {
   const caption = form.caption.value;
@@ -483,6 +603,8 @@ async function submitPost(now) {
   fd.set('scheduledAt', when.toISOString());
   if (!form.media.files[0]) fd.delete('media');
   if (!form.media.files[0] && composeClip) fd.set('clipId', composeClip.id);
+  fd.set('look', lookState.look);
+  fd.set('removeText', lookState.removeText ? '1' : '0');
   const msg = $('#compose-msg');
   msg.textContent = 'Saving…';
   form.querySelectorAll('button').forEach((b) => (b.disabled = true));
@@ -491,6 +613,7 @@ async function submitPost(now) {
     form.reset();
     composeClip = null;
     showComposeClip();
+    showLook();
     calMonth = startOfMonth(when);
     location.hash = 'calendar';
   } catch (e) {
