@@ -9,23 +9,27 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { cleanText } = require('./speechtext');
 
-const [ffmpeg, video, modelDir, outFile] = process.argv.slice(2);
+const [ffmpeg, video, modelDir, outFile, words = 'fast'] = process.argv.slice(2);
+// "best" = the bigger Whisper model, and a voice detector that also catches singing over music.
+const BEST = words === 'best';
+const MODEL = BEST ? 'small.en' : 'base.en';
 const RATE = 16000;
 const WINDOW = 512; // what the voice detector expects
 const LOUD_STEP = RATE / 2; // loudness is measured every half second
 
 function loadEngine() {
   const m = (f) => path.join(modelDir, 'whisper', f);
-  if (!fs.existsSync(m('base.en-encoder.int8.onnx'))) return { reason: 'The speech model is missing.' };
+  if (!fs.existsSync(m(`${MODEL}-encoder.int8.onnx`))) return { reason: 'The speech model is missing.' };
   try {
     const sherpa = require('sherpa-onnx-node');
     const recognizer = new sherpa.OfflineRecognizer({
       featConfig: { sampleRate: RATE, featureDim: 80 },
       modelConfig: {
-        whisper: { encoder: m('base.en-encoder.int8.onnx'), decoder: m('base.en-decoder.int8.onnx') },
-        tokens: m('base.en-tokens.txt'),
-        numThreads: 2,
+        whisper: { encoder: m(`${MODEL}-encoder.int8.onnx`), decoder: m(`${MODEL}-decoder.int8.onnx`) },
+        tokens: m(`${MODEL}-tokens.txt`),
+        numThreads: BEST ? 3 : 2,
         provider: 'cpu',
         debug: 0,
       },
@@ -33,8 +37,8 @@ function loadEngine() {
     const vad = new sherpa.Vad({
       sileroVad: {
         model: path.join(modelDir, 'silero_vad.onnx'),
-        threshold: 0.5,
-        minSilenceDuration: 0.35,
+        threshold: BEST ? 0.35 : 0.5,
+        minSilenceDuration: BEST ? 0.5 : 0.35,
         minSpeechDuration: 0.25,
         maxSpeechDuration: 15,
         windowSize: WINDOW,
@@ -57,7 +61,8 @@ function wordsFromTokens(tokens, text, start, end) {
     if (!words.length || /^\s/.test(t)) words.push(t.trim());
     else words[words.length - 1] += t;
   }
-  const list = (words.length ? words : String(text).split(/\s+/)).filter(Boolean);
+  // Music notes come out as broken byte pieces ("<0xAB>"): those aren't words.
+  const list = (words.length ? words : String(text).split(/\s+/)).map(cleanText).filter((w) => /[\p{L}\p{N}]/u.test(w));
   const weight = (w) => w.replace(/[^\w]/g, '').length + 2;
   const total = list.reduce((s, w) => s + weight(w), 0) || 1;
   let t = start;
@@ -84,7 +89,7 @@ function decode(seg) {
   stream.acceptWaveform({ sampleRate: RATE, samples: seg.samples });
   engine.recognizer.decode(stream);
   const r = engine.recognizer.getResult(stream);
-  const text = String(r.text || '').trim();
+  const text = cleanText(r.text);
   // Whisper sometimes "hears" these in music or noise; they aren't real speech.
   if (!text || /^[\s.[\]()♪*-]*$/.test(text) || /^\[.*\]$|^\(.*\)$/.test(text)) return;
   segments.push({ start: +start.toFixed(2), end: +end.toFixed(2), text, words: wordsFromTokens(r.tokens, text, start, end) });
