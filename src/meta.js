@@ -31,6 +31,9 @@ class GraphError extends Error {
   }
 }
 
+// Network errors that happen before anything is sent (the connection never opened).
+const NOT_CONNECTED = new Set(['UND_ERR_CONNECT_TIMEOUT', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH', 'ENETDOWN']);
+
 function graphUrl(p, base = config.graphBase) {
   return `${base}/${config.graphVersion}/${p.replace(/^\//, '')}`;
 }
@@ -50,8 +53,11 @@ async function call(method, p, params = {}, { base, body } = {}) {
   try {
     res = await fetch(url, init);
   } catch (e) {
-    // No answer at all: for a POST we can't be sure whether it went through, so never auto-retry it.
-    throw Object.assign(new GraphError(`Could not reach Facebook: ${e.message}`, { safeToRetry: method === 'GET' }), { cause: e.cause });
+    // The Mac couldn't even connect (internet hiccup): nothing was sent, so trying again is safe.
+    // Any other "no answer" on a POST might have gone through, so that is never auto-retried.
+    const neverSent = NOT_CONNECTED.has(e.cause?.code);
+    throw Object.assign(new GraphError(neverSent ? `Couldn't connect to Facebook (the Mac's internet had a hiccup): ${e.message}` : `Could not reach Facebook: ${e.message}`,
+      { safeToRetry: method === 'GET' || neverSent }), { cause: e.cause });
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) {
