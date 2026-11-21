@@ -184,8 +184,8 @@ function openClipViewer(id) {
 
 // ---------- New video ----------
 const clipForm = $('#clip-form');
-const clipChoice = { length: 'medium', captions: 'bold' };
-['length', 'captions'].forEach((k) => {
+const clipChoice = { length: 'medium', captions: 'bold', words: 'fast' };
+['length', 'captions', 'words'].forEach((k) => {
   $(`#clip-${k}`).onclick = (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -215,6 +215,7 @@ clipForm.onsubmit = (e) => {
   const fd = new FormData();
   fd.set('length', clipChoice.length);
   fd.set('captions', clipChoice.captions);
+  fd.set('words', clipChoice.words);
   fd.set('framing', clipForm.framing.value);
   fd.set('count', clipForm.count.value);
   fd.set('video', file);
@@ -382,7 +383,7 @@ async function getLinkedVideo() {
     const res = await fetch('/api/clips/link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, length: clipChoice.length, captions: clipChoice.captions, framing: clipForm.framing.value, count: clipForm.count.value }),
+      body: JSON.stringify({ url, length: clipChoice.length, captions: clipChoice.captions, words: clipChoice.words, framing: clipForm.framing.value, count: clipForm.count.value }),
     });
     if (res.status === 401) { location.href = '/login.html'; return; }
     const data = await res.json().catch(() => ({}));

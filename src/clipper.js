@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { cleanText, cleanTranscript } = require('./speechtext');
 const { spawn, execFile } = require('child_process');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
@@ -66,6 +67,22 @@ if (!db.prepare('PRAGMA table_info(clips)').all().some((c) => c.name === 'schedu
   db.exec('ALTER TABLE clips ADD COLUMN scheduled_at TEXT');
 }
 
+// Saved transcripts, with music-note junk ("<0xAB>") taken out (also fixes videos done before).
+function readTranscript(json) {
+  try { return cleanTranscript(JSON.parse(json || '{"segments":[]}')) || { segments: [] }; } catch { return { segments: [] }; }
+}
+// Clips made before this fix: take the junk out of their saved text and titles once.
+for (const c of db.prepare(`SELECT id, text, title FROM clips WHERE text LIKE '%<0x%' OR title LIKE '%<0x%' OR text LIKE '%' || char(65533) || '%' OR text LIKE '%' || char(9834) || '%'`).all()) {
+  db.prepare('UPDATE clips SET text=?, title=? WHERE id=?').run(cleanText(c.text), cleanText(c.title) || 'Clip', c.id);
+}
+
+// Videos whose captions had that junk burned in: clean the saved transcript and remake their clips
+// (in the background, same as after editing a clip). Runs once: the saved transcript is then clean.
+for (const j of db.prepare(`SELECT id, transcript FROM clip_jobs WHERE transcript LIKE '%<0x%' OR transcript LIKE '%\\ufffd%' OR transcript LIKE '%\\u266a%' OR transcript LIKE '%' || char(65533) || '%' OR transcript LIKE '%' || char(9834) || '%'`).all()) {
+  db.prepare('UPDATE clip_jobs SET transcript=? WHERE id=?').run(JSON.stringify(readTranscript(j.transcript)), j.id);
+  db.prepare(`UPDATE clips SET status='pending' WHERE job_id=? AND status='ready' AND captions <> 'none'`).run(j.id);
+}
+
 const LENGTHS = { short: [15, 35], medium: [30, 60], long: [55, 90] };
 const FRAMINGS = ['face', 'center', 'left', 'right', 'fit'];
 const CAPTIONS = ['bold', 'clean', 'none'];
@@ -107,31 +124,35 @@ async function download(url, dest) {
 
 // The speech model is downloaded once from the speech engine's own public releases.
 const MODEL_URL = process.env.CLIPS_MODEL_URL || 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models';
-async function ensureModels(setStep) {
+// Two speech models: "fast" (Whisper base, about 200 MB) and "best" (Whisper small, about
+// 640 MB, much better at singing and noisy rooms, about 3 times slower).
+const SPEECH_MODELS = { fast: { name: 'base.en', size: '200 MB' }, best: { name: 'small.en', size: '640 MB' } };
+async function ensureModels(setStep, words = 'fast') {
+  const { name, size } = SPEECH_MODELS[words] || SPEECH_MODELS.fast;
   const whisper = path.join(modelDir, 'whisper');
-  const need = ['base.en-encoder.int8.onnx', 'base.en-decoder.int8.onnx', 'base.en-tokens.txt'];
+  const need = [`${name}-encoder.int8.onnx`, `${name}-decoder.int8.onnx`, `${name}-tokens.txt`];
   fs.mkdirSync(whisper, { recursive: true });
   if (!fs.existsSync(path.join(modelDir, 'silero_vad.onnx'))) {
     await download(`${MODEL_URL}/silero_vad.onnx`, path.join(modelDir, 'silero_vad.onnx'));
   }
   if (need.every((f) => fs.existsSync(path.join(whisper, f)))) return;
-  setStep('Downloading the free speech-to-text model (one time only, about 200 MB)…');
-  const archive = path.join(modelDir, 'whisper-base.en.tar.bz2');
-  await download(`${MODEL_URL}/sherpa-onnx-whisper-base.en.tar.bz2`, archive);
+  setStep(`Downloading the free speech-to-text model (one time only, about ${size})…`);
+  const archive = path.join(modelDir, `whisper-${name}.tar.bz2`);
+  await download(`${MODEL_URL}/sherpa-onnx-whisper-${name}.tar.bz2`, archive);
   setStep('Unpacking the speech-to-text model…');
   const tmp = fs.mkdtempSync(path.join(modelDir, 'unpack-'));
   try {
-    await run('tar', ['-xjf', archive, '-C', tmp, ...need.map((f) => `sherpa-onnx-whisper-base.en/${f}`)]);
-    for (const f of need) fs.renameSync(path.join(tmp, 'sherpa-onnx-whisper-base.en', f), path.join(whisper, f));
+    await run('tar', ['-xjf', archive, '-C', tmp, ...need.map((f) => `sherpa-onnx-whisper-${name}/${f}`)]);
+    for (const f of need) fs.renameSync(path.join(tmp, `sherpa-onnx-whisper-${name}`, f), path.join(whisper, f));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.rmSync(archive, { force: true });
   }
 }
 
-function transcribe(video, onAt = () => {}, out = path.join(path.dirname(video), 'speech.json')) {
+function transcribe(video, onAt = () => {}, out = path.join(path.dirname(video), 'speech.json'), words = 'fast') {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [path.join(__dirname, 'speech-worker.js'), ffmpegPath(), video, modelDir, out], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [path.join(__dirname, 'speech-worker.js'), ffmpegPath(), video, modelDir, out, words === 'best' ? 'best' : 'fast'], { stdio: ['ignore', 'pipe', 'pipe'] });
     try { os.setPriority(child.pid, 10); } catch {}
     let err = '';
     child.stderr.on('data', (d) => { err = (err + d).slice(-3000); });
@@ -487,7 +508,7 @@ let busy = false;
 async function processJob(job) {
   const settings = JSON.parse(job.settings || '{}');
   const step = (text, progress) => setJob(job.id, progress == null ? { step: text } : { step: text, progress });
-  let transcript = job.transcript ? JSON.parse(job.transcript) : null;
+  let transcript = job.transcript ? readTranscript(job.transcript) : null;
   if (!transcript && settings.link && !fs.existsSync(job.source_file)) {
     // A video from a link: get it first (official ways only, see linkimport.js).
     step('Getting the video from your account…', 1);
@@ -503,11 +524,11 @@ async function processJob(job) {
     setJob(job.id, { duration: info.duration, width: info.width, height: info.height });
     let note = null;
     if (info.hasAudio) {
-      try { await ensureModels((t) => step(t)); } catch (err) { note = `Couldn't download the speech model (${err.message}). Clips were picked without listening.`; }
+      try { await ensureModels((t) => step(t), settings.words); } catch (err) { note = `Couldn't download the speech model (${err.message}). Clips were picked without listening.`; }
     }
     step('Listening to the video and writing down every word…', 5);
     transcript = info.hasAudio
-      ? await transcribe(job.source_file, (at) => step(`Listening… ${fmtDur(at)} of ${fmtDur(info.duration)}`, 5 + Math.round((at / info.duration) * 55)))
+      ? await transcribe(job.source_file, (at) => step(`Listening… ${fmtDur(at)} of ${fmtDur(info.duration)}`, 5 + Math.round((at / info.duration) * 55)), undefined, settings.words)
       : { segments: [], loudness: [] };
     if (!info.hasAudio) note = 'This video has no sound, so clips were picked without captions.';
     else if (transcript.speechReason) note = `${transcript.speechReason} Clips were picked by energy, without captions.`;
@@ -527,7 +548,7 @@ async function processJob(job) {
 
 async function renderPending(jobId) {
   const job = getJob(jobId);
-  const transcript = JSON.parse(job.transcript || '{"segments":[]}');
+  const transcript = readTranscript(job.transcript);
   const list = () => db.prepare(`SELECT * FROM clips WHERE job_id=? AND status IN ('pending','rendering') ORDER BY n`).all(jobId);
   let clip;
   const total = db.prepare('SELECT COUNT(*) AS n FROM clips WHERE job_id=?').get(jobId).n;
@@ -637,6 +658,7 @@ const readSettings = (b = {}) => ({
   framing: FRAMINGS.includes(b.framing) ? b.framing : 'face',
   captions: CAPTIONS.includes(b.captions) ? b.captions : 'bold',
   count: Math.max(1, Math.min(20, Number(b.count) || 8)),
+  words: b.words === 'best' ? 'best' : 'fast',
 });
 
 // A video from a link to your own post (see linkimport.js for which links work and why).
@@ -668,7 +690,7 @@ router.get('/clip/:id', (req, res) => {
 
 router.get('/:id', (req, res) => {
   const j = getJob(req.params.id);
-  j ? res.json({ ...jobOut(j), transcript: JSON.parse(j.transcript || '{"segments":[]}').segments }) : res.status(404).json({ error: 'Not found' });
+  j ? res.json({ ...jobOut(j), transcript: readTranscript(j.transcript).segments }) : res.status(404).json({ error: 'Not found' });
 });
 
 router.delete('/:id', (req, res) => {
@@ -685,7 +707,7 @@ router.patch('/clip/:id', (req, res) => {
   const c = db.prepare('SELECT * FROM clips WHERE id=?').get(req.params.id);
   if (!c) return res.status(404).json({ error: 'Clip not found.' });
   const job = getJob(c.job_id);
-  const transcript = JSON.parse(job.transcript || '{"segments":[]}');
+  const transcript = readTranscript(job.transcript);
   const b = req.body || {};
   const start = b.start != null ? Number(b.start) : c.start;
   const end = b.end != null ? Number(b.end) : c.end;
