@@ -819,3 +819,4 @@ input[type=file]::file-selector-button:hover { border-color: var(--accent); back
 .linkish { align-self: flex-start; border: 0; background: none; padding: 0; color: var(--accent, #4f46e5); font: inherit; font-size: .88rem; cursor: pointer; text-decoration: underline; }
 .dlg-look { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 10px 0; font-size: .92rem; }
 .dlg-look select { width: auto; }
+.clip-notext { display: flex; margin-top: 10px; font-size: .9rem; }

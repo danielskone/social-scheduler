@@ -82,10 +82,11 @@ async function findText(rgb, W, H) {
 }
 
 // Reads small frames out of ffmpeg (no files written). fps = null reads a single picture.
-function readFrames(ffmpeg, source, { W, H, fps, isImage }, onFrame) {
+function readFrames(ffmpeg, source, { W, H, fps, isImage, start = 0, len = 0 }, onFrame) {
   return new Promise((resolve, reject) => {
     const vf = `${fps ? `fps=${fps},` : ''}scale=${W}:${H}:flags=bilinear`;
-    const args = ['-hide_banner', '-loglevel', 'error', ...(isImage ? ['-noautorotate'] : []), '-i', source,
+    const args = ['-hide_banner', '-loglevel', 'error', ...(isImage ? ['-noautorotate'] : []),
+      ...(start ? ['-ss', String(start)] : []), ...(len ? ['-t', String(len)] : []), '-i', source,
       '-an', '-vf', isImage && isImage.rotate ? `${isImage.rotate},${vf}` : vf,
       ...(fps ? [] : ['-frames:v', '1']), '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-threads', '1', 'pipe:1'];
     const child = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -181,7 +182,8 @@ function filters(spots, width, height, { still = false } = {}) {
 
 // Finds the words in a whole video (or a photo) and returns the ffmpeg filters to remove them.
 // info: { width, height, duration } of the picture as shown (already turned upright).
-async function removalFilters({ ffmpeg, source, width, height, duration = 0, image = null, onProgress }) {
+// start/len: only that part of the video (Viral Clips); the times in the filters then count from start.
+async function removalFilters({ ffmpeg, source, width, height, duration = 0, image = null, onProgress, start = 0, len = 0 }) {
   const { W, H } = detSize(width, height);
   if (image) {
     let boxes = [];
@@ -190,11 +192,12 @@ async function removalFilters({ ffmpeg, source, width, height, duration = 0, ima
     return { spots, filters: filters(spots, width, height, { still: true }) };
   }
   // 3 looks a second for songs up to 3 minutes, 2 a second for longer videos.
-  const fps = duration > 180 ? 2 : 3;
+  const span = len || duration;
+  const fps = span > 180 ? 2 : 3;
   const samples = [];
-  await readFrames(ffmpeg, source, { W, H, fps }, async (rgb, t) => {
+  await readFrames(ffmpeg, source, { W, H, fps, start, len }, async (rgb, t) => {
     samples.push({ t, boxes: await findText(rgb, W, H) });
-    if (onProgress && duration) onProgress(Math.min(1, t / duration));
+    if (onProgress && span) onProgress(Math.min(1, t / span));
   });
   const spots = plan(samples, 1 / fps);
   return { spots, filters: filters(spots, width, height) };

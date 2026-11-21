@@ -184,8 +184,8 @@ function openClipViewer(id) {
 
 // ---------- New video ----------
 const clipForm = $('#clip-form');
-const clipChoice = { length: 'medium', captions: 'bold', words: 'fast' };
-['length', 'captions', 'words'].forEach((k) => {
+const clipChoice = { length: 'medium', captions: 'bold', words: 'fast', look: 'hollywood' };
+['length', 'captions', 'words', 'look'].forEach((k) => {
   $(`#clip-${k}`).onclick = (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -216,6 +216,8 @@ clipForm.onsubmit = (e) => {
   fd.set('length', clipChoice.length);
   fd.set('captions', clipChoice.captions);
   fd.set('words', clipChoice.words);
+  fd.set('look', clipChoice.look);
+  fd.set('removeText', $('#clip-notext').checked ? '1' : '0');
   fd.set('framing', clipForm.framing.value);
   fd.set('count', clipForm.count.value);
   fd.set('video', file);
@@ -292,7 +294,9 @@ function openClipEditor(id) {
     <div class="clip-times">
       <label class="field"><span>Framing</span><select name="framing">${Object.entries(FRAMING_NAMES).map(([k, v]) => `<option value="${k}"${k === c.framing ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
       <label class="field"><span>Captions</span><select name="captions">${Object.entries(CAPTION_NAMES).map(([k, v]) => `<option value="${k}"${k === c.captions ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label class="field"><span>Look</span><select name="look">${[['off', 'Off'], ['light', 'Light'], ['hollywood', '🎬 Hollywood']].map(([k, v]) => `<option value="${k}"${k === (c.look || 'off') ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
     </div>
+    <label class="check"><input type="checkbox" name="removeText"${c.remove_text ? ' checked' : ''}> <span>Remove words on screen <small class="muted">(lyrics, titles in the video)</small></span></label>
     <label class="field"><span>Words on screen <small>Fix any misheard words, like names.</small></span>
       <textarea name="text" rows="5">${esc(c.text)}</textarea></label>
     <label class="field"><span>Name <small>(also the suggested YouTube title)</small></span><input name="title" maxlength="100" value="${esc(c.title)}"></label>
@@ -319,7 +323,7 @@ function openClipEditor(id) {
       await api(`/clips/clip/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start: Number(f.start.value), end: Number(f.end.value), framing: f.framing.value, captions: f.captions.value, text: f.text.value, title: f.title.value }),
+        body: JSON.stringify({ start: Number(f.start.value), end: Number(f.end.value), framing: f.framing.value, captions: f.captions.value, look: f.look.value, removeText: f.removeText.checked, text: f.text.value, title: f.title.value }),
       });
       dlg.close();
       await loadClipJobs();
@@ -383,7 +387,7 @@ async function getLinkedVideo() {
     const res = await fetch('/api/clips/link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, length: clipChoice.length, captions: clipChoice.captions, words: clipChoice.words, framing: clipForm.framing.value, count: clipForm.count.value }),
+      body: JSON.stringify({ url, length: clipChoice.length, captions: clipChoice.captions, words: clipChoice.words, look: clipChoice.look, removeText: $('#clip-notext').checked, framing: clipForm.framing.value, count: clipForm.count.value }),
     });
     if (res.status === 401) { location.href = '/login.html'; return; }
     const data = await res.json().catch(() => ({}));

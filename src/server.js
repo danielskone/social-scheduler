@@ -451,7 +451,8 @@ api.post('/posts', upload.single('media'), (req, res) => {
   const clipFile = req.file ? null : req.body.clipId ? clipper.copyClipToMedia(Number(req.body.clipId)) : null;
   if (!req.file && req.body.clipId && !clipFile) return res.status(400).json({ error: 'That clip is not ready yet. Try again in a minute.' });
   const mediaType = req.file ? (req.file.mimetype.startsWith('video') ? 'video' : 'image') : clipFile ? 'video' : null;
-  const lk = look.pick(req.body.look, req.body.removeText);
+  let lk = look.pick(req.body.look, req.body.removeText);
+  if (clipFile && clipper.clipFinished(Number(req.body.clipId))) lk = { look: null, removeText: 0 }; // already done in Viral Clips
   let error = validatePost({ caption, scheduledAt: req.body.scheduledAt, accountIds, mediaType });
   // With a look on, the finished photo is always a JPG, so Instagram takes PNGs too.
   if (!error && req.file?.mimetype === 'image/png' && !lk.look && !lk.removeText && accountIds.length &&
@@ -501,8 +502,9 @@ api.post('/posts/from-clips', (req, res) => {
   const lk = look.pick(req.body?.look, req.body?.removeText);
   const ids = db.transaction(() => list.map((p, i) => {
     const when = new Date(p.scheduledAt).toISOString();
+    const done = clipper.clipFinished(Number(p.clipId)); // look already added in Viral Clips
     const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title, look, remove_text) VALUES (?,?,?,?,?,?,?)')
-      .run(String(p.caption || '').trim(), files[i], 'video', when, String(p.title || '').trim().slice(0, 100) || null, lk.look, lk.removeText);
+      .run(String(p.caption || '').trim(), files[i], 'video', when, String(p.title || '').trim().slice(0, 100) || null, done ? null : lk.look, done ? 0 : lk.removeText);
     const ins = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
     accountIds.forEach((a) => ins.run(lastInsertRowid, a));
     clipper.markScheduled(Number(p.clipId), when);

@@ -336,4 +336,4 @@ async function preview(file, { look, removeText }) {
   return dest;
 }
 
-module.exports = { LOOKS, LOOK_NAMES, settings, saveSettings, pick, prepare, statusFor, mediaFor, work, cleanUp, preview, render, probe, jpegOrientation, keyFor };
+module.exports = { lookFilters, LOOKS, LOOK_NAMES, settings, saveSettings, pick, prepare, statusFor, mediaFor, work, cleanUp, preview, render, probe, jpegOrientation, keyFor };

@@ -9,6 +9,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { cleanText, cleanTranscript } = require('./speechtext');
+const look = require('./look');
+const textremove = require('./textremove');
 const { spawn, execFile } = require('child_process');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
@@ -66,6 +68,14 @@ if (!db.prepare('PRAGMA table_info(clips)').all().some((c) => c.name === 'previe
 if (!db.prepare('PRAGMA table_info(clips)').all().some((c) => c.name === 'scheduled_at')) {
   db.exec('ALTER TABLE clips ADD COLUMN scheduled_at TEXT');
 }
+
+// Added later: Hollywood look and "remove words on screen" for each clip (older clips: none).
+{
+  const cols = db.prepare('PRAGMA table_info(clips)').all().map((c) => c.name);
+  if (!cols.includes('look')) db.exec('ALTER TABLE clips ADD COLUMN look TEXT');
+  if (!cols.includes('remove_text')) db.exec('ALTER TABLE clips ADD COLUMN remove_text INTEGER NOT NULL DEFAULT 0');
+}
+const LOOK_CHOICES = ['off', 'light', 'hollywood'];
 
 // Saved transcripts, with music-note junk ("<0xAB>") taken out (also fixes videos done before).
 function readTranscript(json) {
@@ -371,16 +381,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 // (only the brightness, not the colors, so no colored halos), so clips look crisp on Instagram,
 // Facebook and TikTok even after they compress them again.
 const SHARPEN = 'unsharp=5:5:0.9:5:5:0.0';
-function videoFilter({ width, height }, framing, posExpr) {
+// extra.pre: filters on the original picture first (words removed); extra.post: the look, after resizing.
+function videoFilter({ width, height }, framing, posExpr, extra = {}) {
   const W = 1080, H = 1920;
+  const pre = extra.pre?.length ? `${extra.pre.join(',')},` : '';
+  const post = extra.post?.length ? `,${extra.post.join(',')}` : '';
   if (framing === 'fit') {
-    return `[0:v]fps=30,split=2[a][b];[a]scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bilinear,crop=${W}:${H},boxblur=28:3,eq=brightness=-0.08[bg];` +
-      `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease:flags=lanczos,${SHARPEN},setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[v]`;
+    return `[0:v]${pre}fps=30,split=2[a][b];[a]scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bilinear,crop=${W}:${H},boxblur=28:3,eq=brightness=-0.08[bg];` +
+      `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease:flags=lanczos,${SHARPEN}${post},setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[v]`;
   }
   const pos = posExpr ? `(${posExpr})` : ({ left: 0.15, center: 0.5, right: 0.85 }[framing] ?? 0.5);
   const cropW = `min(iw\\,ih*9/16)`;
   const cropH = `min(ih\\,iw*16/9)`;
-  return `[0:v]fps=30,crop=${cropW}:${cropH}:(iw-${cropW})*${pos}:(ih-${cropH})/2,scale=${W}:${H}:flags=lanczos,${SHARPEN},setsar=1,format=yuv420p[v]`;
+  return `[0:v]${pre}fps=30,crop=${cropW}:${cropH}:(iw-${cropW})*${pos}:(ih-${cropH})/2,scale=${W}:${H}:flags=lanczos,${SHARPEN}${post},setsar=1,format=yuv420p[v]`;
 }
 
 // The full clip and its small preview are made in one go: the video is read once and the
@@ -442,7 +455,19 @@ async function renderClip(job, clip, transcript) {
       console.warn('[clips] face finder:', err.message);
     }
   }
-  const plain = videoFilter(job, clip.framing, posExpr);
+  // Hollywood look (clips are already sharpened, so the look's own sharpening is left out) and
+  // words removed from the original picture, before the new captions go on.
+  const extra = { pre: [], post: [] };
+  if (clip.look && clip.look !== 'off') extra.post = (await look.lookFilters(clip.look)).filter((f) => !f.startsWith('unsharp'));
+  if (clip.remove_text) {
+    try {
+      const r = await textremove.removalFilters({ ffmpeg: ffmpegPath(), source: job.source_file, width: job.width, height: job.height, start: clip.start, len });
+      extra.pre = r.filters;
+    } catch (err) {
+      console.warn('[clips] remove words:', err.message);
+    }
+  }
+  const plain = videoFilter(job, clip.framing, posExpr, extra);
   let filter = plain;
   let assFile = null;
   if (clip.captions !== 'none' && transcript.segments.length) {
@@ -539,9 +564,10 @@ async function processJob(job) {
   if (!db.prepare('SELECT 1 FROM clips WHERE job_id=?').get(job.id)) {
     step('Finding the best moments…', 62);
     const picks = pickClips({ ...transcript, duration: job.duration, length: settings.length, count: settings.count });
-    const ins = db.prepare(`INSERT INTO clips (job_id, n, start, end, score, reason, title, text, framing, captions)
-      VALUES (@job_id, @n, @start, @end, @score, @reason, @title, @text, @framing, @captions)`);
-    db.transaction(() => picks.forEach((p, i) => ins.run({ ...p, job_id: job.id, n: i + 1, framing: settings.framing || 'face', captions: settings.captions || 'bold' })))();
+    const ins = db.prepare(`INSERT INTO clips (job_id, n, start, end, score, reason, title, text, framing, captions, look, remove_text)
+      VALUES (@job_id, @n, @start, @end, @score, @reason, @title, @text, @framing, @captions, @look, @remove_text)`);
+    db.transaction(() => picks.forEach((p, i) => ins.run({ ...p, job_id: job.id, n: i + 1, framing: settings.framing || 'face', captions: settings.captions || 'bold',
+      look: LOOK_CHOICES.includes(settings.look) ? settings.look : 'off', remove_text: settings.removeText ? 1 : 0 })))();
   }
   setJob(job.id, { status: 'ready', step: null, progress: 100 });
 }
@@ -621,7 +647,7 @@ function clipOut(c) {
   return {
     id: c.id, job_id: c.job_id, n: c.n, start: c.start, end: c.end, length: +(c.end - c.start).toFixed(1),
     score: c.score, reason: c.reason, title: c.title, caption: firstSentence(c.text, 300) || c.title, text: c.text, text_edited: Boolean(c.text_edited),
-    framing: c.framing, captions: c.captions, status: c.status, error: c.error, scheduled_at: c.scheduled_at || null,
+    framing: c.framing, captions: c.captions, look: c.look || 'off', remove_text: Boolean(c.remove_text), status: c.status, error: c.error, scheduled_at: c.scheduled_at || null,
     url: c.file ? base + c.file : null, poster_url: c.poster ? base + c.poster : null,
     preview_url: c.preview ? base + c.preview : (c.file ? base + c.file : null),
     size: c.file ? fileSize(path.join(clipsDir, String(c.job_id), c.file)) : null,
@@ -659,6 +685,8 @@ const readSettings = (b = {}) => ({
   captions: CAPTIONS.includes(b.captions) ? b.captions : 'bold',
   count: Math.max(1, Math.min(20, Number(b.count) || 8)),
   words: b.words === 'best' ? 'best' : 'fast',
+  look: LOOK_CHOICES.includes(b.look) ? b.look : 'hollywood',
+  removeText: b.removeText === true || /^(1|true|on)$/.test(String(b.removeText || '')),
 });
 
 // A video from a link to your own post (see linkimport.js for which links work and why).
@@ -718,10 +746,12 @@ router.patch('/clip/:id', (req, res) => {
   let text = c.text, edited = c.text_edited;
   if (typeof b.text === 'string' && b.text.trim() !== (c.text || '').trim()) { text = b.text.trim(); edited = 1; }
   else if (timesChanged && !c.text_edited) text = clipText(transcript.segments, start, end);
-  db.prepare(`UPDATE clips SET start=?, end=?, text=?, text_edited=?, framing=?, captions=?, title=?, status='pending', error=NULL WHERE id=?`).run(
+  db.prepare(`UPDATE clips SET start=?, end=?, text=?, text_edited=?, framing=?, captions=?, look=?, remove_text=?, title=?, status='pending', error=NULL WHERE id=?`).run(
     start, end, text, edited,
     FRAMINGS.includes(b.framing) ? b.framing : c.framing,
     CAPTIONS.includes(b.captions) ? b.captions : c.captions,
+    LOOK_CHOICES.includes(b.look) ? b.look : c.look,
+    b.removeText !== undefined ? (b.removeText ? 1 : 0) : c.remove_text,
     typeof b.title === 'string' && b.title.trim() ? b.title.trim().slice(0, 100) : c.title,
     c.id,
   );
@@ -776,4 +806,10 @@ function start() {
   work();
 }
 
-module.exports = { router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };
+// A clip that already has a look (or words removed) shouldn't get Viral Post's look on top.
+function clipFinished(id) {
+  const c = db.prepare('SELECT look, remove_text FROM clips WHERE id=?').get(id);
+  return Boolean(c && ((c.look && c.look !== 'off') || c.remove_text));
+}
+
+module.exports = { clipFinished, router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };
