@@ -111,6 +111,8 @@ test('upload a video, get vertical clips, and schedule one', { timeout: 180000 }
   assert.ok(job.note, 'explains why there are no captions');
   assert.ok(job.clips.length >= 1);
   const clip = job.clips[0];
+  assert.strictEqual(clip.look, 'hollywood', 'new clips get the Hollywood look');
+  assert.strictEqual(clip.remove_text, false);
   const res = await fetch(root + clip.url);
   assert.strictEqual(res.status, 200);
   const info = await clipper.probe(path.join(dir, 'clips', String(job.id), path.basename(clip.url)));
@@ -138,6 +140,7 @@ test('upload a video, get vertical clips, and schedule one', { timeout: 180000 }
   assert.strictEqual(made.status, 201);
   const p = await made.json();
   assert.strictEqual(p.media_type, 'video');
+  assert.strictEqual(p.look, null, 'no second look on top of the clip\'s own');
   assert.ok(fs.existsSync(path.join(dir, 'media', p.media_file)));
 
   // Deleting the post keeps the clip; deleting the video removes its clips.
@@ -276,4 +279,36 @@ test('Clips: a 6 minute talk still gives all 20 clips asked for (some share a li
   const starts = new Set(picks.map((p) => Math.round(p.start)));
   assert.strictEqual(starts.size, 20, 'every clip starts somewhere different');
   assert.ok(picks.every((p) => p.end - p.start >= 8 && p.end - p.start <= 35));
+});
+
+test('Remove words on screen: lyrics burned into the video are gone from the clip', { timeout: 240000 }, async () => {
+  const src = path.join(dir, 'song.mp4');
+  execFileSync(clipper.ffmpegPath(), ['-loglevel', 'error', '-y', '-loop', '1', '-i', path.join(__dirname, 'fixtures', 'words.jpg'),
+    '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=44100', '-t', '20', '-vf', 'scale=640:360,format=yuv420p', '-r', '25',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', src]);
+  const fd = new FormData();
+  fd.set('length', 'short'); fd.set('count', '1'); fd.set('framing', 'fit'); fd.set('captions', 'none');
+  fd.set('look', 'off'); fd.set('removeText', '1');
+  fd.set('video', new Blob([fs.readFileSync(src)], { type: 'video/mp4' }), 'Song.mp4');
+  const created = await (await fetch(`${root}/api/clips`, { method: 'POST', body: fd })).json();
+  let job;
+  for (let i = 0; i < 230; i++) {
+    job = await (await fetch(`${root}/api/clips/${created.id}`)).json();
+    if (job.status === 'failed' || (job.status === 'ready' && job.clips.length && job.clips.every((c) => c.status === 'ready'))) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  assert.strictEqual(job.status, 'ready', job.error || job.step);
+  const clip = job.clips[0];
+  assert.strictEqual(clip.remove_text, true);
+  // "Whole video" framing: the 640x360 picture sits in the middle of the tall frame (1080 wide, about 608 tall).
+  const file = path.join(dir, 'clips', String(job.id), path.basename(clip.url));
+  const spread = (f, y) => {
+    const raw = execFileSync(clipper.ffmpegPath(), ['-loglevel', 'error', '-ss', '2', '-i', f, '-frames:v', '1', '-vf', `crop=1080:80:0:${y},format=gray`, '-f', 'rawvideo', 'pipe:1']);
+    let sum = 0, sq = 0; for (const v of raw) { sum += v; sq += v * v; }
+    const m = sum / raw.length; return Math.sqrt(sq / raw.length - m * m);
+  };
+  const orig = path.join(dir, 'song-tall.mp4');
+  execFileSync(clipper.ffmpegPath(), ['-loglevel', 'error', '-y', '-i', src, '-t', '4', '-vf', 'scale=1080:-2,pad=1080:1920:0:(oh-ih)/2', '-c:v', 'libx264', '-preset', 'ultrafast', orig]);
+  const wordsY = Math.round((1920 - 608) / 2 + 608 * 0.75);
+  assert.ok(spread(file, wordsY) < spread(orig, wordsY) * 0.6, 'the words\' sharp edges are gone');
 });
