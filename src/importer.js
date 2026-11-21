@@ -27,6 +27,9 @@
 // "media": { "santa": { "name": "santa.mp4", "data": "<base64>" } } and give each post
 // "media": { "use": "santa" }. It is saved once and shared on disk (hard links).
 //
+// "look": "off" | "light" | "hollywood" and "removeText": true (top of the bundle or on one post)
+// pick the Hollywood look and words removal (see look.js). Left out = the look picked in New post.
+//
 // Everything is checked first; if any post has a problem nothing is imported. Posts that
 // already exist (same caption, time and accounts) are skipped, so importing twice is safe.
 const crypto = require('crypto');
@@ -34,6 +37,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 const db = require('./db');
+const look = require('./look');
 
 const norm = (s) => String(s || '').toLowerCase().replace(/^@/, '').replace(/[^a-z0-9]/g, '');
 
@@ -115,7 +119,10 @@ function importBundle(json, { now = Date.now() } = {}) {
     if (accts.some((a) => a.platform === 'tiktok') && (!media || media.type !== 'video')) return problems.push(`${label}: TikTok posts need a video.`);
     if (hasIg && caption.length > 2200) return problems.push(`${label}: Instagram captions are limited to 2,200 characters.`);
     if (!caption && !media) return problems.push(`${label}: empty post.`);
-    ready.push({ caption, title: String(p.title || '').trim() || null, when: new Date(when).toISOString(), accts, media });
+    // Hollywood look: "look": "off" | "light" | "hollywood" and "removeText": true, on the post or the whole bundle.
+    // Left out = the look picked in New post.
+    const lk = media ? look.pick(p.look ?? bundle.look, p.removeText ?? bundle.removeText) : { look: null, removeText: 0 };
+    ready.push({ caption, title: String(p.title || '').trim() || null, when: new Date(when).toISOString(), accts, media, lk });
   });
 
   const clears = [];
@@ -135,7 +142,7 @@ function importBundle(json, { now = Date.now() } = {}) {
       AND (SELECT group_concat(account_id) FROM (SELECT account_id FROM post_targets WHERE post_id=p.id ORDER BY account_id)) = ?
       AND NOT EXISTS (SELECT 1 FROM post_targets WHERE post_id=p.id AND status <> 'scheduled')`);
   const setCaption = db.prepare('UPDATE posts SET caption=?, title=COALESCE(?, title) WHERE id=?');
-  const insPost = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, media_source_url, title) VALUES (?,?,?,?,?,?)');
+  const insPost = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, media_source_url, title, look, remove_text) VALUES (?,?,?,?,?,?,?,?)');
   const insTarget = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
   const written = [];
   const removedFiles = [];
@@ -178,7 +185,7 @@ function importBundle(json, { now = Date.now() } = {}) {
           }
           written.push(file);
         }
-        const { lastInsertRowid } = insPost.run(r.caption, file, r.media ? r.media.type : null, r.when, r.media && r.media.url ? r.media.url : null, r.title);
+        const { lastInsertRowid } = insPost.run(r.caption, file, r.media ? r.media.type : null, r.when, r.media && r.media.url ? r.media.url : null, r.title, r.lk.look, r.lk.removeText);
         ids.forEach((id) => insTarget.run(lastInsertRowid, id));
         imported++;
       }

@@ -89,6 +89,20 @@
             <span>Photo or video <small>(JPG, PNG, MP4 or MOV)</small></span>
             <input type="file" name="media" accept="image/jpeg,image/png,video/mp4,video/quicktime">
           </label>
+          <div class="field look-field" id="look-field" hidden>
+            <span>Look <small>(made on your Mac, free)</small></span>
+            <div class="seg" id="look-seg" role="tablist" aria-label="Look">
+              <button type="button" data-v="off">Off</button><button type="button" data-v="light">Light</button><button type="button" data-v="hollywood" class="on">🎬 Hollywood</button>
+            </div>
+            <small class="muted" id="look-about">Sharper, brighter, more contrast and movie colors.</small>
+            <label class="check"><input type="checkbox" id="look-notext"> <span>Remove words on screen <small class="muted">(lyrics, titles, captions)</small></span></label>
+            <div class="look-preview" id="look-preview" hidden>
+              <figure><img id="look-before" alt="Before"><figcaption>Before</figcaption></figure>
+              <figure><img id="look-after" alt="After"><figcaption>After</figcaption></figure>
+            </div>
+            <small class="muted" id="look-msg" aria-live="polite"></small>
+            <button type="button" class="linkish" id="look-all">Use this look on all my upcoming posts</button>
+          </div>
           <label class="field">
             <span>When</span>
             <input type="datetime-local" name="scheduledAt" required>

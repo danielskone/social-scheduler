@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const multer = require('multer');
+const look = require('./look');
+const os = require('os');
 const config = require('./config');
 const db = require('./db');
 const meta = require('./meta');
@@ -422,7 +424,7 @@ function loadPost(id) {
   post.targets = db.prepare(`
     SELECT t.*, a.platform, a.name AS account_name, a.username
     FROM post_targets t JOIN accounts a ON a.id=t.account_id WHERE t.post_id=?`).all(id);
-  return Object.assign(post, mediaUrls(post));
+  return Object.assign(post, mediaUrls(post), { look_status: look.statusFor(post) });
 }
 function mediaUrls(post) {
   const media_url = post.media_file ? `/media/${post.media_file}` : post.media_source_url || null;
@@ -449,8 +451,10 @@ api.post('/posts', upload.single('media'), (req, res) => {
   const clipFile = req.file ? null : req.body.clipId ? clipper.copyClipToMedia(Number(req.body.clipId)) : null;
   if (!req.file && req.body.clipId && !clipFile) return res.status(400).json({ error: 'That clip is not ready yet. Try again in a minute.' });
   const mediaType = req.file ? (req.file.mimetype.startsWith('video') ? 'video' : 'image') : clipFile ? 'video' : null;
+  const lk = look.pick(req.body.look, req.body.removeText);
   let error = validatePost({ caption, scheduledAt: req.body.scheduledAt, accountIds, mediaType });
-  if (!error && req.file?.mimetype === 'image/png' && accountIds.length &&
+  // With a look on, the finished photo is always a JPG, so Instagram takes PNGs too.
+  if (!error && req.file?.mimetype === 'image/png' && !lk.look && !lk.removeText && accountIds.length &&
       db.prepare(`SELECT 1 FROM accounts WHERE platform='instagram' AND id IN (${accountIds.map(() => '?').join(',')})`).get(...accountIds)) {
     error = 'Instagram only accepts JPG photos. Please save the image as a JPG.';
   }
@@ -460,13 +464,15 @@ api.post('/posts', upload.single('media'), (req, res) => {
     return res.status(400).json({ error });
   }
   const id = db.transaction(() => {
-    const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title) VALUES (?,?,?,?,?)')
-      .run(caption, req.file?.filename || clipFile || null, mediaType, new Date(req.body.scheduledAt).toISOString(), (req.body.title || '').trim() || null);
+    const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title, look, remove_text) VALUES (?,?,?,?,?,?,?)')
+      .run(caption, req.file?.filename || clipFile || null, mediaType, new Date(req.body.scheduledAt).toISOString(), (req.body.title || '').trim() || null,
+        mediaType ? lk.look : null, mediaType ? lk.removeText : 0);
     const ins = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
     accountIds.forEach((a) => ins.run(lastInsertRowid, a));
     if (clipFile) clipper.markScheduled(Number(req.body.clipId), new Date(req.body.scheduledAt).toISOString());
     return lastInsertRowid;
   })();
+  look.work().catch(() => {});
   res.status(201).json(loadPost(id));
 });
 
@@ -492,15 +498,17 @@ api.post('/posts/from-clips', (req, res) => {
     files.forEach((f) => fs.rmSync(path.join(config.mediaDir, f), { force: true }));
     return res.status(400).json({ error: err.message });
   }
+  const lk = look.pick(req.body?.look, req.body?.removeText);
   const ids = db.transaction(() => list.map((p, i) => {
     const when = new Date(p.scheduledAt).toISOString();
-    const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title) VALUES (?,?,?,?,?)')
-      .run(String(p.caption || '').trim(), files[i], 'video', when, String(p.title || '').trim().slice(0, 100) || null);
+    const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title, look, remove_text) VALUES (?,?,?,?,?,?,?)')
+      .run(String(p.caption || '').trim(), files[i], 'video', when, String(p.title || '').trim().slice(0, 100) || null, lk.look, lk.removeText);
     const ins = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
     accountIds.forEach((a) => ins.run(lastInsertRowid, a));
     clipper.markScheduled(Number(p.clipId), when);
     return lastInsertRowid;
   }))();
+  look.work().catch(() => {});
   res.status(201).json({ created: ids.length, first: list.map((p) => p.scheduledAt).sort()[0] });
 });
 
@@ -509,7 +517,7 @@ api.get('/posts', (req, res) => {
   const to = req.query.to || new Date(Date.now() + 62 * 864e5).toISOString();
   // Two queries for the whole range (not two per post), so a busy month opens quickly.
   const posts = db.prepare('SELECT * FROM posts WHERE scheduled_at BETWEEN ? AND ? ORDER BY scheduled_at').all(from, to);
-  const byId = new Map(posts.map((p) => [p.id, Object.assign(p, mediaUrls(p), { targets: [] })]));
+  const byId = new Map(posts.map((p) => [p.id, Object.assign(p, mediaUrls(p), { look_status: look.statusFor(p), targets: [] })]));
   for (const t of db.prepare(`
     SELECT t.*, a.platform, a.name AS account_name, a.username
     FROM post_targets t JOIN accounts a ON a.id=t.account_id JOIN posts p ON p.id=t.post_id
@@ -534,6 +542,11 @@ api.patch('/posts/:id', (req, res) => {
   db.prepare('UPDATE posts SET caption=COALESCE(?, caption), scheduled_at=COALESCE(?, scheduled_at) WHERE id=?')
     .run(caption ?? null, scheduledAt ? new Date(scheduledAt).toISOString() : null, post.id);
   if (title !== undefined) db.prepare('UPDATE posts SET title=? WHERE id=?').run(String(title).trim() || null, post.id);
+  if ((req.body.look !== undefined || req.body.removeText !== undefined) && post.media_type) {
+    const lk = look.pick(req.body.look ?? post.look ?? 'off', req.body.removeText ?? post.remove_text);
+    db.prepare('UPDATE posts SET look=?, remove_text=? WHERE id=?').run(lk.look, lk.removeText, post.id);
+    look.work().catch(() => {});
+  }
   res.json(loadPost(post.id));
 });
 
@@ -550,6 +563,40 @@ api.delete('/posts/:id', (req, res) => {
   db.prepare('DELETE FROM posts WHERE id=?').run(post.id);
   if (post.media_file) fs.rmSync(path.join(config.mediaDir, post.media_file), { force: true });
   res.json({ ok: true });
+});
+
+// ---------- Hollywood look ----------
+api.get('/look/settings', (req, res) => res.json(look.settings()));
+api.put('/look/settings', (req, res) => res.json(look.saveSettings({ look: req.body?.look, removeText: req.body?.removeText })));
+
+// Before/after preview: one picture in (a photo, or a frame of the video), the finished picture out.
+const previewUpload = multer({ storage: multer.diskStorage({ destination: os.tmpdir() }), limits: { fileSize: 25 * 1024 * 1024 } });
+api.post('/look/preview', previewUpload.single('frame'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No picture sent.' });
+  const src = `${req.file.path}${/png/.test(req.file.mimetype) ? '.png' : '.jpg'}`;
+  fs.renameSync(req.file.path, src);
+  let out = null;
+  try {
+    out = await look.preview(src, { look: req.body.look, removeText: /^(1|true|on)$/.test(String(req.body.removeText || '')) });
+    res.type('image/jpeg').send(fs.readFileSync(out));
+  } catch (err) {
+    res.status(500).json({ error: `The preview couldn't be made: ${err.message}` });
+  } finally {
+    fs.rmSync(src, { force: true });
+    if (out) fs.rmSync(out, { force: true });
+  }
+});
+
+// "Use on all upcoming posts": sets the look on every photo/video post that hasn't gone out yet.
+api.post('/look/apply-upcoming', (req, res) => {
+  const lk = look.pick(req.body?.look, req.body?.removeText);
+  const r = db.prepare(`UPDATE posts SET look=?, remove_text=? WHERE media_type IS NOT NULL AND scheduled_at >= ?
+    AND id IN (SELECT post_id FROM post_targets WHERE status='scheduled')
+    AND id NOT IN (SELECT post_id FROM post_targets WHERE status IN ('published','publishing'))`)
+    .run(lk.look, lk.removeText, new Date().toISOString());
+  look.saveSettings({ look: lk.look || 'off', removeText: Boolean(lk.removeText) });
+  look.work().catch(() => {});
+  res.json({ updated: r.changes });
 });
 
 const bundleUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 * 1024 } });

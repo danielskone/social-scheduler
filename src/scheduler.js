@@ -16,6 +16,7 @@ const automations = require('../crm/server/automations');
 const campaigns = require('../crm/server/campaigns');
 const gcal = require('../crm/server/gcal');
 const thumbs = require('./thumbs');
+const look = require('./look');
 
 const publishers = { facebook: meta.publishFacebook, instagram: meta.publishInstagram, youtube: youtube.publishYouTube, tiktok: tiktok.publishTikTok };
 const postStats = { facebook: meta.facebookPostStats, instagram: meta.instagramPostStats, youtube: youtube.videoStats, tiktok: tiktok.videoStats };
@@ -71,6 +72,19 @@ async function publishDue(now = new Date()) {
           continue;
         }
       }
+      // Hollywood look / words removed: post the finished copy. If it's still being made, wait a little.
+      let finished = look.mediaFor(row, now);
+      if (finished.wait) { // not finished yet (e.g. "Post now"): finish it right here, then post
+        await look.prepare(row);
+        finished = look.mediaFor(row, now);
+      }
+      if (finished.wait) {
+        db.prepare(`UPDATE post_targets SET retry_at=? WHERE id=?`).run(new Date(now.getTime() + 60e3).toISOString(), row.target_id);
+        console.log(`[publish] post ${row.id} -> ${row.platform}: waiting for its Hollywood look to finish`);
+        look.work().catch(() => {});
+        continue;
+      }
+      row.media_file = finished.file;
       if (tiktokFull.has(row.target_account)) { // TikTok just said it's full: don't knock again this run
         holdTikTok(row, tiktokFull.get(row.target_account), now, false);
         continue;
@@ -200,6 +214,9 @@ function start() {
   db.prepare(`UPDATE post_targets SET status='failed', error='App restarted while publishing. Check the platform, then retry if it did not post.' WHERE status='publishing'`).run();
   cron.schedule('* * * * *', () => publishDue().catch((e) => console.error(e)));
   cron.schedule('*/2 * * * *', () => media.prefetch().then(() => thumbs.warm(db)).catch((e) => console.error(e)));
+  // Hollywood look: make the finished photos and videos for upcoming posts ahead of time.
+  cron.schedule('* * * * *', () => look.work().catch((e) => console.error(e)));
+  cron.schedule('25 4 * * *', () => { try { look.cleanUp(); } catch (e) { console.error(e); } });
   cron.schedule('7-59/15 * * * *', () => headsUp().catch((e) => console.error(e)));
   cron.schedule('17 */3 * * *', () => refreshStats().catch((e) => console.error(e)));
 }
