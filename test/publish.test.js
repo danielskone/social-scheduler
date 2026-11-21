@@ -24,6 +24,10 @@ const fakeGraph = http.createServer((req, res) => {
     else if (p === 'ig-api-upload/' + url.pathname.split('/')[2] + '/reel1') out = { success: true };
     else if (p === 'IG1/media' && /upload_type=resumable/.test(body)) out = { id: 'reel1' };
     else if (p === 'reel1') out = { status_code: 'FINISHED' };
+    else if (p === 'PAGE1/video_reels' && /upload_phase=start/.test(body)) out = { video_id: 'vr1' };
+    else if (p === 'PAGE1/video_reels' && /upload_phase=finish/.test(body)) out = { success: true, post_id: 'PAGE1_333' };
+    else if (p.startsWith('video-upload/') && p.endsWith('/vr1')) out = { success: true };
+    else if (p === 'PAGE1/videos') out = { id: 'vid1' };
     else if (p === 'PAGE1/feed') out = { id: 'PAGE1_111' };
     else if (p === 'PAGE1/photos') out = { id: 'photo1', post_id: 'PAGE1_222' };
     else if (p === 'IG1/media' && igFailures > 0) { igFailures--; res.statusCode = 500; out = { error: { message: 'An unknown error has occurred.', code: 1, is_transient: false } }; }
@@ -158,6 +162,30 @@ test('Instagram videos are uploaded straight to Instagram, not downloaded from t
   const up = calls.find((c) => c.path.endsWith('/reel1') && c.method === 'POST');
   assert.equal(up.body, 'fakevideo');
   assert.ok(!calls.some((c) => /video_url=/.test(c.body)), 'no download link given to Instagram');
+});
+
+test('tall videos go to Facebook as real Reels, wide videos as Page videos', { timeout: 60000 }, async () => {
+  const config = require('../src/config');
+  const { execFileSync } = require('node:child_process');
+  const ffmpeg = require('../src/clipper').ffmpegPath();
+  const make = (name, size) => execFileSync(ffmpeg, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=blue:s=${size}:d=4`, '-pix_fmt', 'yuv420p', path.join(config.mediaDir, name)]);
+  make('tall.mp4', '360x640');
+  make('wide.mp4', '640x360');
+  const before = calls.length;
+  for (const file of ['tall.mp4', 'wide.mp4']) {
+    const id = db.prepare("INSERT INTO posts (caption, media_file, media_type, scheduled_at) VALUES ('clip!', ?, 'video', ?)").run(file, new Date(Date.now() - 1000).toISOString()).lastInsertRowid;
+    db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?, 1)').run(id);
+  }
+  await scheduler.publishDue();
+  const mine = calls.slice(before);
+  const up = mine.find((c) => c.path.endsWith('/vr1'));
+  assert.ok(up && up.body.length > 100, 'reel file sent to Facebook');
+  assert.match(mine.find((c) => /upload_phase=finish/.test(c.body)).body, /description=clip/);
+  assert.equal(mine.filter((c) => c.path.endsWith('PAGE1/videos')).length, 1, 'only the wide video is a plain Page video');
+  assert.ok(!mine.some((c) => c.path.endsWith('PAGE1/feed')), 'never posted as a link or text post');
+  const rows = db.prepare("SELECT t.status, t.external_post_id AS external_id FROM post_targets t JOIN posts p ON p.id=t.post_id WHERE p.media_file IN ('tall.mp4','wide.mp4')").all();
+  assert.deepEqual(rows.map((r) => r.status), ['published', 'published']);
+  assert.ok(rows.some((r) => r.external_id === 'PAGE1_333'));
 });
 
 test('if Facebook can\'t hold the photo, Instagram falls back to the Mac link', async () => {

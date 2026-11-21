@@ -168,6 +168,8 @@ async function publishFacebook(account, post) {
     form.set('caption', post.caption);
     form.set('source', await fileBlob(post.media_file), post.media_file);
     result = await call('POST', `${account.external_id}/photos`, {}, { body: form });
+  } else if (await isReelShaped(post.media_file)) {
+    result = await publishFacebookReel(account, post);
   } else {
     const form = new FormData();
     form.set('access_token', token);
@@ -183,6 +185,43 @@ async function publishFacebook(account, post) {
     if (permalink && permalink.startsWith('/')) permalink = `https://www.facebook.com${permalink}`;
   } catch { /* video posts may not expose this right away */ }
   return { id, permalink };
+}
+
+// Tall (9:16) videos of 3 to 90 seconds go up through Facebook's own Reels upload, so the
+// Page gets a real Reel that plays full screen in everyone's feed. Wide or long videos stay
+// regular Page videos.
+async function isReelShaped(file) {
+  try {
+    const info = await require('./clipper').probe(path.join(config.mediaDir, file));
+    return Boolean(info && info.height > info.width && info.duration >= 3 && info.duration <= 90);
+  } catch {
+    return false;
+  }
+}
+
+async function publishFacebookReel(account, post) {
+  const token = account.access_token;
+  const pageId = account.external_id;
+  // Nothing shows on the Page until the last step ("finish"), so a failure before it is safe to retry.
+  const start = await call('POST', `${pageId}/video_reels`, { upload_phase: 'start', access_token: token });
+  const buf = await fs.promises.readFile(path.join(config.mediaDir, post.media_file));
+  const uri = start.upload_url || `${config.igUploadBase}/video-upload/${config.graphVersion}/${start.video_id}`;
+  let res;
+  try {
+    res = await fetch(uri, { method: 'POST', headers: { Authorization: `OAuth ${token}`, offset: '0', file_size: String(buf.length) }, body: buf });
+  } catch (e) {
+    throw new GraphError(`Could not send the reel to Facebook: ${e.message}`);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error || data.success === false) {
+    const err = data.error || data.debug_info || {};
+    throw new GraphError(`Facebook didn't accept the reel upload: ${err.message || `HTTP ${res.status}`}`, { code: err.code });
+  }
+  const done = await call('POST', `${pageId}/video_reels`, {
+    upload_phase: 'finish', video_id: start.video_id, video_state: 'PUBLISHED', description: post.caption, access_token: token,
+  });
+  if (done.success === false) throw new GraphError('Facebook did not publish the reel.');
+  return { id: done.post_id || start.video_id };
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
