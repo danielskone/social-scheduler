@@ -117,7 +117,10 @@ test('Facebook stats include views when Facebook shares them', async () => {
   assert.equal(s.likes, 5);
 });
 
-test('new permissions are asked for at login', () => {
-  assert.ok(meta.SCOPES.includes('pages_read_user_content'));
-  assert.ok(meta.SCOPES.includes('instagram_manage_comments'));
+test('comments and messages permissions are asked for only once turned on (Live app refuses them otherwise)', () => {
+  assert.ok(!meta.scopes({}).includes('pages_read_user_content'), 'not by default: Facebook would block the whole login');
+  assert.ok(meta.scopes({}).includes('instagram_content_publish'));
+  const on = meta.scopes({ META_EXTRA_SCOPES: 'on' });
+  for (const s of ['pages_read_user_content', 'instagram_manage_comments', 'pages_messaging', 'instagram_manage_messages']) assert.ok(on.includes(s));
+  assert.ok(!new URL(meta.loginUrl('x')).searchParams.get('scope').includes('pages_messaging'));
 });

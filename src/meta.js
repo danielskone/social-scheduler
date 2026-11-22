@@ -3,7 +3,9 @@ const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 
-const SCOPES = [
+// What Viral Post asks for when you connect. These work for the app's own admins, also now the
+// Meta app is Live.
+const BASE_SCOPES = [
   'pages_show_list',
   'pages_read_engagement',
   'pages_manage_posts',
@@ -12,13 +14,14 @@ const SCOPES = [
   'instagram_content_publish',
   'instagram_manage_insights',
   'business_management',
-  // Read the comments on your own posts and who wrote them (Analytics). Needs a reconnect.
-  'pages_read_user_content',
-  'instagram_manage_comments',
-  // Read and answer Messenger and Instagram messages in the CRM's Conversations. Needs a reconnect.
-  'pages_messaging',
-  'instagram_manage_messages',
 ];
+// Comments with who wrote them (Analytics) and Messenger / Instagram messages (CRM Conversations).
+// Since the Meta app went Live, Facebook refuses the whole login while these aren't approved for
+// the app ("Invalid Scopes"), so they are only asked for once turned on: META_EXTRA_SCOPES=on in
+// .env (after adding them to the app's use cases or App Review). Posting never needs them.
+const EXTRA_SCOPES = ['pages_read_user_content', 'instagram_manage_comments', 'pages_messaging', 'instagram_manage_messages'];
+const scopes = (env = process.env) => (/^(on|1|true|yes)$/i.test(env.META_EXTRA_SCOPES || '') ? [...BASE_SCOPES, ...EXTRA_SCOPES] : BASE_SCOPES);
+const SCOPES = scopes();
 
 // safeToRetry = Facebook/Instagram answered with an error, so nothing was posted and trying
 // again can't make a double post. Errors about sign-in or permissions never fix themselves.
@@ -79,7 +82,7 @@ function loginUrl(state) {
   u.searchParams.set('redirect_uri', redirectUri());
   u.searchParams.set('state', state);
   if (config.metaLoginConfigId) u.searchParams.set('config_id', config.metaLoginConfigId);
-  else u.searchParams.set('scope', SCOPES.join(','));
+  else u.searchParams.set('scope', scopes().join(','));
   u.searchParams.set('response_type', 'code');
   return u.toString();
 }
@@ -455,6 +458,8 @@ async function followerCount(account) {
 
 module.exports = {
   SCOPES,
+  EXTRA_SCOPES,
+  scopes,
   call,
   GraphError,
   loginUrl,
