@@ -112,3 +112,37 @@ test('a remade clip replaces the video in its posts that have not gone out', () 
   assert.ok(!fs.existsSync(path.join(config.mediaDir, 'old.mp4')), 'the old copy is cleaned up');
   assert.equal(db.prepare('SELECT media_file FROM posts WHERE id=?').get(out).media_file, 'out.mp4');
 });
+
+test('the Candy Cane Lane fix runs by itself once, then buzzes the phone when the clips are made', async () => {
+  const clipper = require('../src/clipper');
+  const words = (s) => s.split(' ').map((text, i) => ({ text, start: i * 0.5, end: i * 0.5 + 0.5 }));
+  const transcript = { segments: [{ start: 0, end: 5, text: "Take a trip down can you can't lay with me", words: words("Take a trip down can you can't lay with me") }] };
+  const job = db.prepare(`INSERT INTO clip_jobs (name, source_file, settings, status, transcript) VALUES ('Elves 2','/nope.mp4','{}','ready',?)`).run(JSON.stringify(transcript)).lastInsertRowid;
+  const clip = db.prepare(`INSERT INTO clips (job_id, n, start, end, score, title, text, status) VALUES (?,1,0,5,1,'Elves',?,'ready')`).run(job, "Take a trip down can you can't lay with me").lastInsertRowid;
+  const acct = db.prepare('SELECT id FROM accounts LIMIT 1').get().id;
+  const pid = db.prepare(`INSERT INTO posts (caption, scheduled_at) VALUES (?, ?)`).run("Candy can't lane with me!", new Date(Date.now() + 864e5).toISOString()).lastInsertRowid;
+  db.prepare('INSERT INTO post_targets (post_id, account_id, status) VALUES (?,?,?)').run(pid, acct, 'scheduled');
+
+  assert.ok(clipper.applyStarterFixes() >= 1);
+  assert.equal(clipper.applyStarterFixes(), 0, 'only once');
+  const c = db.prepare('SELECT text, status FROM clips WHERE id=?').get(clip);
+  assert.equal(c.text, 'Take a trip down Candy Cane Lane with me');
+  assert.equal(c.status, 'pending', 'made again');
+  assert.equal(db.prepare('SELECT caption FROM posts WHERE id=?').get(pid).caption, 'Candy Cane Lane with me!');
+  assert.ok(wordfix.list().some((f) => f.wrong === "can you can't lay"), 'remembered for new videos');
+
+  // The buzz waits for the clip, then goes once.
+  const sent = [];
+  const notify = require('../src/notify');
+  const orig = notify.send;
+  notify.send = async (title, msg) => { sent.push(`${title}: ${msg}`); return true; };
+  await clipper.checkFixRuns();
+  assert.equal(sent.length, 0, 'clip still being made');
+  db.prepare(`UPDATE clips SET status='ready' WHERE id=?`).run(clip);
+  await clipper.checkFixRuns();
+  await clipper.checkFixRuns();
+  notify.send = orig;
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /Candy Cane Lane/);
+  assert.match(sent[0], /post/);
+});

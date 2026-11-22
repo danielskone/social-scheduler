@@ -599,6 +599,7 @@ async function renderPending(jobId) {
     }
   }
   setJob(jobId, { step: null });
+  checkFixRuns().catch(() => {});
 }
 
 async function work() {
@@ -726,28 +727,87 @@ router.post('/:id/fix-words', (req, res) => {
   if (!wordfix.phrase(wrong)) return res.status(400).json({ error: 'Type the wrong words first.' });
   if (!right) return res.status(400).json({ error: 'Type the right words.' });
   const out = db.transaction(() => {
-    const transcript = readTranscript(j.transcript);
-    const before = transcript.segments.map((s) => JSON.stringify(s.words || s.text));
-    const inTranscript = wordfix.fixTranscript(transcript, wrong, right);
-    if (inTranscript) setJob(j.id, { transcript: JSON.stringify(transcript) });
-    const clips = db.prepare('SELECT * FROM clips WHERE job_id=?').all(j.id);
-    let changed = 0;
-    for (const c of clips) {
-      const t = wordfix.fixText(c.text, wrong, right), n = wordfix.fixText(c.title, wrong, right);
-      // Captions come from the transcript's words, so a clip whose part of the transcript changed is made again too.
-      const heard = inTranscript && !c.text_edited && transcript.segments.some((s, i) => s.end > c.start && s.start < c.end && JSON.stringify(s.words || s.text) !== before[i]);
-      if (!t.count && !n.count && !heard) continue;
-      db.prepare(`UPDATE clips SET text=?, title=?, status=CASE WHEN status='rendering' THEN status ELSE 'pending' END, error=NULL WHERE id=?`)
-        .run(t.text, (n.text || '').slice(0, 100) || c.title, c.id);
-      changed++;
-    }
-    const posts = wordfix.fixPosts(wrong, right, { clipIds: clips.map((c) => c.id) });
+    const r = fixJob(j, wrong, right);
+    const posts = wordfix.fixPosts(wrong, right, { clipIds: r.allClipIds });
     if (req.body?.remember !== false) wordfix.remember(wrong, right);
-    return { clips: changed, transcript: inTranscript, ...posts };
+    recordRun(wrong, right, r.changedIds, posts);
+    return { clips: r.changedIds.length, transcript: r.transcript, ...posts };
   })();
   work();
   res.json({ ...out, job: jobOut(getJob(j.id)) });
 });
+
+// Fixes one video: its transcript (keeping word timing) and every clip's words and name.
+// Changed clips are set to be made again.
+function fixJob(j, wrong, right) {
+  const transcript = readTranscript(j.transcript);
+  const before = transcript.segments.map((s) => JSON.stringify(s.words || s.text));
+  const inTranscript = wordfix.fixTranscript(transcript, wrong, right);
+  if (inTranscript) setJob(j.id, { transcript: JSON.stringify(transcript) });
+  const clips = db.prepare('SELECT * FROM clips WHERE job_id=?').all(j.id);
+  const changedIds = [];
+  for (const c of clips) {
+    const t = wordfix.fixText(c.text, wrong, right), n = wordfix.fixText(c.title, wrong, right);
+    // Captions come from the transcript's words, so a clip whose part of the transcript changed is made again too.
+    const heard = inTranscript && !c.text_edited && transcript.segments.some((s, i) => s.end > c.start && s.start < c.end && JSON.stringify(s.words || s.text) !== before[i]);
+    if (!t.count && !n.count && !heard) continue;
+    db.prepare(`UPDATE clips SET text=?, title=?, status=CASE WHEN status='rendering' THEN status ELSE 'pending' END, error=NULL WHERE id=?`)
+      .run(t.text, (n.text || '').slice(0, 100) || c.title, c.id);
+    changedIds.push(c.id);
+  }
+  return { transcript: inTranscript, changedIds, allClipIds: clips.map((c) => c.id) };
+}
+
+function recordRun(wrong, right, clipIds, posts, starter = null) {
+  db.prepare('INSERT INTO word_fix_runs (wrong, right, clip_ids, posts_fixed, already_out, starter) VALUES (?,?,?,?,?,?)')
+    .run(wrong, right, JSON.stringify(clipIds), posts.fixed || 0, posts.alreadyOut || 0, starter);
+}
+
+// The fixes the app ships with (wordfix.STARTER_FIXES) run once by themselves, on every video
+// and on posts not sent yet, with no steps from anyone. All of one right word are one buzz.
+function applyStarterFixes() {
+  const done = new Set(db.prepare('SELECT starter FROM word_fix_runs WHERE starter IS NOT NULL').all().map((r) => r.starter));
+  const todo = wordfix.STARTER_FIXES.filter(([w, r]) => !done.has(`${w}=>${r}`));
+  if (!todo.length) return 0;
+  db.transaction(() => {
+    const byRight = new Map();
+    for (const [wrong, right] of todo) {
+      const sum = byRight.get(right) || { clipIds: new Set(), fixed: 0, alreadyOut: 0, keys: [] };
+      for (const j of db.prepare(`SELECT * FROM clip_jobs`).all()) fixJob(j, wrong, right).changedIds.forEach((id) => sum.clipIds.add(id));
+      const p = wordfix.fixPosts(wrong, right);
+      sum.fixed += p.fixed; sum.alreadyOut += p.alreadyOut;
+      wordfix.remember(wrong, right);
+      sum.keys.push(`${wrong}=>${right}`);
+      byRight.set(right, sum);
+    }
+    for (const [right, sum] of byRight) {
+      const anything = sum.clipIds.size || sum.fixed;
+      sum.keys.forEach((key, i) => {
+        // Only the first row carries the counts and the buzz; the others just mark the fix as done.
+        if (i === 0) recordRun(key.split('=>')[0], right, [...sum.clipIds], { fixed: sum.fixed, alreadyOut: sum.alreadyOut }, key);
+        else db.prepare(`INSERT INTO word_fix_runs (wrong, right, starter, notified) VALUES (?,?,?,1)`).run(key.split('=>')[0], right, key);
+      });
+      if (!anything) db.prepare('UPDATE word_fix_runs SET notified=1 WHERE starter=?').run(sum.keys[0]);
+    }
+  })();
+  return todo.length;
+}
+
+// Buzzes the phone once every clip of a fix is made again.
+async function checkFixRuns() {
+  const runs = db.prepare('SELECT * FROM word_fix_runs WHERE notified=0').all();
+  for (const r of runs) {
+    const ids = JSON.parse(r.clip_ids || '[]');
+    const left = ids.length ? db.prepare(`SELECT COUNT(*) AS n FROM clips WHERE id IN (${ids.map(() => '?').join(',')}) AND status IN ('pending','rendering')`).get(...ids).n : 0;
+    if (left) continue;
+    db.prepare('UPDATE word_fix_runs SET notified=1 WHERE id=?').run(r.id);
+    const parts = [];
+    if (ids.length) parts.push(`${ids.length} clip${ids.length === 1 ? '' : 's'} made again with "${r.right}".`);
+    if (r.posts_fixed) parts.push(`${r.posts_fixed} post${r.posts_fixed === 1 ? '' : 's'} in Viral Post fixed.`);
+    if (r.already_out) parts.push(`${r.already_out} post${r.already_out === 1 ? ' had' : 's had'} already gone out; fix those captions in the Facebook or Instagram app.`);
+    await require('./notify').send(`Words fixed: ${r.right}`, parts.join(' ') || 'Done.', { tags: 'white_check_mark' }).catch(() => {});
+  }
+}
 
 router.get('/clip/:id', (req, res) => {
   const c = db.prepare('SELECT * FROM clips WHERE id=?').get(req.params.id);
@@ -856,6 +916,8 @@ const markScheduled = (clipId, when) => db.prepare('UPDATE clips SET scheduled_a
 // Pick up where it left off after the Mac restarts.
 function start() {
   db.prepare(`UPDATE clips SET status='pending' WHERE status='rendering'`).run();
+  try { applyStarterFixes(); } catch (err) { console.warn('[clips] word fixes:', err.message); }
+  checkFixRuns().catch(() => {});
   fs.readdirSync(clipsDir).filter((d) => d.startsWith('upload-')).forEach((d) => fs.rmSync(path.join(clipsDir, d), { recursive: true, force: true }));
   work();
 }
@@ -866,4 +928,6 @@ function clipFinished(id) {
   return Boolean(c && ((c.look && c.look !== 'off') || c.remove_text));
 }
 
-module.exports = { refreshPosts, clipFinished, router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };
+const isBusy = () => Boolean(db.prepare(`SELECT 1 FROM clips WHERE status='rendering' UNION SELECT 1 FROM clip_jobs WHERE status='working' LIMIT 1`).get());
+
+module.exports = { applyStarterFixes, checkFixRuns, isBusy, refreshPosts, clipFinished, router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };

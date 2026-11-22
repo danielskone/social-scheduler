@@ -257,4 +257,6 @@ function startCrm() {
   cron.schedule('0 8 1 * *', () => require('../crm/server/reports').sendMonthly().catch((e) => console.error(e)), { timezone: process.env.BOOKING_TIMEZONE || 'America/New_York' });
 }
 
-module.exports = { start, startCrm, publishDue, refreshStats, headsUp };
+const isBusy = () => Boolean(db.prepare(`SELECT 1 FROM post_targets WHERE status='publishing' LIMIT 1`).get());
+
+module.exports = { start, startCrm, publishDue, refreshStats, headsUp, isBusy };
