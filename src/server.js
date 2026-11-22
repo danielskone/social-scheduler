@@ -465,9 +465,9 @@ api.post('/posts', upload.single('media'), (req, res) => {
     return res.status(400).json({ error });
   }
   const id = db.transaction(() => {
-    const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title, look, remove_text) VALUES (?,?,?,?,?,?,?)')
+    const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title, look, remove_text, clip_id) VALUES (?,?,?,?,?,?,?,?)')
       .run(caption, req.file?.filename || clipFile || null, mediaType, new Date(req.body.scheduledAt).toISOString(), (req.body.title || '').trim() || null,
-        mediaType ? lk.look : null, mediaType ? lk.removeText : 0);
+        mediaType ? lk.look : null, mediaType ? lk.removeText : 0, clipFile ? Number(req.body.clipId) : null);
     const ins = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
     accountIds.forEach((a) => ins.run(lastInsertRowid, a));
     if (clipFile) clipper.markScheduled(Number(req.body.clipId), new Date(req.body.scheduledAt).toISOString());
@@ -503,8 +503,8 @@ api.post('/posts/from-clips', (req, res) => {
   const ids = db.transaction(() => list.map((p, i) => {
     const when = new Date(p.scheduledAt).toISOString();
     const done = clipper.clipFinished(Number(p.clipId)); // look already added in Viral Clips
-    const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title, look, remove_text) VALUES (?,?,?,?,?,?,?)')
-      .run(String(p.caption || '').trim(), files[i], 'video', when, String(p.title || '').trim().slice(0, 100) || null, done ? null : lk.look, done ? 0 : lk.removeText);
+    const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title, look, remove_text, clip_id) VALUES (?,?,?,?,?,?,?,?)')
+      .run(String(p.caption || '').trim(), files[i], 'video', when, String(p.title || '').trim().slice(0, 100) || null, done ? null : lk.look, done ? 0 : lk.removeText, Number(p.clipId));
     const ins = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
     accountIds.forEach((a) => ins.run(lastInsertRowid, a));
     clipper.markScheduled(Number(p.clipId), when);
@@ -536,10 +536,17 @@ api.get('/posts/:id', (req, res) => {
 api.patch('/posts/:id', (req, res) => {
   const post = loadPost(req.params.id);
   if (!post) return res.status(404).json({ error: 'Not found' });
-  if (post.targets.some((t) => t.status === 'published' || t.status === 'publishing')) {
-    return res.status(409).json({ error: 'Already published to at least one account, so it can no longer be edited.' });
-  }
   const { caption, scheduledAt, title } = req.body;
+  if (post.targets.some((t) => t.status === 'published' || t.status === 'publishing')) {
+    // Partly out (some accounts failed): the words can still be fixed for the accounts it hasn't
+    // gone to yet, so "Retry failed" sends the right caption. Nothing else changes.
+    const waiting = post.targets.some((t) => t.status === 'failed' || t.status === 'scheduled');
+    const wordsOnly = Object.keys(req.body || {}).every((k) => k === 'caption' || k === 'title');
+    if (!waiting || !wordsOnly) return res.status(409).json({ error: 'Already published to at least one account, so it can no longer be edited.' });
+    if (caption !== undefined) db.prepare('UPDATE posts SET caption=? WHERE id=?').run(String(caption), post.id);
+    if (title !== undefined) db.prepare('UPDATE posts SET title=? WHERE id=?').run(String(title).trim() || null, post.id);
+    return res.json(loadPost(post.id));
+  }
   if (scheduledAt !== undefined && isNaN(Date.parse(scheduledAt))) return res.status(400).json({ error: 'Invalid date.' });
   db.prepare('UPDATE posts SET caption=COALESCE(?, caption), scheduled_at=COALESCE(?, scheduled_at) WHERE id=?')
     .run(caption ?? null, scheduledAt ? new Date(scheduledAt).toISOString() : null, post.id);

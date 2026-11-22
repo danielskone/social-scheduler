@@ -820,3 +820,21 @@ input[type=file]::file-selector-button:hover { border-color: var(--accent); back
 .dlg-look { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 10px 0; font-size: .92rem; }
 .dlg-look select { width: auto; }
 .clip-notext { display: flex; margin-top: 10px; font-size: .9rem; }
+
+/* Fix words (Viral Clips) */
+#clip-dialog.clip-wordfix { width: min(520px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); }
+.wf-form { display: grid; gap: 10px; }
+.wf-form h2 { margin: 0; }
+.wf-form > .muted { margin: 0 0 4px; }
+.wf-count { margin: 0; font-weight: 600; min-height: 1.2em; }
+.wf-list { margin: 0; padding-left: 18px; color: var(--muted, #667085); font-size: 14px; }
+.wf-list:empty { display: none; }
+.wf-saved summary { cursor: pointer; font-size: 14px; }
+.wf-saved ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.wf-saved li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }
+.wf-form .check { justify-self: start; }
+.wf-form .check input { width: auto; }
+@media (max-width: 640px) {
+  .clip-job-title .btn[data-job-fix] { flex: 1; justify-content: center; white-space: nowrap; }
+  .clip-job-title .btn.primary[data-job-plan] { flex: 1 0 100%; order: 5; }
+}

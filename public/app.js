@@ -386,6 +386,8 @@ function lookLine(p, editable) {
 async function openPost(id) {
   const p = await api(`/posts/${id}`);
   const editable = p.targets.every((t) => t.status === 'scheduled' || t.status === 'failed') && !p.targets.some((t) => t.status === 'published');
+  // Partly out: the caption can still be fixed for the accounts that failed, before "Retry failed".
+  const wordsOnly = !editable && p.targets.some((t) => t.status === 'failed') && !p.targets.some((t) => t.status === 'publishing');
   const dlg = $('#post-dialog');
   dlg.innerHTML = `
     <h2 style="margin-top:0">${fmtDateTime(p.scheduled_at)}</h2>
@@ -393,6 +395,8 @@ async function openPost(id) {
     ${editable && p.targets.some((t) => t.platform === 'youtube') ? `<p><input type="text" id="dlg-title" maxlength="100" placeholder="YouTube title (optional)" value="${esc(p.title || '')}"></p>` : (p.title ? `<p><b>${esc(p.title)}</b></p>` : '')}
     ${editable ? `<textarea id="dlg-caption" rows="5">${esc(p.caption)}</textarea>
       <p><input type="datetime-local" id="dlg-when" value="${toLocalInput(new Date(p.scheduled_at))}"></p>`
+      : wordsOnly ? `<textarea id="dlg-caption" rows="5">${esc(p.caption)}</textarea>
+      <p class="muted small">Fixing the words here changes them for the accounts that failed (sent when you tap Retry failed). Accounts it already went to keep the old words; fix those in the Facebook or Instagram app.</p>`
       : `<p style="white-space:pre-wrap">${esc(p.caption)}</p>`}
     ${p.media_type ? lookLine(p, editable) : ''}
     ${p.targets.map((t) => `<div class="target">${icon(t.platform)}${esc(t.account_name)}
@@ -400,7 +404,7 @@ async function openPost(id) {
       ${t.permalink ? `<a href="${esc(t.permalink)}" target="_blank" rel="noopener">View</a>` : ''}
       ${t.error ? `<small class="muted">${esc(t.error)}</small>` : ''}</div>`).join('')}
     <div class="row" style="margin-top:16px">
-      ${editable ? '<button class="btn primary" id="dlg-save">Save</button>' : ''}
+      ${editable || wordsOnly ? '<button class="btn primary" id="dlg-save">Save</button>' : ''}
       ${p.targets.some((t) => t.status === 'failed') ? '<button class="btn" id="dlg-retry">Retry failed</button>' : ''}
       <button class="btn danger" id="dlg-delete">Delete</button>
       <button class="btn ghost" id="dlg-close">Close</button>
@@ -417,7 +421,7 @@ async function openPost(id) {
   if ($('#dlg-save')) $('#dlg-save').onclick = async () => {
     try {
       await api(`/posts/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ caption: $('#dlg-caption').value, scheduledAt: new Date($('#dlg-when').value).toISOString(), ...($('#dlg-title') ? { title: $('#dlg-title').value } : {}),
+        body: JSON.stringify(wordsOnly ? { caption: $('#dlg-caption').value } : { caption: $('#dlg-caption').value, scheduledAt: new Date($('#dlg-when').value).toISOString(), ...($('#dlg-title') ? { title: $('#dlg-title').value } : {}),
           ...($('#dlg-look') ? { look: $('#dlg-look').value, removeText: $('#dlg-notext').checked } : {}) }) });
       dlg.close(); renderCalendar();
     } catch (e) { alert(e.message); }
