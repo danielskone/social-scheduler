@@ -803,6 +803,19 @@ function applyStarterFixes() {
   return todo.length;
 }
 
+// Some improvements need clips made again. Each runs once by itself (no steps for anyone);
+// posts not sent yet get the remade video too (refreshPosts).
+db.exec('CREATE TABLE IF NOT EXISTS clip_migrations (name TEXT PRIMARY KEY, done_at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
+function remakeOnce(name, where) {
+  if (db.prepare('SELECT 1 FROM clip_migrations WHERE name=?').get(name)) return 0;
+  const n = db.transaction(() => {
+    db.prepare('INSERT INTO clip_migrations (name) VALUES (?)').run(name);
+    return db.prepare(`UPDATE clips SET status='pending', error=NULL WHERE status='ready' AND ${where}`).run().changes;
+  })();
+  if (n) console.log(`[clips] ${name}: making ${n} clips again`);
+  return n;
+}
+
 // Buzzes the phone once every clip of a fix is made again.
 async function checkFixRuns() {
   const runs = db.prepare('SELECT * FROM word_fix_runs WHERE notified=0').all();
@@ -928,6 +941,7 @@ const markScheduled = (clipId, when) => db.prepare('UPDATE clips SET scheduled_a
 function start() {
   db.prepare(`UPDATE clips SET status='pending' WHERE status='rendering'`).run();
   try { applyStarterFixes(); } catch (err) { console.warn('[clips] word fixes:', err.message); }
+  remakeOnce('follow-singer-v1', `framing='face'`); // better "Follow faces" for singers: remake those clips once
   checkFixRuns().catch(() => {});
   fs.readdirSync(clipsDir).filter((d) => d.startsWith('upload-')).forEach((d) => fs.rmSync(path.join(clipsDir, d), { recursive: true, force: true }));
   work();
@@ -941,4 +955,4 @@ function clipFinished(id) {
 
 const isBusy = () => Boolean(db.prepare(`SELECT 1 FROM clips WHERE status='rendering' UNION SELECT 1 FROM clip_jobs WHERE status='working' LIMIT 1`).get());
 
-module.exports = { renderArgs, applyStarterFixes, checkFixRuns, isBusy, refreshPosts, clipFinished, router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };
+module.exports = { remakeOnce, renderArgs, applyStarterFixes, checkFixRuns, isBusy, refreshPosts, clipFinished, router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };

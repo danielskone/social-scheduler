@@ -51,3 +51,34 @@ test('Follow faces: with two people, follows the one talking and switches when t
   const switches = pts.filter((p, i) => i && (p.x > 0.5) !== (pts[i - 1].x > 0.5)).length;
   assert.strictEqual(switches, 1, 'no jumping back and forth');
 });
+
+test('Follow faces: kids on a stage, small faces: follows the one singing, not the biggest face', () => {
+  const { targets } = require('../src/facetrack');
+  const samples = [];
+  for (let i = 0; i < 90; i++) { // 15 seconds
+    const t = i / 6;
+    const wobble = 0.03 * Math.sin(i); // head bobbing and camera noise
+    samples.push({ t, faces: [
+      { x1: 0.10, y1: 0.30, x2: 0.20, y2: 0.50, score: 0.9, talk: 0.05 + Math.abs(wobble) }, // closest kid, not singing
+      { x1: 0.47, y1: 0.35, x2: 0.53, y2: 0.45, score: 0.9, talk: 0.25 + wobble },           // the singer with the mic (small, far)
+      { x1: 0.80, y1: 0.36, x2: 0.86, y2: 0.46, score: 0.9, talk: 0.06 },
+    ] });
+  }
+  const pts = targets(samples);
+  assert.ok(pts.every((p) => p.x > 0.4 && p.x < 0.6), 'stays on the singer the whole time');
+});
+
+test('Follow faces: in a song with few words heard, mouths still decide', async () => {
+  const ft = require('../src/facetrack');
+  // Two people; the right one sings. Only one short word was heard, at the very start.
+  const samples = [];
+  for (let i = 0; i < 60; i++) samples.push({ t: i / 6, faces: [
+    { x1: 0.10, y1: 0.3, x2: 0.2, y2: 0.5, score: 0.9, talk: 0.04 },
+    { x1: 0.80, y1: 0.3, x2: 0.88, y2: 0.45, score: 0.9, talk: 0.3 },
+  ] });
+  const speaking = ft.speakingFrom([[0, 0.3]], 10);
+  assert.equal(speaking, undefined, 'too few words heard: every moment counts');
+  assert.equal(typeof ft.speakingFrom([[0, 6]], 10), 'function', 'talking video: words decide');
+  const pts = ft.targets(samples, speaking);
+  assert.ok(pts.slice(6).every((p) => p.x > 0.7));
+});
