@@ -299,6 +299,9 @@ function openClipEditor(id) {
       <label class="field"><span>Look</span><select name="look">${[['off', 'Off'], ['light', 'Light'], ['hollywood', '🎬 Hollywood']].map(([k, v]) => `<option value="${k}"${k === (c.look || 'off') ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
     </div>
     <label class="check"><input type="checkbox" name="removeText"${c.remove_text ? ' checked' : ''}> <span>Remove words on screen <small class="muted">(lyrics, titles in the video)</small></span></label>
+    <label class="field"><span>Sound timing <small>If the voice doesn't match the lips</small></span>
+      <div class="nudge"><button type="button" data-shift="-0.1" title="Sound plays sooner">Sooner</button><input type="number" name="audioShift" step="0.05" min="-2" max="2" value="${c.audio_shift || 0}" aria-label="Seconds"><button type="button" data-shift="0.1" title="Sound plays later">Later</button></div>
+      <small class="muted" id="ce-shift"></small></label>
     <label class="field"><span>Words on screen <small>Fix any misheard words, like names.</small></span>
       <textarea name="text" rows="5">${esc(c.text)}</textarea></label>
     <label class="field"><span>Name <small>(also the suggested YouTube title)</small></span><input name="title" maxlength="100" value="${esc(c.title)}"></label>
@@ -311,8 +314,19 @@ function openClipEditor(id) {
     const len = f.end.value - f.start.value;
     $('#ce-len').textContent = `Clip length: ${len > 0 ? Math.round(len) : 0} seconds${len > 90 ? ' (over 90s: fine for YouTube Shorts and TikTok, too long for a Facebook Reel)' : ''}`;
   };
-  showLen();
-  f.addEventListener('input', showLen);
+  const showShift = () => {
+    const v = Number(f.audioShift.value) || 0;
+    // audio_shift above 0 = take the sound from later in the video = it plays sooner.
+    $('#ce-shift').textContent = !v ? 'Sound plays as it was recorded.' : `Sound plays ${Math.abs(v).toFixed(2)} s ${v > 0 ? 'sooner' : 'later'}.`;
+  };
+  showLen(); showShift();
+  f.addEventListener('input', () => { showLen(); showShift(); });
+  f.querySelectorAll('[data-shift]').forEach((b) => (b.onclick = () => {
+    // "Sooner" moves the sound earlier: it is taken from further into the video.
+    const by = -Number(b.dataset.shift);
+    f.audioShift.value = Math.max(-2, Math.min(2, Math.round((Number(f.audioShift.value) + by) * 100) / 100));
+    showShift();
+  }));
   f.querySelectorAll('[data-nudge]').forEach((b) => (b.onclick = () => {
     const input = f[b.dataset.nudge];
     input.value = Math.max(0, Math.round((Number(input.value) + Number(b.dataset.by)) * 10) / 10);
@@ -325,7 +339,7 @@ function openClipEditor(id) {
       await api(`/clips/clip/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start: Number(f.start.value), end: Number(f.end.value), framing: f.framing.value, captions: f.captions.value, look: f.look.value, removeText: f.removeText.checked, text: f.text.value, title: f.title.value }),
+        body: JSON.stringify({ start: Number(f.start.value), end: Number(f.end.value), framing: f.framing.value, captions: f.captions.value, look: f.look.value, removeText: f.removeText.checked, audioShift: Number(f.audioShift.value) || 0, text: f.text.value, title: f.title.value }),
       });
       dlg.close();
       await loadClipJobs();
