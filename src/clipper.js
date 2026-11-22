@@ -75,6 +75,8 @@ if (!db.prepare('PRAGMA table_info(clips)').all().some((c) => c.name === 'schedu
   const cols = db.prepare('PRAGMA table_info(clips)').all().map((c) => c.name);
   if (!cols.includes('look')) db.exec('ALTER TABLE clips ADD COLUMN look TEXT');
   if (!cols.includes('remove_text')) db.exec('ALTER TABLE clips ADD COLUMN remove_text INTEGER NOT NULL DEFAULT 0');
+  // Seconds to move the sound so the voice matches the lips (above 0 = the sound came late).
+  if (!cols.includes('audio_shift')) db.exec('ALTER TABLE clips ADD COLUMN audio_shift REAL NOT NULL DEFAULT 0');
 }
 const LOOK_CHOICES = ['off', 'light', 'hollywood'];
 
@@ -419,19 +421,27 @@ function hasHardwareEncoder() {
 // Size caps keep files small enough to play and save quickly, even over a phone connection,
 // while staying sharp for Reels, Shorts and TikTok (all re-compress uploads anyway).
 const fullVideo = (hw) => (hw
-  ? ['-c:v', 'h264_videotoolbox', '-b:v', '8M', '-maxrate', '10M', '-bufsize', '16M', '-profile:v', 'high', '-allow_sw', '1']
+  ? ['-c:v', 'h264_videotoolbox', '-b:v', '8M', '-maxrate', '10M', '-bufsize', '16M', '-profile:v', 'high', '-allow_sw', '1', '-bf', '0']
   : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '19', '-maxrate', '10M', '-bufsize', '16M', '-profile:v', 'high', '-level', '4.1']);
 const smallVideo = (hw) => (hw
-  ? ['-c:v', 'h264_videotoolbox', '-b:v', '900k', '-maxrate', '1200k', '-bufsize', '2M', '-profile:v', 'main', '-allow_sw', '1']
+  ? ['-c:v', 'h264_videotoolbox', '-b:v', '900k', '-maxrate', '1200k', '-bufsize', '2M', '-profile:v', 'main', '-allow_sw', '1', '-bf', '0']
   : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-maxrate', '1200k', '-bufsize', '2M', '-profile:v', 'main']);
 
-function renderArgs({ source, start, len, filter, file, preview, hw }) {
-  return ['-hide_banner', '-y', '-ss', String(start), '-t', String(len.toFixed(2)), '-i', source,
+// Sound and picture: the sound follows its own clock in the video (gaps are filled with
+// silence, never squeezed out), so the voice stays on the lips for the whole clip. audioShift
+// moves the sound for videos that came in with it early or late (the clip editor's Sound timing).
+function renderArgs({ source, start, len, filter, file, preview, hw, audioShift = 0 }) {
+  const shift = Math.max(-2, Math.min(2, Number(audioShift) || 0));
+  const from = start + shift;
+  const audioIn = shift ? ['-ss', String(Math.max(0, from).toFixed(3)), '-t', String((len + 1).toFixed(2)), '-i', source] : [];
+  const a = shift ? '1:a?' : '0:a?';
+  const af = ['aresample=async=1:first_pts=0', ...(from < 0 ? [`adelay=${Math.round(-from * 1000)}:all=1`] : []), ...(shift ? [`atrim=0:${len.toFixed(3)}`] : [])].join(',');
+  return ['-hide_banner', '-y', '-ss', String(start), '-t', String(len.toFixed(2)), '-i', source, ...audioIn,
     '-filter_complex', withPreview(filter),
-    '-map', '[v]', '-map', '0:a?', ...fullVideo(hw), '-pix_fmt', 'yuv420p', '-g', '60',
-    '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', file,
-    '-map', '[pv]', '-map', '0:a?', ...smallVideo(hw), '-pix_fmt', 'yuv420p', '-g', '60',
-    '-c:a', 'aac', '-b:a', '64k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', preview,
+    '-map', '[v]', '-map', a, ...fullVideo(hw), '-pix_fmt', 'yuv420p', '-g', '60',
+    '-af', af, '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', file,
+    '-map', '[pv]', '-map', a, ...smallVideo(hw), '-pix_fmt', 'yuv420p', '-g', '60',
+    '-af', af, '-c:a', 'aac', '-b:a', '64k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', preview,
     // Use only half of the Mac's processor so everything else stays smooth while clips are made.
     '-threads', String(RENDER_THREADS), '-filter_complex_threads', String(RENDER_THREADS)];
 }
@@ -480,7 +490,7 @@ async function renderClip(job, clip, transcript) {
     }
   }
   const hw = await hasHardwareEncoder();
-  const make = (f, useHw) => run(ffmpegPath(), renderArgs({ source: job.source_file, start: clip.start, len, filter: f, file, preview, hw: useHw }), { cwd: dir });
+  const make = (f, useHw) => run(ffmpegPath(), renderArgs({ source: job.source_file, start: clip.start, len, filter: f, file, preview, hw: useHw, audioShift: clip.audio_shift }), { cwd: dir });
   // Try the fast way first; if anything goes wrong, the slower ways that always work.
   const tries = [[filter, hw], ...(hw ? [[filter, false]] : []), ...(assFile ? [[plain, false]] : [])];
   try {
@@ -651,7 +661,7 @@ function clipOut(c) {
   return {
     id: c.id, job_id: c.job_id, n: c.n, start: c.start, end: c.end, length: +(c.end - c.start).toFixed(1),
     score: c.score, reason: c.reason, title: c.title, caption: firstSentence(c.text, 300) || c.title, text: c.text, text_edited: Boolean(c.text_edited),
-    framing: c.framing, captions: c.captions, look: c.look || 'off', remove_text: Boolean(c.remove_text), status: c.status, error: c.error, scheduled_at: c.scheduled_at || null,
+    framing: c.framing, captions: c.captions, look: c.look || 'off', remove_text: Boolean(c.remove_text), audio_shift: c.audio_shift || 0, status: c.status, error: c.error, scheduled_at: c.scheduled_at || null,
     url: c.file ? base + c.file : null, poster_url: c.poster ? base + c.poster : null,
     preview_url: c.preview ? base + c.preview : (c.file ? base + c.file : null),
     size: c.file ? fileSize(path.join(clipsDir, String(c.job_id), c.file)) : null,
@@ -844,6 +854,7 @@ router.patch('/clip/:id', (req, res) => {
   let text = c.text, edited = c.text_edited;
   if (typeof b.text === 'string' && b.text.trim() !== (c.text || '').trim()) { text = b.text.trim(); edited = 1; }
   else if (timesChanged && !c.text_edited) text = clipText(transcript.segments, start, end);
+  if (b.audioShift !== undefined) db.prepare('UPDATE clips SET audio_shift=? WHERE id=?').run(Math.max(-2, Math.min(2, Math.round((Number(b.audioShift) || 0) * 100) / 100)), c.id);
   db.prepare(`UPDATE clips SET start=?, end=?, text=?, text_edited=?, framing=?, captions=?, look=?, remove_text=?, title=?, status='pending', error=NULL WHERE id=?`).run(
     start, end, text, edited,
     FRAMINGS.includes(b.framing) ? b.framing : c.framing,
@@ -930,4 +941,4 @@ function clipFinished(id) {
 
 const isBusy = () => Boolean(db.prepare(`SELECT 1 FROM clips WHERE status='rendering' UNION SELECT 1 FROM clip_jobs WHERE status='working' LIMIT 1`).get());
 
-module.exports = { applyStarterFixes, checkFixRuns, isBusy, refreshPosts, clipFinished, router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };
+module.exports = { renderArgs, applyStarterFixes, checkFixRuns, isBusy, refreshPosts, clipFinished, router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };

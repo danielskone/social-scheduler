@@ -838,3 +838,5 @@ input[type=file]::file-selector-button:hover { border-color: var(--accent); back
   .clip-job-title .btn[data-job-fix] { flex: 1; justify-content: center; white-space: nowrap; }
   .clip-job-title .btn.primary[data-job-plan] { flex: 1 0 100%; order: 5; }
 }
+.clip-edit .check { display: flex; align-items: center; gap: 8px; margin: 2px 0 12px; }
+.clip-edit .check input { width: auto; flex: none; }
