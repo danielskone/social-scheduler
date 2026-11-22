@@ -20,6 +20,7 @@ const config = require('./config');
 const { facePath } = require('./facetrack');
 const db = require('./db');
 const linkimport = require('./linkimport');
+const wordfix = require('./wordfix');
 
 const clipsDir = path.join(config.dataDir, 'clips');
 const modelDir = path.join(config.dataDir, 'models');
@@ -558,6 +559,7 @@ async function processJob(job) {
     if (!info.hasAudio) note = 'This video has no sound, so clips were picked without captions.';
     else if (transcript.speechReason) note = `${transcript.speechReason} Clips were picked by energy, without captions.`;
     else if (!transcript.segments.length) note = note || 'No talking was found, so clips were picked by energy, without captions.';
+    wordfix.applySaved(transcript); // words you taught it earlier ("Candy Cane Lane")
     setJob(job.id, { transcript: JSON.stringify(transcript), note });
   }
 
@@ -590,6 +592,7 @@ async function renderPending(jobId) {
       db.prepare(`UPDATE clips SET status='ready', file=?, poster=?, preview=?, error=? WHERE id=? AND status='rendering'`).run(out.file, out.poster, out.preview, clip.captionNote || null, clip.id);
       if (db.prepare('SELECT status FROM clips WHERE id=?').get(clip.id).status === 'ready') {
         old.forEach((f) => fs.rmSync(path.join(clipsDir, String(jobId), f), { force: true }));
+        refreshPosts(clip.id);
       }
     } catch (err) {
       db.prepare(`UPDATE clips SET status='failed', error=? WHERE id=?`).run(String(err.message).slice(0, 500), clip.id);
@@ -711,6 +714,41 @@ router.post('/link', async (req, res) => {
   res.status(201).json({ ...jobOut(getJob(id)), how: found.kind === 'local' ? 'local' : 'api', from: found.from || null });
 });
 
+// "Fix words": the wrong words become the right ones in this video's transcript, every clip's
+// words and name (each changed clip is made again), and posts in Viral Post not yet sent.
+router.get('/word-fixes', (req, res) => res.json(wordfix.list()));
+router.delete('/word-fixes/:id', (req, res) => { wordfix.forget(Number(req.params.id)); res.json(wordfix.list()); });
+router.post('/:id/fix-words', (req, res) => {
+  const j = getJob(req.params.id);
+  if (!j) return res.status(404).json({ error: 'Not found' });
+  const wrong = String(req.body?.wrong || '').trim().slice(0, 200);
+  const right = String(req.body?.right || '').trim().slice(0, 200);
+  if (!wordfix.phrase(wrong)) return res.status(400).json({ error: 'Type the wrong words first.' });
+  if (!right) return res.status(400).json({ error: 'Type the right words.' });
+  const out = db.transaction(() => {
+    const transcript = readTranscript(j.transcript);
+    const before = transcript.segments.map((s) => JSON.stringify(s.words || s.text));
+    const inTranscript = wordfix.fixTranscript(transcript, wrong, right);
+    if (inTranscript) setJob(j.id, { transcript: JSON.stringify(transcript) });
+    const clips = db.prepare('SELECT * FROM clips WHERE job_id=?').all(j.id);
+    let changed = 0;
+    for (const c of clips) {
+      const t = wordfix.fixText(c.text, wrong, right), n = wordfix.fixText(c.title, wrong, right);
+      // Captions come from the transcript's words, so a clip whose part of the transcript changed is made again too.
+      const heard = inTranscript && !c.text_edited && transcript.segments.some((s, i) => s.end > c.start && s.start < c.end && JSON.stringify(s.words || s.text) !== before[i]);
+      if (!t.count && !n.count && !heard) continue;
+      db.prepare(`UPDATE clips SET text=?, title=?, status=CASE WHEN status='rendering' THEN status ELSE 'pending' END, error=NULL WHERE id=?`)
+        .run(t.text, (n.text || '').slice(0, 100) || c.title, c.id);
+      changed++;
+    }
+    const posts = wordfix.fixPosts(wrong, right, { clipIds: clips.map((c) => c.id) });
+    if (req.body?.remember !== false) wordfix.remember(wrong, right);
+    return { clips: changed, transcript: inTranscript, ...posts };
+  })();
+  work();
+  res.json({ ...out, job: jobOut(getJob(j.id)) });
+});
+
 router.get('/clip/:id', (req, res) => {
   const c = db.prepare('SELECT * FROM clips WHERE id=?').get(req.params.id);
   c ? res.json(clipOut(c)) : res.status(404).json({ error: 'Clip not found.' });
@@ -787,6 +825,22 @@ function serveFile(req, res) {
   res.sendFile(full, { maxAge: '30d', immutable: true });
 }
 
+// A remade clip (fixed words, new look...) replaces the video in posts made from it that haven't
+// gone out to any account yet. Posts already out somewhere keep their video, so every account
+// shows the same thing.
+function refreshPosts(clipId) {
+  const posts = db.prepare(`SELECT p.id, p.media_file FROM posts p WHERE p.clip_id=?
+    AND EXISTS (SELECT 1 FROM post_targets t WHERE t.post_id=p.id AND t.status IN ('scheduled','failed'))
+    AND NOT EXISTS (SELECT 1 FROM post_targets t WHERE t.post_id=p.id AND t.status IN ('published','publishing'))`).all(clipId);
+  for (const p of posts) {
+    const file = copyClipToMedia(clipId);
+    if (!file) return;
+    db.prepare('UPDATE posts SET media_file=? WHERE id=?').run(file, p.id);
+    const stillUsed = p.media_file && db.prepare('SELECT 1 FROM posts WHERE media_file=?').get(p.media_file);
+    if (p.media_file && !stillUsed) fs.rmSync(path.join(config.mediaDir, p.media_file), { force: true });
+  }
+}
+
 // For the composer: copies a finished clip into the post media folder (so deleting the post
 // never deletes the clip) and returns the new file name.
 function copyClipToMedia(clipId) {
@@ -812,4 +866,4 @@ function clipFinished(id) {
   return Boolean(c && ((c.look && c.look !== 'off') || c.remove_text));
 }
 
-module.exports = { clipFinished, router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };
+module.exports = { refreshPosts, clipFinished, router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };

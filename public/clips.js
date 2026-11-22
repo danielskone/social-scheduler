@@ -83,6 +83,7 @@ function jobHead(job) {
         <span class="muted">${job.duration ? fmtLen(job.duration) + ' video · ' : ''}${esc(date)}</span></div>
       ${status}
       ${job.status === 'failed' ? `<button class="btn ghost" data-job-retry="${job.id}">${CI.retry}Try again</button>` : ''}
+      ${!working && job.clips.length ? `<button class="btn ghost" data-job-fix="${job.id}" title="Fix misheard words in every clip and post">${CI.edit}Fix words</button>` : ''}
       ${!working && ready ? `<button class="btn primary" data-job-plan="${job.id}">${CI.cal}Schedule all</button>` : ''}
       <button class="iconbtn danger" data-job-del="${job.id}" title="Delete this video and its clips" aria-label="Delete this video and its clips">${CI.trash}</button>
     </div>
@@ -255,10 +256,11 @@ clipForm.onsubmit = (e) => {
 
 // ---------- Buttons on clips and videos ----------
 $('#clip-jobs').addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-job-plan],[data-job-del],[data-job-retry],[data-clip-edit],[data-clip-del],[data-clip-view],[data-clip-remake]');
+  const t = e.target.closest('[data-job-plan],[data-job-fix],[data-job-del],[data-job-retry],[data-clip-edit],[data-clip-del],[data-clip-view],[data-clip-remake]');
   if (!t) return;
   if (t.dataset.clipView) { openClipViewer(Number(t.dataset.clipView)); return; }
   if (t.dataset.jobPlan) { openSchedulePlanner(Number(t.dataset.jobPlan)); return; }
+  if (t.dataset.jobFix) { openWordFix(Number(t.dataset.jobFix)); return; }
   try {
     if (t.dataset.clipRemake) await api(`/clips/clip/${t.dataset.clipRemake}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     if (t.dataset.jobDel) {
@@ -333,6 +335,69 @@ function openClipEditor(id) {
   dlg.showModal();
 }
 $('#clip-dialog').addEventListener('close', () => { const d = $('#clip-dialog'); if (!d.open) d.innerHTML = ''; }); // stops a playing preview
+
+// ---------- "Fix words": one fix for every clip of a video and its posts ----------
+// Same matching as the Mac does (src/wordfix.js): capitals and commas between words don't matter.
+function wrongWords(wrong) {
+  const list = String(wrong || '').split(/\s+/).map((w) => w.toLowerCase().replace(/[’‘]/g, "'").replace(/[^\p{L}\p{N}']/gu, '').replace(/^'+|'+$/g, '')).filter(Boolean);
+  if (!list.length) return null;
+  const word = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['’‘]");
+  return new RegExp(`(?<![\\p{L}\\p{N}'’])${list.map(word).join("[^\\p{L}\\p{N}'’]+")}(?![\\p{L}\\p{N}'’])`, 'giu');
+}
+
+async function openWordFix(jobId) {
+  const job = clipState.jobs.find((j) => j.id === jobId);
+  if (!job) return;
+  let saved = [];
+  try { saved = await api('/clips/word-fixes'); } catch { /* older Mac */ }
+  const dlg = $('#clip-dialog');
+  dlg.className = 'clip-wordfix';
+  dlg.onclick = null;
+  dlg.innerHTML = `<form method="dialog" class="wf-form">
+    <h2>Fix words</h2>
+    <p class="muted small">Type what the app wrote and what was really said. It is fixed in every clip of this video (words on screen and names), and in posts in Viral Post that haven't gone out yet.</p>
+    <label class="field"><span>Wrong words <small>(as the app wrote them)</small></span><input name="wrong" placeholder="Example: can you can't lay" autocomplete="off" required></label>
+    <label class="field"><span>Right words</span><input name="right" placeholder="Example: Candy Cane Lane" autocomplete="off" required></label>
+    <p class="wf-count" id="wf-count" aria-live="polite"></p>
+    <ul class="wf-list" id="wf-list"></ul>
+    <label class="check"><input type="checkbox" name="remember" checked> <span>Remember this fix for new videos</span></label>
+    ${saved.length ? `<details class="wf-saved"><summary>Fixes it remembers (${saved.length})</summary><ul>${saved.map((x) => `<li><span>${esc(x.wrong)} → <b>${esc(x.right)}</b></span><button type="button" class="iconbtn" data-forget="${x.id}" title="Forget this fix" aria-label="Forget this fix">${CI.trash}</button></li>`).join('')}</ul></details>` : ''}
+    <div class="row"><button class="btn primary" value="go" id="wf-go">Fix everywhere</button><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><span class="muted" id="wf-msg"></span></div>
+  </form>`;
+  const f = dlg.querySelector('form');
+  const show = () => {
+    const re = wrongWords(f.wrong.value);
+    const hits = re ? job.clips.filter((c) => { re.lastIndex = 0; const a = re.test(c.text || ''); re.lastIndex = 0; return a || re.test(c.title || ''); }) : [];
+    $('#wf-count').textContent = !re ? '' : hits.length ? `Found in ${hits.length} clip${hits.length === 1 ? '' : 's'}.` : 'Not in any clip. Check the spelling, or it may only be in a post.';
+    $('#wf-list').innerHTML = hits.slice(0, 6).map((c) => `<li>${esc(c.title)}</li>`).join('') + (hits.length > 6 ? `<li class="muted">and ${hits.length - 6} more</li>` : '');
+  };
+  f.addEventListener('input', show);
+  f.querySelector('.wf-saved')?.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-forget]'); if (!b) return;
+    try { await api(`/clips/word-fixes/${b.dataset.forget}`, { method: 'DELETE' }); b.closest('li').remove(); } catch (err) { $('#wf-msg').textContent = err.message; }
+  });
+  f.onsubmit = async (e) => {
+    if (e.submitter?.value !== 'go') return;
+    e.preventDefault();
+    const msg = $('#wf-msg');
+    msg.textContent = 'Fixing…';
+    $('#wf-go').disabled = true;
+    try {
+      const r = await api(`/clips/${jobId}/fix-words`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wrong: f.wrong.value, right: f.right.value, remember: f.remember.checked }) });
+      dlg.close();
+      const parts = [];
+      parts.push(r.clips ? `${r.clips} clip${r.clips === 1 ? ' is' : 's are'} being made again with "${f.right.value.trim()}"` : 'No clips had those words');
+      if (r.fixed) parts.push(`${r.fixed} post${r.fixed === 1 ? '' : 's'} in Viral Post fixed (posts waiting to go out also get the new video once it's made)`);
+      if (r.alreadyOut) parts.push(`${r.alreadyOut} post${r.alreadyOut === 1 ? ' has' : 's have'} already gone out. Fix those captions in the Facebook or Instagram app`);
+      banner(parts.join('. ') + '.');
+      await loadClipJobs();
+      renderClips();
+    } catch (err) { msg.textContent = err.message; $('#wf-go').disabled = false; }
+  };
+  dlg.showModal();
+  f.wrong.focus();
+}
 
 // ---------- "Paste a link" helper ----------
 // YouTube and TikTok don't let apps download videos, so for those (and for posts that aren't on
