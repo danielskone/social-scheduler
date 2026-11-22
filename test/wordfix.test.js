@@ -146,3 +146,14 @@ test('the Candy Cane Lane fix runs by itself once, then buzzes the phone when th
   assert.match(sent[0], /Candy Cane Lane/);
   assert.match(sent[0], /post/);
 });
+
+test('an improvement that needs clips remade runs once, only on those clips', () => {
+  const clipper = require('../src/clipper');
+  const job = db.prepare(`INSERT INTO clip_jobs (name, source_file, settings, status) VALUES ('M','','{}','ready')`).run().lastInsertRowid;
+  const mk = (framing) => db.prepare(`INSERT INTO clips (job_id, n, start, end, score, title, text, status, framing) VALUES (?,1,0,4,1,'t','x','ready',?)`).run(job, framing).lastInsertRowid;
+  const face = mk('face'), center = mk('center');
+  assert.equal(clipper.remakeOnce('test-face', `framing='face'`), 1);
+  assert.equal(clipper.remakeOnce('test-face', `framing='face'`), 0, 'only once');
+  assert.equal(db.prepare('SELECT status FROM clips WHERE id=?').get(face).status, 'pending');
+  assert.equal(db.prepare('SELECT status FROM clips WHERE id=?').get(center).status, 'ready');
+});

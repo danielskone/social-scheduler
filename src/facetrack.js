@@ -11,7 +11,10 @@ const { spawn } = require('child_process');
 const MODEL = path.join(__dirname, '..', 'assets', 'models', 'face-detector-rfb320.onnx');
 const IN_W = 320, IN_H = 240;
 const SAMPLES_PER_SEC = 6; // mouths are checked 6 times a second, faces are found 3 times a second
-const BIG_W = IN_W * 2, BIG_H = IN_H * 2; // bigger frames, so small mouths can be seen moving
+// Bigger frames for watching mouths: 3x the face finder's size, so small faces (kids on a stage,
+// a choir) still show their mouths moving.
+const K = 3;
+const BIG_W = IN_W * K, BIG_H = IN_H * K;
 
 let sessionPromise = null;
 function session() {
@@ -130,12 +133,13 @@ async function detectFaces(ffmpeg, source, start, len) {
   await readFrames(ffmpeg, source, start, len, async (rgb, t) => {
     const luma = new Uint8Array(BIG_W * BIG_H);
     for (let i = 0; i < luma.length; i++) luma[i] = (rgb[i * 3] * 77 + rgb[i * 3 + 1] * 150 + rgb[i * 3 + 2] * 29) >> 8;
-    if (n++ % 2 === 0) { // find faces on every other frame (half size picture for the face finder)
+    if (n++ % 2 === 0) { // find faces on every other frame (small picture for the face finder)
       for (let y = 0; y < IN_H; y++) for (let x = 0; x < IN_W; x++) {
         const o = y * IN_W + x;
         for (let c = 0; c < 3; c++) {
-          const a = ((2 * y) * BIG_W + 2 * x) * 3 + c, b = a + BIG_W * 3;
-          input[c * plane + o] = ((rgb[a] + rgb[a + 3] + rgb[b] + rgb[b + 3]) / 4 - 127) / 128;
+          let sum = 0;
+          for (let dy = 0; dy < K; dy++) for (let dx = 0; dx < K; dx++) sum += rgb[((K * y + dy) * BIG_W + K * x + dx) * 3 + c];
+          input[c * plane + o] = (sum / (K * K) - 127) / 128;
         }
       }
       const out = await s.run({ [s.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, IN_H, IN_W]) });
@@ -161,14 +165,26 @@ function targets(samples, speaking = () => true) {
   let cur = null;
   let challenger = null, challengeFor = 0;
   const dt = 1 / SAMPLES_PER_SEC;
-  // Who talks most in the first 2 seconds, so the clip starts on them right away.
-  const early = {};
-  for (const { t, faces } of samples) {
-    if (t > 2 || !speaking(t)) continue;
-    for (const f of faces) { const k = Math.round(mid(f) * 20); early[k] = (early[k] || 0) + (f.talk || 0); }
-  }
-  const firstKey = Object.keys(early).sort((a, b) => early[b] - early[a])[0];
-  const firstX = firstKey != null && early[firstKey] > 3 ? firstKey / 20 : null;
+  // How much "talking" counts as talking depends on the video: small faces far away (kids on a
+  // stage) move fewer pixels than one close-up face. So it's measured against this clip's own
+  // busiest mouths instead of a fixed number.
+  const all = samples.flatMap((x) => x.faces.map((f) => f.talk || 0)).filter((v) => v > 0).sort((a, b) => a - b);
+  const busy = all.length ? all[Math.floor(all.length * 0.9)] : 0;
+  const minTalk = Math.max(0.05, Math.min(0.6, busy * 0.35));
+  // Who sings or talks most at the start (first 3 seconds), else over the whole clip, so the
+  // clip starts on them right away and comes back to them, instead of the biggest face.
+  const score = (until) => {
+    const sum = {};
+    for (const { t, faces } of samples) {
+      if (t > until || !speaking(t)) continue;
+      for (const f of faces) { const k = Math.round(mid(f) * 20); sum[k] = (sum[k] || 0) + (f.talk || 0); }
+    }
+    const key = Object.keys(sum).sort((a, b) => sum[b] - sum[a])[0];
+    const others = Object.keys(sum).filter((k) => Math.abs(k - key) > 1).map((k) => sum[k]);
+    const second = others.length ? Math.max(...others) : 0;
+    return key != null && sum[key] > minTalk * 6 && sum[key] > second * 1.3 ? key / 20 : null;
+  };
+  const firstX = score(3) ?? score(Infinity);
   const out = [];
   samples.forEach(({ t, faces }) => {
     const usable = faces.filter((f) => (f.x2 - f.x1) > 0.025);
@@ -201,9 +217,9 @@ function targets(samples, speaking = () => true) {
       cur = here.reduce((a, b) => (Math.abs(b.x - firstX) < Math.abs(a.x - firstX) ? b : a));
     } else if (!cur || !people.includes(cur) || (t - cur.lastT > 1.5)) {
       // Nobody followed yet (or they left): the one talking, else the biggest face.
-      cur = loudest.talk > 0.6 ? loudest : biggest;
+      cur = loudest.talk > minTalk ? loudest : biggest;
       challenger = null; challengeFor = 0;
-    } else if (loudest !== cur && loudest.talk > 0.6 && loudest.talk > cur.talk * 1.6) {
+    } else if (loudest !== cur && loudest.talk > minTalk && loudest.talk > cur.talk * 1.6) {
       if (challenger !== loudest) { challenger = loudest; challengeFor = 0; }
       challengeFor += dt;
       if (challengeFor >= 0.8) {
@@ -284,6 +300,11 @@ function pathExpr(keys) {
   return `if(lt(t\\,${keys[0].t})\\,${keys[0].x}\\,${expr})`;
 }
 
+function speakingFrom(speech, len) {
+  const covered = (speech || []).reduce((sum, [a, b]) => sum + Math.max(0, Math.min(len, b) - Math.max(0, a)), 0);
+  return speech && speech.length && covered > len * 0.4 ? (t) => speech.some(([a, b]) => t >= a - 0.2 && t <= b + 0.2) : undefined;
+}
+
 // Main entry: returns an ffmpeg expression for the frame's position, or null (use the middle).
 // speech: optional list of [start, end] times (from the clip's start) when words are said.
 async function facePath({ ffmpeg, source, start, len, width, height, speech }) {
@@ -291,7 +312,9 @@ async function facePath({ ffmpeg, source, start, len, width, height, speech }) {
   const cropFrac = Math.min(1, (height * 9 / 16) / width);
   if (cropFrac >= 0.99) return null; // already tall: nothing to follow
   const samples = await detectFaces(ffmpeg, source, start, len);
-  const speaking = speech && speech.length ? (t) => speech.some(([a, b]) => t >= a - 0.2 && t <= b + 0.2) : undefined;
+  // Words heard tell when someone is talking. In songs the words are often only partly heard,
+  // so when they cover little of the clip, every moment counts (the mouths decide).
+  const speaking = speakingFrom(speech, len);
   const keys = cameraPath(samples, cropFrac, speaking);
   if (!keys) return null;
   // ffmpeg expressions can't be endless; very busy clips just use fewer stops.
@@ -300,4 +323,4 @@ async function facePath({ ffmpeg, source, start, len, width, height, speech }) {
   return { expr: pathExpr(k), keys: k, faces: samples.filter((s) => s.faces.length).length, samples: samples.length };
 }
 
-module.exports = { facePath, cameraPath, pathExpr, decode, detectFaces, targets };
+module.exports = { speakingFrom, facePath, cameraPath, pathExpr, decode, detectFaces, targets };
