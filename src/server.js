@@ -729,6 +729,8 @@ function startApp() {
   if (runs('scheduler')) scheduler.start();
   if (runs('crm') && appsOnKeys.has('crm')) scheduler.startCrm();
   if (runs('clips') && appsOnKeys.has('clips')) clipper.start();
+  // On the Mac: install new versions by themselves (see autoupdate.js).
+  if (ownApp) require('./autoupdate').start(ownApp.key, { busy: () => (ownApp.key === 'clips' ? clipper.isBusy() : ownApp.key === 'scheduler' ? scheduler.isBusy() : false) });
   const port = ownApp && !process.env.PORT ? apps.portOf(ownApp) : config.port;
   const args = config.host ? [port, config.host] : [port];
   app.listen(...args, () => console.log(`${ownApp ? ownApp.name : 'Viral Post'} running at http://localhost:${port}`));

@@ -12,6 +12,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS word_fixes (
   right TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`);
+// Each fix is followed until its clips are made again, then the phone gets a buzz.
+db.exec(`CREATE TABLE IF NOT EXISTS word_fix_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  wrong TEXT NOT NULL, right TEXT NOT NULL,
+  clip_ids TEXT NOT NULL DEFAULT '[]', posts_fixed INTEGER NOT NULL DEFAULT 0, already_out INTEGER NOT NULL DEFAULT 0,
+  starter TEXT, notified INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
 if (!db.prepare('PRAGMA table_info(posts)').all().some((c) => c.name === 'clip_id')) db.exec('ALTER TABLE posts ADD COLUMN clip_id INTEGER');
 
 const words = (s) => String(s || '').split(/\s+/).map((w) => w.trim()).filter(Boolean);
@@ -81,6 +89,20 @@ function fixTranscript(transcript, wrong, right) {
   return count;
 }
 
+// Fixes the app ships with. Each one runs by itself once on the Mac (all videos, clips and posts
+// not sent yet), then is remembered for new videos. Daniel's elves song first:
+// "Take a trip down Candy Cane Lane with me" was heard as "can you can't lay".
+const STARTER_FIXES = [
+  ["can you can't lay", 'Candy Cane Lane'],
+  ["can you can't lane", 'Candy Cane Lane'],
+  ["candy can't lane", 'Candy Cane Lane'],
+  ["candy can't lay", 'Candy Cane Lane'],
+  ['candy can lane', 'Candy Cane Lane'],
+  ['candy cane lay', 'Candy Cane Lane'],
+  ['can you can lay', 'Candy Cane Lane'],
+  ['can you cane lane', 'Candy Cane Lane'],
+];
+
 // Saved fixes, used on every new video.
 const list = () => db.prepare('SELECT id, wrong, right FROM word_fixes ORDER BY id').all();
 function remember(wrong, right) {
@@ -121,4 +143,4 @@ function countIn(texts, wrong) {
   return texts.reduce((n, t) => n + ((String(t || '').match(re) || []).length), 0);
 }
 
-module.exports = { phrase, fixText, fixTranscript, fixPosts, countIn, list, remember, forget, applySaved, plain };
+module.exports = { STARTER_FIXES, phrase, fixText, fixTranscript, fixPosts, countIn, list, remember, forget, applySaved, plain };
