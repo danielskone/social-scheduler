@@ -511,7 +511,9 @@ api.post('/posts/from-clips', (req, res) => {
     return lastInsertRowid;
   }))();
   look.work().catch(() => {});
-  res.status(201).json({ created: ids.length, first: list.map((p) => p.scheduledAt).sort()[0] });
+  // Clips from other videos may already be at these times: keep an hour between posts per account.
+  const moved = require('./spread').run().length;
+  res.status(201).json({ created: ids.length, moved, first: list.map((p) => p.scheduledAt).sort()[0] });
 });
 
 api.get('/posts', (req, res) => {
@@ -729,6 +731,7 @@ function startApp() {
   if (runs('scheduler')) scheduler.start();
   // On the Mac: posts Claude prepared in imports/ go onto the calendar by themselves.
   if (ownApp && runs('scheduler')) require('./autoimport').start();
+  if (ownApp && runs('scheduler')) setTimeout(() => require('./spread').runOnce('spread-v1').catch((err) => console.error('[spread]', err.message)), 60e3).unref();
   if (runs('crm') && appsOnKeys.has('crm')) scheduler.startCrm();
   if (runs('clips') && appsOnKeys.has('clips')) clipper.start();
   // On the Mac: install new versions by themselves (see autoupdate.js).

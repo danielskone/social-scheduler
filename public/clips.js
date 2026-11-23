@@ -621,7 +621,7 @@ function openSchedulePlanner(jobId) {
     try {
       const r = await api('/posts/from-clips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountIds, posts }) });
       dlg.close();
-      banner(`Scheduled ${r.created} clip${r.created === 1 ? '' : 's'} on ${accountIds.length} account${accountIds.length === 1 ? '' : 's'}. First one goes out ${fmtWhen(r.first)}. See them in Viral Post's calendar.`);
+      banner(`Scheduled ${r.created} clip${r.created === 1 ? '' : 's'} on ${accountIds.length} account${accountIds.length === 1 ? '' : 's'}. First one goes out ${fmtWhen(r.first)}.${r.moved ? ` ${r.moved} moved a little so each account has an hour between posts.` : ''} See them in Viral Post's calendar.`);
       await loadClipJobs();
     } catch (err) { msg.textContent = err.message; $('#cp-go').disabled = false; }
   };
