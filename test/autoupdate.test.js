@@ -58,3 +58,22 @@ test('only on the Mac apps started in the background, and can be turned off', ()
   assert.equal(au.enabled({ APP: 'scheduler', NO_JOBS: '1' }), false);
   assert.equal(au.enabled({ APP: 'scheduler', AUTO_UPDATE: 'off' }), false);
 });
+
+test('a post waiting hours to try again (TikTok inbox full) does not hold back updates', () => {
+  db.prepare('DELETE FROM post_targets').run();
+  const acct = db.prepare(`INSERT INTO accounts (platform, external_id, name, access_token) VALUES ('tiktok','T','Daniel King','t')`).run().lastInsertRowid;
+  const now = Date.now();
+  const add = (at, retry) => {
+    const id = db.prepare(`INSERT INTO posts (caption, scheduled_at) VALUES ('t', ?)`).run(new Date(at).toISOString()).lastInsertRowid;
+    return db.prepare(`INSERT INTO post_targets (post_id, account_id, retry_at) VALUES (?,?,?)`).run(id, acct, retry ? new Date(retry).toISOString() : null).lastInsertRowid;
+  };
+  const waiting = add(now - 3600e3, now + 5 * 3600e3);
+  assert.equal(au.quietForPosts(db, now), true, 'TikTok wait 5 hours away');
+  db.prepare('UPDATE post_targets SET retry_at=? WHERE id=?').run(new Date(now + 5 * 60e3).toISOString(), waiting);
+  assert.equal(au.quietForPosts(db, now), false, 'next try in 5 minutes');
+  db.prepare('DELETE FROM post_targets').run();
+  add(now - 2 * 864e5, null);
+  assert.equal(au.quietForPosts(db, now), true, 'a post stuck for two days');
+  add(now - 60e3, null);
+  assert.equal(au.quietForPosts(db, now), false, 'a post due a minute ago');
+});
