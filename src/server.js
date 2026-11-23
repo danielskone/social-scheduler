@@ -727,6 +727,8 @@ function startApp() {
   // already publish posts and run the CRM, so it starts no background work (no double posting).
   const runs = (key) => process.env.NO_JOBS !== '1' && (!ownApp || ownApp.key === key);
   if (runs('scheduler')) scheduler.start();
+  // On the Mac: posts Claude prepared in imports/ go onto the calendar by themselves.
+  if (ownApp && runs('scheduler')) require('./autoimport').start();
   if (runs('crm') && appsOnKeys.has('crm')) scheduler.startCrm();
   if (runs('clips') && appsOnKeys.has('clips')) clipper.start();
   // On the Mac: install new versions by themselves (see autoupdate.js).
