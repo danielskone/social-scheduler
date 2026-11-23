@@ -32,10 +32,17 @@ async function latest() {
   return sha;
 }
 
-// Not while a post is going out or about to.
-function quietForPosts(db) {
+// Not while a post is going out or about to. A post that is waiting to try again later (TikTok
+// inbox full, a retry, spacing) only counts when its next try is close, and a post stuck for
+// hours doesn't count at all: before, one TikTok post waiting on a full inbox held back every
+// update for days.
+function quietForPosts(db, now = Date.now()) {
+  const soon = new Date(now + 10 * 60e3).toISOString();
+  const stale = new Date(now - 2 * 3600e3).toISOString();
   const busy = db.prepare(`SELECT 1 FROM post_targets t JOIN posts p ON p.id=t.post_id
-    WHERE t.status='publishing' OR (t.status='scheduled' AND p.scheduled_at <= ?) LIMIT 1`).get(new Date(Date.now() + 10 * 60e3).toISOString());
+    WHERE t.status='publishing'
+       OR (t.status='scheduled' AND p.scheduled_at <= ? AND COALESCE(t.retry_at, p.scheduled_at) <= ? AND COALESCE(t.retry_at, p.scheduled_at) >= ?)
+    LIMIT 1`).get(soon, soon, stale);
   return !busy;
 }
 
