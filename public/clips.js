@@ -52,6 +52,7 @@ function drawClipJobs() {
       const html = clipCard(c);
       let card = document.getElementById(`clip-${c.id}`);
       if (!card) { card = document.createElement('article'); card.id = `clip-${c.id}`; card.className = 'clip-card'; }
+      card.classList.toggle('wide', c.shape === 'wide');
       if (card.dataset.html !== html) { card.innerHTML = html; card.dataset.html = html; }
       if (grid.children[ci] !== card) grid.insertBefore(card, grid.children[ci] || null);
     });
@@ -157,7 +158,7 @@ function openClipViewer(id) {
   const c = findClip(id);
   if (!c?.url) return;
   const dlg = $('#clip-dialog');
-  dlg.className = 'clip-viewer';
+  dlg.className = c.shape === 'wide' ? 'clip-viewer wide' : 'clip-viewer';
   dlg.innerHTML = `<div class="cv-grid">
       <div class="cv-video"><video src="${c.preview_url || c.url}" poster="${c.poster_url || ''}" controls autoplay playsinline preload="auto"></video>
         <p class="cv-slow" hidden></p></div>
@@ -220,6 +221,7 @@ clipForm.onsubmit = (e) => {
   fd.set('look', clipChoice.look);
   fd.set('removeText', $('#clip-notext').checked ? '1' : '0');
   fd.set('framing', clipForm.framing.value);
+  fd.set('shape', clipForm.shape.value);
   fd.set('count', clipForm.count.value);
   fd.set('video', file);
   const bar = $('#clip-upload-bar');
@@ -281,7 +283,7 @@ function openClipEditor(id) {
   const c = findClip(id);
   if (!c) return;
   const dlg = $('#clip-dialog');
-  dlg.className = 'clip-editor';
+  dlg.className = c.shape === 'wide' ? 'clip-editor wide' : 'clip-editor';
   dlg.onclick = null;
   dlg.innerHTML = `<form method="dialog" class="clip-edit">
     <h2>Edit clip</h2>
@@ -294,6 +296,7 @@ function openClipEditor(id) {
     </div>
     <p class="muted small" id="ce-len"></p>
     <div class="clip-times">
+      <label class="field"><span>Shape</span><select name="shape">${[['tall', 'Tall 9:16'], ['wide', 'Wide 16:9']].map(([k, v]) => `<option value="${k}"${k === (c.shape || 'tall') ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
       <label class="field"><span>Framing</span><select name="framing">${Object.entries(FRAMING_NAMES).map(([k, v]) => `<option value="${k}"${k === c.framing ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
       <label class="field"><span>Captions</span><select name="captions">${Object.entries(CAPTION_NAMES).map(([k, v]) => `<option value="${k}"${k === c.captions ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
       <label class="field"><span>Look</span><select name="look">${[['off', 'Off'], ['light', 'Light'], ['hollywood', '🎬 Hollywood']].map(([k, v]) => `<option value="${k}"${k === (c.look || 'off') ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
@@ -339,7 +342,7 @@ function openClipEditor(id) {
       await api(`/clips/clip/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start: Number(f.start.value), end: Number(f.end.value), framing: f.framing.value, captions: f.captions.value, look: f.look.value, removeText: f.removeText.checked, audioShift: Number(f.audioShift.value) || 0, text: f.text.value, title: f.title.value }),
+        body: JSON.stringify({ start: Number(f.start.value), end: Number(f.end.value), shape: f.shape.value, framing: f.framing.value, captions: f.captions.value, look: f.look.value, removeText: f.removeText.checked, audioShift: Number(f.audioShift.value) || 0, text: f.text.value, title: f.title.value }),
       });
       dlg.close();
       await loadClipJobs();
@@ -466,7 +469,7 @@ async function getLinkedVideo() {
     const res = await fetch('/api/clips/link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, length: clipChoice.length, captions: clipChoice.captions, words: clipChoice.words, look: clipChoice.look, removeText: $('#clip-notext').checked, framing: clipForm.framing.value, count: clipForm.count.value }),
+      body: JSON.stringify({ url, length: clipChoice.length, captions: clipChoice.captions, words: clipChoice.words, look: clipChoice.look, removeText: $('#clip-notext').checked, framing: clipForm.framing.value, shape: clipForm.shape.value, count: clipForm.count.value }),
     });
     if (res.status === 401) { location.href = '/login.html'; return; }
     const data = await res.json().catch(() => ({}));
@@ -575,7 +578,7 @@ function openSchedulePlanner(jobId) {
     $('#cp-count').textContent = `${list.length} clip${list.length === 1 ? '' : 's'}`;
     const at = new Map(list.map((c, i) => [c.id, times[i]]));
     $('#cp-list').innerHTML = ready.filter((c) => $('#cp-again').checked || !c.scheduled_at).map((c) => `<li class="${skipped.has(c.id) ? 'off' : ''}" data-id="${c.id}">
-        ${c.poster_url ? `<img src="${c.poster_url}" alt="" loading="lazy">` : '<span class="cp-noimg"></span>'}
+        ${c.poster_url ? `<img src="${c.poster_url}" alt="" loading="lazy"${c.shape === 'wide' ? ' class="wide"' : ''}>` : '<span class="cp-noimg"></span>'}
         <div class="cp-item"><div class="cp-item-top"><b>${esc(c.title)}</b><span class="cp-when">${skipped.has(c.id) ? 'Skipped' : at.get(c.id) ? esc(fmtWhen(at.get(c.id))) : ''}</span></div>
           <textarea rows="2" data-cap="${c.id}" aria-label="Caption"${skipped.has(c.id) ? ' disabled' : ''}>${esc(captions.get(c.id))}</textarea></div>
         <button type="button" class="iconbtn" data-skip="${c.id}" title="${skipped.has(c.id) ? 'Add back' : 'Leave this clip out'}" aria-label="${skipped.has(c.id) ? 'Add back' : 'Leave this clip out'}">${skipped.has(c.id) ? CI.retry : CI.trash}</button>

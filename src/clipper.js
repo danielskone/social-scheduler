@@ -66,6 +66,10 @@ if (!db.prepare('PRAGMA table_info(clips)').all().some((c) => c.name === 'previe
   db.exec('ALTER TABLE clips ADD COLUMN preview TEXT');
 }
 // Added later: when the clip was last put on the calendar ("Schedule all" skips these by default).
+// Shape: 'tall' 9:16 (Reels, TikTok, Shorts) or 'wide' 16:9 (YouTube, Facebook feed).
+if (!db.prepare('PRAGMA table_info(clips)').all().some((c) => c.name === 'shape')) db.exec("ALTER TABLE clips ADD COLUMN shape TEXT NOT NULL DEFAULT 'tall'");
+const SHAPES = ['tall', 'wide'];
+const sizeOf = (shape) => (shape === 'wide' ? { W: 1920, H: 1080 } : { W: 1080, H: 1920 });
 if (!db.prepare('PRAGMA table_info(clips)').all().some((c) => c.name === 'scheduled_at')) {
   db.exec('ALTER TABLE clips ADD COLUMN scheduled_at TEXT');
 }
@@ -342,18 +346,24 @@ const assTime = (t) => {
 };
 const assText = (s) => String(s).replace(/[{}]/g, '').replace(/\\/g, '');
 
-function buildAss(words, style, clipLen) {
+function buildAss(words, style, clipLen, shape = 'tall') {
   const bold = style === 'bold';
+  const wide = shape === 'wide';
+  const { W, H } = sizeOf(shape);
+  // Wide clips: smaller words near the bottom, so they don't cover faces.
+  const size = wide ? (bold ? 72 : 58) : (bold ? 92 : 74);
+  const marginV = wide ? (bold ? 110 : 70) : (bold ? 560 : 300);
+  const marginLR = wide ? 160 : 70;
   const head = `[Script Info]
 ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: ${W}
+PlayResY: ${H}
 WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,Archivo Black,${bold ? 92 : 74},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,${bold ? 7 : 5},${bold ? 3 : 2},2,70,70,${bold ? 560 : 300},1
+Style: Cap,Archivo Black,${size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,${bold ? 7 : 5},${bold ? 3 : 2},2,${marginLR},${marginLR},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -385,8 +395,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 // Facebook and TikTok even after they compress them again.
 const SHARPEN = 'unsharp=5:5:0.9:5:5:0.0';
 // extra.pre: filters on the original picture first (words removed); extra.post: the look, after resizing.
-function videoFilter({ width, height }, framing, posExpr, extra = {}) {
-  const W = 1080, H = 1920;
+function videoFilter({ width, height }, framing, posExpr, extra = {}, shape = 'tall') {
+  const { W, H } = sizeOf(shape);
+  // A tall video made wide: the whole picture in the middle over a blurred copy, so no one's head is cut off.
+  if (shape === 'wide' && height > width) framing = 'fit';
   const pre = extra.pre?.length ? `${extra.pre.join(',')},` : '';
   const post = extra.post?.length ? `,${extra.post.join(',')}` : '';
   if (framing === 'fit') {
@@ -394,14 +406,15 @@ function videoFilter({ width, height }, framing, posExpr, extra = {}) {
       `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease:flags=lanczos,${SHARPEN}${post},setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[v]`;
   }
   const pos = posExpr ? `(${posExpr})` : ({ left: 0.15, center: 0.5, right: 0.85 }[framing] ?? 0.5);
-  const cropW = `min(iw\\,ih*9/16)`;
-  const cropH = `min(ih\\,iw*16/9)`;
+  const [rw, rh] = shape === 'wide' ? [16, 9] : [9, 16];
+  const cropW = `min(iw\\,ih*${rw}/${rh})`;
+  const cropH = `min(ih\\,iw*${rh}/${rw})`;
   return `[0:v]${pre}fps=30,crop=${cropW}:${cropH}:(iw-${cropW})*${pos}:(ih-${cropH})/2,scale=${W}:${H}:flags=lanczos,${SHARPEN}${post},setsar=1,format=yuv420p[v]`;
 }
 
 // The full clip and its small preview are made in one go: the video is read once and the
 // picture is split in two at the end.
-const withPreview = (filter) => `${filter.replace(/\[v\]$/, '[vv]')};[vv]split=2[v][pv0];[pv0]scale=540:960:flags=bilinear[pv]`;
+const withPreview = (filter, shape = 'tall') => `${filter.replace(/\[v\]$/, '[vv]')};[vv]split=2[v][pv0];[pv0]scale=${shape === 'wide' ? '960:540' : '540:960'}:flags=bilinear[pv]`;
 
 const RENDER_THREADS = Math.max(1, Math.floor((os.cpus()?.length || 2) / 2));
 const escFilterPath = (p) => p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
@@ -430,14 +443,14 @@ const smallVideo = (hw) => (hw
 // Sound and picture: the sound follows its own clock in the video (gaps are filled with
 // silence, never squeezed out), so the voice stays on the lips for the whole clip. audioShift
 // moves the sound for videos that came in with it early or late (the clip editor's Sound timing).
-function renderArgs({ source, start, len, filter, file, preview, hw, audioShift = 0 }) {
+function renderArgs({ source, start, len, filter, file, preview, hw, audioShift = 0, shape = 'tall' }) {
   const shift = Math.max(-2, Math.min(2, Number(audioShift) || 0));
   const from = start + shift;
   const audioIn = shift ? ['-ss', String(Math.max(0, from).toFixed(3)), '-t', String((len + 1).toFixed(2)), '-i', source] : [];
   const a = shift ? '1:a?' : '0:a?';
   const af = ['aresample=async=1:first_pts=0', ...(from < 0 ? [`adelay=${Math.round(-from * 1000)}:all=1`] : []), ...(shift ? [`atrim=0:${len.toFixed(3)}`] : [])].join(',');
   return ['-hide_banner', '-y', '-ss', String(start), '-t', String(len.toFixed(2)), '-i', source, ...audioIn,
-    '-filter_complex', withPreview(filter),
+    '-filter_complex', withPreview(filter, shape),
     '-map', '[v]', '-map', a, ...fullVideo(hw), '-pix_fmt', 'yuv420p', '-g', '60',
     '-af', af, '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', file,
     '-map', '[pv]', '-map', a, ...smallVideo(hw), '-pix_fmt', 'yuv420p', '-g', '60',
@@ -454,7 +467,9 @@ async function renderClip(job, clip, transcript) {
   const poster = `clip-${clip.n}-${tag}.jpg`;
   const len = clip.end - clip.start;
   let posExpr = null;
-  if (clip.framing === 'face') {
+  const shape = clip.shape === 'wide' ? 'wide' : 'tall';
+  // A wide clip from a wide video already shows the whole width, so there's nothing to follow.
+  if (clip.framing === 'face' && (shape === 'tall' || job.width / job.height > 16 / 9 + 0.05)) {
     // Find the faces and follow them. If anything goes wrong, the middle of the picture is used.
     try {
       // When words are said in this clip, so the frame follows the person who is talking.
@@ -478,19 +493,19 @@ async function renderClip(job, clip, transcript) {
       console.warn('[clips] remove words:', err.message);
     }
   }
-  const plain = videoFilter(job, clip.framing, posExpr, extra);
+  const plain = videoFilter(job, clip.framing, posExpr, extra, shape);
   let filter = plain;
   let assFile = null;
   if (clip.captions !== 'none' && transcript.segments.length) {
     const words = captionWords(transcript.segments, clip.start, clip.end, clip.text_edited ? clip.text : null);
     if (words.length) {
       assFile = `clip-${clip.n}-${tag}.ass`;
-      fs.writeFileSync(path.join(dir, assFile), buildAss(words, clip.captions, len));
+      fs.writeFileSync(path.join(dir, assFile), buildAss(words, clip.captions, len, shape));
       filter = filter.replace(/\[v\]$/, `[pre];[pre]ass=filename='${assFile}':fontsdir='${escFilterPath(fontsDir)}'[v]`);
     }
   }
   const hw = await hasHardwareEncoder();
-  const make = (f, useHw) => run(ffmpegPath(), renderArgs({ source: job.source_file, start: clip.start, len, filter: f, file, preview, hw: useHw, audioShift: clip.audio_shift }), { cwd: dir });
+  const make = (f, useHw) => run(ffmpegPath(), renderArgs({ source: job.source_file, start: clip.start, len, filter: f, file, preview, hw: useHw, audioShift: clip.audio_shift, shape }), { cwd: dir });
   // Try the fast way first; if anything goes wrong, the slower ways that always work.
   const tries = [[filter, hw], ...(hw ? [[filter, false]] : []), ...(assFile ? [[plain, false]] : [])];
   try {
@@ -523,7 +538,7 @@ async function makeMissingPreviews() {
     if (!fs.existsSync(path.join(dir, c.file))) continue;
     const preview = c.file.replace(/\.mp4$/, '-small.mp4');
     try {
-      await run(ffmpegPath(), ['-hide_banner', '-y', '-i', c.file, '-vf', 'scale=540:960:flags=bilinear', ...smallVideo(false), '-pix_fmt', 'yuv420p',
+      await run(ffmpegPath(), ['-hide_banner', '-y', '-i', c.file, '-vf', c.shape === 'wide' ? 'scale=960:540:flags=bilinear' : 'scale=540:960:flags=bilinear', ...smallVideo(false), '-pix_fmt', 'yuv420p',
         '-c:a', 'aac', '-b:a', '64k', '-movflags', '+faststart', '-threads', String(RENDER_THREADS), preview], { cwd: dir });
       db.prepare('UPDATE clips SET preview=? WHERE id=? AND file=?').run(preview, c.id, c.file);
     } catch (err) {
@@ -576,10 +591,10 @@ async function processJob(job) {
   if (!db.prepare('SELECT 1 FROM clips WHERE job_id=?').get(job.id)) {
     step('Finding the best moments…', 62);
     const picks = pickClips({ ...transcript, duration: job.duration, length: settings.length, count: settings.count });
-    const ins = db.prepare(`INSERT INTO clips (job_id, n, start, end, score, reason, title, text, framing, captions, look, remove_text)
-      VALUES (@job_id, @n, @start, @end, @score, @reason, @title, @text, @framing, @captions, @look, @remove_text)`);
+    const ins = db.prepare(`INSERT INTO clips (job_id, n, start, end, score, reason, title, text, framing, captions, look, remove_text, shape)
+      VALUES (@job_id, @n, @start, @end, @score, @reason, @title, @text, @framing, @captions, @look, @remove_text, @shape)`);
     db.transaction(() => picks.forEach((p, i) => ins.run({ ...p, job_id: job.id, n: i + 1, framing: settings.framing || 'face', captions: settings.captions || 'bold',
-      look: LOOK_CHOICES.includes(settings.look) ? settings.look : 'off', remove_text: settings.removeText ? 1 : 0 })))();
+      look: LOOK_CHOICES.includes(settings.look) ? settings.look : 'off', remove_text: settings.removeText ? 1 : 0, shape: SHAPES.includes(settings.shape) ? settings.shape : 'tall' })))();
   }
   setJob(job.id, { status: 'ready', step: null, progress: 100 });
 }
@@ -661,7 +676,7 @@ function clipOut(c) {
   return {
     id: c.id, job_id: c.job_id, n: c.n, start: c.start, end: c.end, length: +(c.end - c.start).toFixed(1),
     score: c.score, reason: c.reason, title: c.title, caption: firstSentence(c.text, 300) || c.title, text: c.text, text_edited: Boolean(c.text_edited),
-    framing: c.framing, captions: c.captions, look: c.look || 'off', remove_text: Boolean(c.remove_text), audio_shift: c.audio_shift || 0, status: c.status, error: c.error, scheduled_at: c.scheduled_at || null,
+    framing: c.framing, shape: c.shape || 'tall', captions: c.captions, look: c.look || 'off', remove_text: Boolean(c.remove_text), audio_shift: c.audio_shift || 0, status: c.status, error: c.error, scheduled_at: c.scheduled_at || null,
     url: c.file ? base + c.file : null, poster_url: c.poster ? base + c.poster : null,
     preview_url: c.preview ? base + c.preview : (c.file ? base + c.file : null),
     size: c.file ? fileSize(path.join(clipsDir, String(c.job_id), c.file)) : null,
@@ -701,6 +716,7 @@ const readSettings = (b = {}) => ({
   words: b.words === 'best' ? 'best' : 'fast',
   look: LOOK_CHOICES.includes(b.look) ? b.look : 'hollywood',
   removeText: b.removeText === true || /^(1|true|on)$/.test(String(b.removeText || '')),
+  shape: SHAPES.includes(b.shape) ? b.shape : 'tall',
 });
 
 // A video from a link to your own post (see linkimport.js for which links work and why).
@@ -867,6 +883,7 @@ router.patch('/clip/:id', (req, res) => {
   let text = c.text, edited = c.text_edited;
   if (typeof b.text === 'string' && b.text.trim() !== (c.text || '').trim()) { text = b.text.trim(); edited = 1; }
   else if (timesChanged && !c.text_edited) text = clipText(transcript.segments, start, end);
+  if (SHAPES.includes(b.shape)) db.prepare('UPDATE clips SET shape=? WHERE id=?').run(b.shape, c.id);
   if (b.audioShift !== undefined) db.prepare('UPDATE clips SET audio_shift=? WHERE id=?').run(Math.max(-2, Math.min(2, Math.round((Number(b.audioShift) || 0) * 100) / 100)), c.id);
   db.prepare(`UPDATE clips SET start=?, end=?, text=?, text_edited=?, framing=?, captions=?, look=?, remove_text=?, title=?, status='pending', error=NULL WHERE id=?`).run(
     start, end, text, edited,
@@ -955,4 +972,4 @@ function clipFinished(id) {
 
 const isBusy = () => Boolean(db.prepare(`SELECT 1 FROM clips WHERE status='rendering' UNION SELECT 1 FROM clip_jobs WHERE status='working' LIMIT 1`).get());
 
-module.exports = { remakeOnce, renderArgs, applyStarterFixes, checkFixRuns, isBusy, refreshPosts, clipFinished, router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };
+module.exports = { SHAPES, sizeOf, videoFilter, remakeOnce, renderArgs, applyStarterFixes, checkFixRuns, isBusy, refreshPosts, clipFinished, router, serveFile, copyClipToMedia, markScheduled, start, work, pickClips, captionWords, groupWords, buildAss, firstSentence, probe, ffmpegPath, ensureModels, transcribe };

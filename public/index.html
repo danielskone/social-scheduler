@@ -127,7 +127,7 @@
     <!-- Clips: long video -> short vertical clips -->
     <section id="view-clips" class="view" hidden>
       <header class="view-head">
-        <div><h1>Clips</h1><p class="muted head-sub">Turn a long video into short vertical clips with captions, ready for Reels, Shorts and TikTok.</p></div>
+        <div><h1>Clips</h1><p class="muted head-sub">Turn a long video into short clips with captions: tall 9:16 for Reels, Shorts and TikTok, or wide 16:9 for YouTube and Facebook.</p></div>
       </header>
       <form id="clip-form" class="panel clip-new">
         <div class="clip-new-grid">
@@ -164,6 +164,9 @@
                 <div class="seg" id="clip-look"><button type="button" data-v="off">Off</button><button type="button" data-v="light">Light</button><button type="button" data-v="hollywood" class="on">🎬 Hollywood</button></div>
                 <label class="check clip-notext"><input type="checkbox" id="clip-notext"> <span>Remove words on screen <small class="muted">(lyrics, titles)</small></span></label>
               </div>
+              <label class="field"><span>Shape</span>
+                <select name="shape"><option value="tall" selected>Tall 9:16</option><option value="wide">Wide 16:9</option></select>
+              </label>
               <label class="field"><span>Framing</span>
                 <select name="framing"><option value="face" selected>Fill screen · follow faces</option><option value="center">Fill screen · center</option><option value="left">Fill screen · left side</option><option value="right">Fill screen · right side</option><option value="fit">Whole video</option></select>
               </label>
