@@ -647,6 +647,20 @@ $('#import-file').onchange = async (e) => {
   }
 };
 
+// ---------- Delete all (start fresh) ----------
+$('#delete-all').onclick = async () => {
+  try {
+    const { count } = await api('/posts/unsent/count');
+    if (!count) return banner('There are no scheduled posts to delete.');
+    if (!confirm(`Delete all ${count} scheduled post${count === 1 ? '' : 's'} and start fresh?\n\nPosts that already went out stay. This can't be undone.`)) return;
+    const r = await api('/posts/unsent', { method: 'DELETE' });
+    banner(`Deleted ${r.deleted} scheduled post${r.deleted === 1 ? '' : 's'}. Your calendar is empty and ready for new posts.`);
+    renderCalendar();
+  } catch (err) {
+    banner(err.message, true);
+  }
+};
+
 // ---------- Analytics ----------
 const PL_COLOR = { facebook: '#1877F2', instagram: '#D6249F', youtube: '#FF0000', tiktok: 'var(--tiktok)' };
 let anDays = (() => { try { return Number(localStorage.getItem('anDays')) || 30; } catch { return 30; } })();

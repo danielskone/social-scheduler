@@ -568,6 +568,28 @@ api.post('/posts/:id/retry', (req, res) => {
   res.json(loadPost(req.params.id));
 });
 
+// "Delete all" on the Calendar: start fresh. Every post that hasn't gone out anywhere yet is
+// removed (waiting, failed, or held for TikTok). Posts that already went out to at least one
+// account stay, so Analytics keeps its history. Clips lose their "scheduled" mark so Viral
+// Clips' Schedule all offers them again.
+const unsentPosts = () => db.prepare(`SELECT p.id, p.media_file, p.clip_id FROM posts p
+  WHERE NOT EXISTS (SELECT 1 FROM post_targets t WHERE t.post_id=p.id AND t.status IN ('published','publishing'))`).all();
+api.get('/posts/unsent/count', (req, res) => res.json({ count: unsentPosts().length }));
+api.delete('/posts/unsent', (req, res) => {
+  const rows = unsentPosts();
+  db.transaction(() => {
+    const del = db.prepare('DELETE FROM posts WHERE id=?');
+    const unmark = db.prepare('UPDATE clips SET scheduled_at=NULL WHERE id=?');
+    for (const r of rows) {
+      del.run(r.id);
+      if (r.clip_id) { try { unmark.run(r.clip_id); } catch { /* no clips table */ } }
+    }
+  })();
+  const kept = new Set(db.prepare('SELECT media_file FROM posts WHERE media_file IS NOT NULL').all().map((r) => r.media_file));
+  for (const r of rows) if (r.media_file && !kept.has(r.media_file)) fs.rmSync(path.join(config.mediaDir, r.media_file), { force: true });
+  res.json({ deleted: rows.length });
+});
+
 api.delete('/posts/:id', (req, res) => {
   const post = loadPost(req.params.id);
   if (!post) return res.status(404).json({ error: 'Not found' });
