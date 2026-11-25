@@ -1,6 +1,6 @@
 // Clips tab: upload a long video, get short vertical clips with captions, then schedule them.
 // Uses $, esc, api and banner from app.js.
-const clipState = { jobs: [], shown: new Map(), timer: null };
+const clipState = { jobs: [], shown: new Map(), timer: null, picked: new Set() };
 const fmtSec = (s) => { s = Math.max(0, Number(s) || 0); const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`; };
 const fmtLen = (s) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min` : s >= 60 ? `${Math.round(s / 60)} min` : `${Math.round(s)} s`);
 const FRAMING_NAMES = { face: 'Follow faces', center: 'Fill (center)', left: 'Fill (left side)', right: 'Fill (right side)', fit: 'Whole video' };
@@ -53,6 +53,7 @@ function drawClipJobs() {
       let card = document.getElementById(`clip-${c.id}`);
       if (!card) { card = document.createElement('article'); card.id = `clip-${c.id}`; card.className = 'clip-card'; }
       card.classList.toggle('wide', c.shape === 'wide');
+      card.classList.toggle('picked', clipState.picked.has(c.id));
       if (card.dataset.html !== html) { card.innerHTML = html; card.dataset.html = html; }
       if (grid.children[ci] !== card) grid.insertBefore(card, grid.children[ci] || null);
     });
@@ -77,6 +78,7 @@ function jobHead(job) {
     : working ? `<span class="vchip live">${job.status === 'queued' ? 'Waiting its turn' : 'Finding clips'}</span>`
     : making ? `<span class="vchip live">Making clips · ${ready}/${job.clips.length}</span>`
     : `<span class="vchip ok">${job.clips.length} clip${job.clips.length === 1 ? '' : 's'} ready</span>`;
+  const picks = job.clips.filter((c) => c.status === 'ready' && clipState.picked.has(c.id)).length;
   const pct = working ? job.progress : Math.round((100 * ready) / Math.max(1, job.clips.length));
   const date = new Date(job.created_at.replace(' ', 'T') + 'Z').toLocaleDateString([], { month: 'short', day: 'numeric' });
   return `<div class="clip-job-title">
@@ -85,7 +87,7 @@ function jobHead(job) {
       ${status}
       ${job.status === 'failed' ? `<button class="btn ghost" data-job-retry="${job.id}">${CI.retry}Try again</button>` : ''}
       ${!working && job.clips.length ? `<button class="btn ghost" data-job-fix="${job.id}" title="Fix misheard words in every clip and post">${CI.edit}Fix words</button>` : ''}
-      ${!working && ready ? `<button class="btn primary" data-job-plan="${job.id}">${CI.cal}Schedule clips</button>` : ''}
+      ${!working && ready ? `<button class="btn primary" data-job-plan="${job.id}">${CI.cal}${picks ? `Schedule ${picks} picked` : 'Schedule clips'}</button>` : ''}
       <button class="iconbtn danger" data-job-del="${job.id}" title="Delete this video and its clips" aria-label="Delete this video and its clips">${CI.trash}</button>
     </div>
     ${working || making ? `<div class="clip-progress"><div class="bar"><i style="width:${Math.max(3, pct)}%"></i></div>
@@ -104,7 +106,8 @@ function clipCard(c) {
     : `<div class="clip-wait">${c.status === 'failed' ? `<b>Couldn't make this clip</b><small>${esc(c.error || '')}</small><button class="btn ghost" data-clip-remake="${c.id}">${CI.retry}Try again</button>` : `<span class="spinner"></span><small>${c.status === 'rendering' ? 'Making it now…' : 'Waiting its turn…'}</small>`}</div>`;
   return `<div class="clip-media">${media}
       <span class="clip-score${hot}" title="How likely this part is to grab attention, from what is said and how">${CI.flame}${c.score}</span>
-      <span class="clip-len">${Math.round(c.length)}s</span></div>
+      <span class="clip-len">${Math.round(c.length)}s</span>
+      ${ready ? `<label class="clip-pick" title="Tick to pick this clip, then tap Schedule picked"><input type="checkbox" data-clip-pick="${c.id}"${clipState.picked.has(c.id) ? ' checked' : ''}><span>${clipState.picked.has(c.id) ? 'Picked' : 'Pick'}</span></label>` : ''}</div>
     <div class="clip-body">
       <b class="clip-title" title="${esc(c.title)}">${esc(c.title)}</b>
       <span class="clip-meta">${esc(fmtSec(c.start))}–${esc(fmtSec(c.end))}${c.reason ? ` · ${esc(c.reason.split(' · ')[0])}` : ''}</span>
@@ -255,6 +258,15 @@ clipForm.onsubmit = (e) => {
   xhr.onerror = () => { btn.disabled = false; bar.hidden = true; msg.textContent = 'Upload failed. Check the connection to your Mac and try again.'; };
   xhr.send(fd);
 };
+
+// ---------- Checkmark on each clip card ----------
+$('#clip-jobs').addEventListener('change', (e) => {
+  const box = e.target.closest('[data-clip-pick]');
+  if (!box) return;
+  const id = Number(box.dataset.clipPick);
+  box.checked ? clipState.picked.add(id) : clipState.picked.delete(id);
+  drawClipJobs();
+});
 
 // ---------- Buttons on clips and videos ----------
 $('#clip-jobs').addEventListener('click', async (e) => {
@@ -562,7 +574,10 @@ function openSchedulePlanner(jobId) {
   </form>`;
   const f = dlg.querySelector('form');
   const captions = new Map(ready.map((c) => [c.id, c.caption || c.title || '']));
-  const skipped = new Set();
+  // Clips ticked on their cards come in already picked; the rest start unticked.
+  const preset = ready.filter((c) => clipState.picked.has(c.id));
+  const skipped = new Set(preset.length ? ready.filter((c) => !clipState.picked.has(c.id)).map((c) => c.id) : []);
+  if (preset.some((c) => c.scheduled_at)) $('#cp-again').checked = true;
   const chosen = () => ready.filter((c) => !skipped.has(c.id) && ($('#cp-again').checked || !c.scheduled_at));
   const draw = () => {
     const list = chosen();
@@ -629,6 +644,7 @@ function openSchedulePlanner(jobId) {
     try {
       const r = await api('/posts/from-clips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountIds, posts }) });
       dlg.close();
+      list.forEach((c) => clipState.picked.delete(c.id));
       banner(`Scheduled ${r.created} clip${r.created === 1 ? '' : 's'} on ${accountIds.length} account${accountIds.length === 1 ? '' : 's'}. First one goes out ${fmtWhen(r.first)}.${r.moved ? ` ${r.moved} moved a little so each account has an hour between posts.` : ''} See them in Viral Post's calendar.`);
       await loadClipJobs();
     } catch (err) { msg.textContent = err.message; $('#cp-go').disabled = false; }
