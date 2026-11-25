@@ -851,3 +851,9 @@ input[type=file]::file-selector-button:hover { border-color: var(--accent); back
 .cp-tick { width: 22px; height: 22px; margin: 4px 0 0; accent-color: var(--accent, #6d4aff); cursor: pointer; }
 .cp-pick { display: inline-flex; gap: 6px; }
 .cp-pick .btn { padding: 5px 10px; font-size: .8rem; }
+
+/* Checkmark on each clip card (pick clips, then Schedule picked) */
+.clip-pick { position: absolute; left: 10px; bottom: 10px; z-index: 3; display: inline-flex; align-items: center; gap: 7px; background: rgb(15 17 23 / .78); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: #fff; font-weight: 800; font-size: .9rem; border-radius: 999px; padding: 7px 14px 7px 9px; cursor: pointer; user-select: none; }
+.clip-pick input { width: 22px; height: 22px; margin: 0; accent-color: #22c55e; cursor: pointer; }
+.clip-card.picked { outline: 3px solid #22c55e; outline-offset: -1px; }
+.clip-card.picked .clip-pick { background: #16a34a; }
