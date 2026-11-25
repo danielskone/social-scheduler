@@ -267,7 +267,8 @@ test('Schedule all: every clip gets its own time on every picked account, and is
   assert.ok(out.scheduled_at, 'clip shows it is scheduled');
   // The page has the button and the planner.
   const page = fs.readFileSync(path.join(__dirname, '..', 'public', 'clips.js'), 'utf8');
-  assert.match(page, /Schedule all/);
+  assert.match(page, /Schedule clips/);
+  assert.match(page, /data-pick=/);
   assert.match(page, /\/posts\/from-clips/);
 });
 
