@@ -85,7 +85,7 @@ function jobHead(job) {
       ${status}
       ${job.status === 'failed' ? `<button class="btn ghost" data-job-retry="${job.id}">${CI.retry}Try again</button>` : ''}
       ${!working && job.clips.length ? `<button class="btn ghost" data-job-fix="${job.id}" title="Fix misheard words in every clip and post">${CI.edit}Fix words</button>` : ''}
-      ${!working && ready ? `<button class="btn primary" data-job-plan="${job.id}">${CI.cal}Schedule all</button>` : ''}
+      ${!working && ready ? `<button class="btn primary" data-job-plan="${job.id}">${CI.cal}Schedule clips</button>` : ''}
       <button class="iconbtn danger" data-job-del="${job.id}" title="Delete this video and its clips" aria-label="Delete this video and its clips">${CI.trash}</button>
     </div>
     ${working || making ? `<div class="clip-progress"><div class="bar"><i style="width:${Math.max(3, pct)}%"></i></div>
@@ -541,8 +541,8 @@ function openSchedulePlanner(jobId) {
   dlg.className = 'clip-planner';
   dlg.onclick = null;
   dlg.innerHTML = `<form method="dialog" class="cp-form">
-    <h2>Schedule all clips</h2>
-    <p class="muted small">Each clip gets its own time. The best clips go first.</p>
+    <h2>Schedule clips</h2>
+    <p class="muted small">Tick the clips you want to post. Each one gets its own time, best clips first.</p>
     <div class="field"><span>Post to</span>
       <div class="cp-accts">${accts.length ? accts.map((a) => `<label><input type="checkbox" name="acct" value="${a.id}" data-platform="${a.platform}"${!prefs.accts || prefs.accts.includes(a.id) ? ' checked' : ''}>${icon(a.platform)}${esc(a.username ? '@' + a.username : a.name)}</label>`).join('') : '<span class="muted">No accounts yet. Connect one in Viral Post first.</span>'}</div></div>
     <div class="field"><span>When</span>
@@ -556,7 +556,7 @@ function openSchedulePlanner(jobId) {
     <label class="field"><span>Add to every caption <small>(optional, like your website or hashtags)</small></span>
       <textarea name="extra" rows="2" placeholder="Example: Learn more at yourwebsite.com #shorts">${esc(prefs.extra || '')}</textarea></label>
     <p class="cp-pace" id="cp-pace" aria-live="polite"></p>
-    <div class="cp-head"><b id="cp-count"></b><label class="cp-again"><input type="checkbox" id="cp-again"> Include clips already scheduled</label></div>
+    <div class="cp-head"><b id="cp-count"></b><span class="cp-pick"><button type="button" class="btn ghost btn-sm" id="cp-all">Tick all</button><button type="button" class="btn ghost btn-sm" id="cp-none">Untick all</button></span><label class="cp-again"><input type="checkbox" id="cp-again"> Include clips already scheduled</label></div>
     <ol class="cp-list" id="cp-list"></ol>
     <div class="row"><button class="btn primary" value="go" id="cp-go">Schedule</button><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><span class="muted" id="cp-msg"></span></div>
   </form>`;
@@ -575,13 +575,14 @@ function openSchedulePlanner(jobId) {
     pace.textContent = !list.length ? '' : times.length < list.length ? 'Pick days and times that are still ahead.'
       : `About ${perDay} clip${perDay === 1 ? '' : 's'} a day on each account.` + (perDay > 3 ? ' That is a lot. Platforms like 1 to 3 posts a day, so more days is safer.' : ' A safe pace.')
         + (yt && perDay > 6 ? ' YouTube only takes about 6 uploads a day, so some YouTube posts would fail.' : '');
-    $('#cp-count').textContent = `${list.length} clip${list.length === 1 ? '' : 's'}`;
+    $('#cp-count').textContent = `${list.length} clip${list.length === 1 ? '' : 's'} picked`;
+    $('#cp-go').textContent = list.length ? `Schedule ${list.length} clip${list.length === 1 ? '' : 's'}` : 'Schedule';
     const at = new Map(list.map((c, i) => [c.id, times[i]]));
     $('#cp-list').innerHTML = ready.filter((c) => $('#cp-again').checked || !c.scheduled_at).map((c) => `<li class="${skipped.has(c.id) ? 'off' : ''}" data-id="${c.id}">
+        <input type="checkbox" class="cp-tick" data-pick="${c.id}"${skipped.has(c.id) ? '' : ' checked'} aria-label="Post this clip">
         ${c.poster_url ? `<img src="${c.poster_url}" alt="" loading="lazy"${c.shape === 'wide' ? ' class="wide"' : ''}>` : '<span class="cp-noimg"></span>'}
-        <div class="cp-item"><div class="cp-item-top"><b>${esc(c.title)}</b><span class="cp-when">${skipped.has(c.id) ? 'Skipped' : at.get(c.id) ? esc(fmtWhen(at.get(c.id))) : ''}</span></div>
+        <div class="cp-item"><div class="cp-item-top"><b>${esc(c.title)}</b><span class="cp-when">${skipped.has(c.id) ? 'Not picked' : at.get(c.id) ? esc(fmtWhen(at.get(c.id))) : ''}</span></div>
           <textarea rows="2" data-cap="${c.id}" aria-label="Caption"${skipped.has(c.id) ? ' disabled' : ''}>${esc(captions.get(c.id))}</textarea></div>
-        <button type="button" class="iconbtn" data-skip="${c.id}" title="${skipped.has(c.id) ? 'Add back' : 'Leave this clip out'}" aria-label="${skipped.has(c.id) ? 'Add back' : 'Leave this clip out'}">${skipped.has(c.id) ? CI.retry : CI.trash}</button>
       </li>`).join('') || '<li class="muted">All clips are already scheduled. Tick "Include clips already scheduled" to schedule them again.</li>';
     $('#cp-go').disabled = !list.length || times.length < list.length;
   };
@@ -602,12 +603,16 @@ function openSchedulePlanner(jobId) {
     if (['first', 'last'].includes(e.target.name)) $('#cp-quick').querySelectorAll('button').forEach((x) => x.classList.remove('on'));
     if (e.target.name !== 'extra') draw();
   });
+  // A tick on each clip: ticked clips are posted. Tapping the picture or title ticks it too.
   $('#cp-list').onclick = (e) => {
-    const b = e.target.closest('[data-skip]'); if (!b) return;
-    const id = Number(b.dataset.skip);
+    if (e.target.closest('textarea')) return;
+    const li = e.target.closest('li[data-id]'); if (!li) return;
+    const id = Number(li.dataset.id);
     skipped.has(id) ? skipped.delete(id) : skipped.add(id);
     draw();
   };
+  $('#cp-all').onclick = () => { skipped.clear(); draw(); };
+  $('#cp-none').onclick = () => { ready.forEach((c) => skipped.add(c.id)); draw(); };
   f.onsubmit = async (e) => {
     if (e.submitter?.value !== 'go') return;
     e.preventDefault();

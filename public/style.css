@@ -776,7 +776,7 @@ button.top-post:active { transform: scale(.99); }
 .cp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
 .cp-again { display: inline-flex; align-items: center; gap: 6px; font-size: .84rem; color: var(--muted); }
 .cp-list { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px; max-height: 40vh; overflow: auto; }
-.cp-list li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.cp-list li { cursor: pointer; display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
 .cp-list li.off { opacity: .5; }
 .cp-list li img, .cp-noimg { width: 44px; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 6px; background: #000; display: block; }
 .cp-item { min-width: 0; }
@@ -847,3 +847,7 @@ input[type=file]::file-selector-button:hover { border-color: var(--accent); back
 .clip-viewer.wide .cv-grid video { max-height: 70vh; }
 @media (max-width: 640px) { .clip-viewer.wide .cv-grid video { height: auto; max-height: 40dvh; } }
 .cp-list li img.wide { aspect-ratio: 16 / 9; width: 64px; }
+
+.cp-tick { width: 22px; height: 22px; margin: 4px 0 0; accent-color: var(--accent, #6d4aff); cursor: pointer; }
+.cp-pick { display: inline-flex; gap: 6px; }
+.cp-pick .btn { padding: 5px 10px; font-size: .8rem; }
