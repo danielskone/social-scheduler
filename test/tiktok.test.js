@@ -43,6 +43,7 @@ const tk = http.createServer((req, res) => {
       }
       return send({ data: { status: statusFor }, error: ok });
     }
+    if (p === '/v2/video/list/') return send({ data: { has_more: false, videos: [{ id: '7300000000000000002', create_time: Math.floor(Date.now() / 1000), video_description: 'Draft one #FuquayVarina', share_url: 'https://www.tiktok.com/@fvparade/video/7300000000000000002' }] }, error: ok });
     if (p === '/v2/video/query/') return send({ data: { videos: [{ id: '7300000000000000001', like_count: 5, comment_count: 1, share_count: 2, view_count: 300 }] }, error: ok });
     send({ error: { code: 'not_found', message: 'nope' } }, 404);
   });
@@ -120,6 +121,14 @@ test('direct mode posts with the allowed privacy and links the video', async () 
   assert.deepEqual({ ...s }, { likes: 5, comments: 1, shares: 2, views: 300 });
 });
 
+test('inbox (draft) posts get linked to the real video so stats show up', async () => {
+  await scheduler.refreshStats();
+  const t = db.prepare("SELECT t.* FROM post_targets t JOIN posts p ON p.id=t.post_id WHERE p.caption='Draft one #FuquayVarina'").get();
+  assert.equal(t.external_post_id, '7300000000000000002');
+  assert.equal(t.permalink, 'https://www.tiktok.com/@fvparade/video/7300000000000000002');
+  assert.equal(t.views, 300);
+});
+
 test('expired access tokens are refreshed and the new refresh token is saved', async () => {
   const a = db.prepare("SELECT * FROM accounts WHERE platform='tiktok'").get();
   db.prepare('UPDATE accounts SET access_token=? WHERE id=?').run(JSON.stringify({ refresh: 'rft1', access: 'old', exp: 0 }), a.id);
@@ -180,4 +189,20 @@ test('after 3 days of a full TikTok inbox the post shows as failed', async () =>
   assert.equal(t.status, 'failed');
   assert.match(t.error, /inbox/);
   inboxFull = false;
+});
+
+test('inbox posts are matched to the real TikTok videos (caption first, then next new video)', () => {
+  const { matchInbox } = require('../src/tiktok');
+  const t0 = 1764100000;
+  const targets = [
+    { id: 1, sentSec: t0, caption: 'Comment FAIRY and we will send you the link! 12 warm fairy light strands' },
+    { id: 2, sentSec: t0 + 86400, caption: 'Something with no matching text at all here' },
+  ];
+  const videos = [
+    { id: '900', create_time: t0 - 5000, title: 'older video' }, // before it was sent: never used
+    { id: '901', create_time: t0 + 86400 + 600, title: 'random' },
+    { id: '902', create_time: t0 + 2 * 86400, video_description: 'Comment FAIRY and we will send you the link 12 warm fairy light strands #NCNorthPole' },
+  ];
+  const links = matchInbox(targets, videos).map((l) => [l.target.id, l.video.id]).sort();
+  assert.deepEqual(links, [[1, '902'], [2, '901']]);
 });

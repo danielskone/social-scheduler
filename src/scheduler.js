@@ -181,6 +181,7 @@ async function headsUp(now = new Date()) {
 
 async function refreshStats({ days = 30 } = {}) {
   const since = new Date(Date.now() - days * 864e5).toISOString();
+  await linkTikTokInbox(since).catch((e) => console.error(`[stats] tiktok link: ${e.message}`));
   const rows = db.prepare(`
     SELECT t.id, t.external_post_id, a.platform, a.external_id, a.access_token, a.username
     FROM post_targets t JOIN accounts a ON a.id = t.account_id
@@ -205,6 +206,31 @@ async function refreshStats({ days = 30 } = {}) {
     } catch (err) {
       console.error(`[stats] followers for ${a.name}: ${err.message}`);
     }
+  }
+}
+
+// TikTok inbox posts only know a temporary publish id, so their stats stay at zero.
+// Find the real videos in the account's video list and link them.
+async function linkTikTokInbox(since) {
+  const rows = db.prepare(`
+    SELECT t.id, t.account_id, t.external_post_id, t.published_at, p.caption, a.external_id, a.access_token, a.username
+    FROM post_targets t JOIN posts p ON p.id = t.post_id JOIN accounts a ON a.id = t.account_id
+    WHERE a.platform='tiktok' AND t.status='published' AND t.published_at >= ?`).all(since);
+  const byAcct = new Map();
+  for (const r of rows) (byAcct.get(r.account_id) || byAcct.set(r.account_id, []).get(r.account_id)).push(r);
+  for (const list of byAcct.values()) {
+    const todo = list.filter((r) => !/^\d+$/.test(String(r.external_post_id || '')));
+    if (!todo.length) continue;
+    const used = new Set(list.map((r) => String(r.external_post_id)));
+    const sentSec = (r) => Math.floor(Date.parse(r.published_at) / 1000);
+    const from = Math.min(...todo.map(sentSec)) - 600;
+    const videos = (await tiktok.listVideos(todo[0], from)).filter((v) => !used.has(String(v.id)));
+    const links = tiktok.matchInbox(todo.map((r) => ({ ...r, sentSec: sentSec(r) })), videos);
+    for (const { target, video } of links) {
+      db.prepare('UPDATE post_targets SET external_post_id=?, permalink=? WHERE id=?')
+        .run(String(video.id), video.share_url || null, target.id);
+    }
+    if (links.length) console.log(`[stats] linked ${links.length} TikTok inbox post(s) to their videos`);
   }
 }
 
