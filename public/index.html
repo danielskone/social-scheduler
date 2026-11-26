@@ -82,6 +82,30 @@
             <span>Caption <small id="caption-count"></small></span>
             <textarea name="caption" rows="8" placeholder="What do you want to say?"></textarea>
           </label>
+          <div class="field tt-field" id="tt-field" hidden>
+            <span>TikTok settings</span>
+            <div class="tt-creator" id="tt-creator"></div>
+            <label class="tt-row"><b>Who can see this video</b>
+              <select id="tt-privacy" required><option value="" selected disabled>Choose…</option></select></label>
+            <div class="tt-row"><b>Allow users to</b>
+              <div class="tt-allow">
+                <label class="check"><input type="checkbox" id="tt-comment"> <span>Comment</span></label>
+                <label class="check"><input type="checkbox" id="tt-duet"> <span>Duet</span></label>
+                <label class="check"><input type="checkbox" id="tt-stitch"> <span>Stitch</span></label>
+              </div></div>
+            <div class="tt-row tt-disclose">
+              <label class="tt-switch"><input type="checkbox" id="tt-disclose" role="switch"> <span><b>Disclose video content</b>
+                <small class="muted">Turn on to disclose that this video promotes goods or services in exchange for something of value. Your video could promote yourself, a third party, or both.</small></span></label>
+              <div class="tt-cc" id="tt-cc" hidden>
+                <label class="check"><input type="checkbox" id="tt-brand"> <span><b>Your brand</b> <small class="muted">You are promoting yourself or your own business. This video will be classified as Brand Organic.</small></span></label>
+                <label class="check"><input type="checkbox" id="tt-branded"> <span><b>Branded content</b> <small class="muted">You are promoting another brand or a third party. This video will be classified as Branded Content.</small></span></label>
+                <p class="tt-label" id="tt-label" aria-live="polite"></p>
+              </div>
+            </div>
+            <p class="tt-consent" id="tt-consent"></p>
+            <small class="muted">After you post, it may take a few minutes for the video to process and show on your TikTok profile.</small>
+            <small class="tt-msg" id="tt-msg" aria-live="polite"></small>
+          </div>
           <div class="field compose-clip" id="compose-clip" hidden>
             <span>Video</span>
             <div class="compose-clip-box"><img alt=""><div><b></b><small></small></div><button type="button" class="btn ghost" id="compose-clip-remove">Remove</button></div>

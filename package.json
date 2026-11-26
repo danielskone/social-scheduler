@@ -19,6 +19,8 @@
     "phone": "node scripts/phone.js",
     "youtube-keys": "node scripts/save-keys.js youtube",
     "tiktok-keys": "node scripts/save-keys.js tiktok",
+    "tiktok-direct": "node scripts/tiktok-mode.js direct",
+    "tiktok-inbox": "node scripts/tiktok-mode.js inbox",
     "password": "node scripts/set-password.js",
     "phone-app": "node scripts/phone-app.js",
     "mac-app": "node scripts/mac-app.js",

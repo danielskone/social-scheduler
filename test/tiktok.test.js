@@ -30,7 +30,7 @@ const tk = http.createServer((req, res) => {
       if (f === 'follower_count') return send({ data: { user: { follower_count: 77 } }, error: ok });
       return send({ data: { user: { open_id: 'OPEN1', display_name: 'FV Parade', avatar_url: 'https://img/a.jpg' } }, error: ok });
     }
-    if (p === '/v2/post/publish/creator_info/query/') return send({ data: { privacy_level_options: ['SELF_ONLY'] }, error: ok });
+    if (p === '/v2/post/publish/creator_info/query/') return send({ data: { creator_nickname: 'FV Parade', creator_username: 'fvparade', privacy_level_options: ['SELF_ONLY'], max_video_post_duration_sec: 600 }, error: ok });
     if (p === '/v2/post/publish/inbox/video/init/' || p === '/v2/post/publish/video/init/') {
       if (inboxFull) return send({ error: { code: 'spam_risk_too_many_pending_share', message: 'too many pending' } }, 403);
       return send({ data: { publish_id: 'pub1', upload_url: `http://127.0.0.1:${tk.address().port}/upload/1` }, error: ok });
@@ -81,14 +81,15 @@ test('connect goes through the https forwarding page and saves the account', asy
   assert.equal(JSON.parse(a.access_token).refresh, 'rft1');
 });
 
-async function schedule(caption) {
+async function schedule(caption, tiktokChoices, wantStatus = 201) {
   const id = db.prepare("SELECT id FROM accounts WHERE platform='tiktok'").get().id;
   const fd = new FormData();
+  if (tiktokChoices) fd.set('tiktok', JSON.stringify(tiktokChoices));
   fd.set('caption', caption); fd.set('scheduledAt', new Date(Date.now() - 1000).toISOString()); fd.set('accountIds', String(id));
   fd.set('media', new Blob([Buffer.from('fakevideo')], { type: 'video/mp4' }), 'clip.mp4');
   const r = await fetch(`${base}/api/posts`, { method: 'POST', body: fd });
-  assert.equal(r.status, 201, await r.clone().text());
-  return (await r.json()).id;
+  assert.equal(r.status, wantStatus, await r.clone().text());
+  return wantStatus === 201 ? (await r.json()).id : (await r.json()).error;
 }
 const target = (postId) => db.prepare('SELECT * FROM post_targets WHERE post_id=?').get(postId);
 
@@ -106,7 +107,7 @@ test('draft mode sends the video to the TikTok inbox', async () => {
 test('direct mode posts with the allowed privacy and links the video', async () => {
   process.env.TIKTOK_MODE = 'direct';
   statusFor = 'PUBLISH_COMPLETE';
-  const postId = await schedule('Direct one');
+  const postId = await schedule('Direct one', { privacy: 'SELF_ONLY', comment: true, duet: false, stitch: false, disclose: true, brand: true, branded: false });
   await scheduler.publishDue();
   delete process.env.TIKTOK_MODE;
   const t = target(postId);
@@ -114,6 +115,10 @@ test('direct mode posts with the allowed privacy and links the video', async () 
   const init = JSON.parse(calls.find((c) => c.path === '/v2/post/publish/video/init/').body.toString());
   assert.equal(init.post_info.privacy_level, 'SELF_ONLY');
   assert.equal(init.post_info.title, 'Direct one');
+  assert.equal(init.post_info.disable_comment, false);
+  assert.equal(init.post_info.disable_duet, true);
+  assert.equal(init.post_info.brand_organic_toggle, true);
+  assert.equal(init.post_info.brand_content_toggle, false);
   assert.equal(t.permalink, 'https://www.tiktok.com/@fvparade/video/7300000000000000001');
 
   await scheduler.refreshStats();
@@ -127,6 +132,31 @@ test('inbox (draft) posts get linked to the real video so stats show up', async 
   assert.equal(t.external_post_id, '7300000000000000002');
   assert.equal(t.permalink, 'https://www.tiktok.com/@fvparade/video/7300000000000000002');
   assert.equal(t.views, 300);
+});
+
+test('New post gets the creator info, and bad TikTok choices are refused', async () => {
+  const id = db.prepare("SELECT id FROM accounts WHERE platform='tiktok'").get().id;
+  const info = await (await fetch(`${base}/api/tiktok/creator/${id}`)).json();
+  assert.deepEqual(info.privacy, ['SELF_ONLY']);
+  assert.equal(await schedule('x', { privacy: '' }, 400), 'Choose who can see the TikTok video.');
+  assert.match(await schedule('x', { privacy: 'SELF_ONLY', disclose: true }, 400), /promotes yourself, a third party, or both/);
+  assert.equal(await schedule('x', { privacy: 'SELF_ONLY', disclose: true, branded: true }, 400), 'Branded content visibility cannot be set to private.');
+});
+
+test('direct mode without choices (imports) still goes to the inbox, and "Only me" is never reused', async () => {
+  process.env.TIKTOK_MODE = 'direct';
+  statusFor = 'SEND_TO_USER_INBOX';
+  calls.length = 0;
+  tiktok.saveDefaults({ privacy: 'SELF_ONLY', comment: false, duet: false, stitch: false });
+  db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at) VALUES (?,?,?,?)')
+    .run('Imported one', db.prepare('SELECT media_file FROM posts WHERE media_file IS NOT NULL').get().media_file, 'video', new Date(Date.now() - 1000).toISOString());
+  const postId = db.prepare('SELECT max(id) id FROM posts').get().id;
+  db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)').run(postId, db.prepare("SELECT id FROM accounts WHERE platform='tiktok'").get().id);
+  await scheduler.publishDue();
+  delete process.env.TIKTOK_MODE;
+  assert.equal(target(postId).status, 'published', target(postId).error);
+  assert.ok(calls.some((c) => c.path === '/v2/post/publish/inbox/video/init/'));
+  assert.ok(!calls.some((c) => c.path === '/v2/post/publish/video/init/'));
 });
 
 test('expired access tokens are refreshed and the new refresh token is saved', async () => {
