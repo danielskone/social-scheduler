@@ -458,6 +458,7 @@ async function renderCompose(dateIso, clipId) {
   }
   showComposeClip();
   updatePreview();
+  tt.acct = null; ttVideoLength(); updateTikTok();
   api('/look/settings').then((st) => { lookState = st; showLook(); }).catch(() => showLook());
 }
 
@@ -600,6 +601,91 @@ function updatePreview() {
   }
 }
 form.addEventListener('input', updatePreview);
+form.addEventListener('change', () => updateTikTok());
+
+// ---------- TikTok choices (only when TikTok posts by itself) ----------
+// TikTok's rules: show who is posting, let the person pick who can see it (no default),
+// comments/duet/stitch start off, a promotion disclosure, and the consent line before posting.
+const tt = { mode: null, acct: null, info: null, error: '', loading: false, videoSec: null };
+const TT_PRIVACY = { PUBLIC_TO_EVERYONE: 'Everyone', MUTUAL_FOLLOW_FRIENDS: 'Friends', FOLLOWER_OF_CREATOR: 'Followers', SELF_ONLY: 'Only me' };
+const TT_MUSIC = '<a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener">Music Usage Confirmation</a>';
+const TT_BC = '<a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener">Branded Content Policy</a>';
+const ttOn = () => !$('#tt-field').hidden;
+async function updateTikTok() {
+  if (tt.mode === null) { tt.mode = 'loading'; try { tt.mode = (await api('/status')).tiktokMode; } catch { tt.mode = 'draft'; } }
+  if (tt.mode === 'loading') return;
+  const box = form.querySelector('[name=accountIds][data-platform=tiktok]:checked');
+  const show = tt.mode === 'direct' && Boolean(box);
+  $('#tt-field').hidden = !show;
+  if (show && String(box.value) !== String(tt.acct)) {
+    tt.acct = box.value; tt.info = null; tt.error = ''; tt.loading = true;
+    $('#tt-creator').innerHTML = '<span class="muted">Checking your TikTok account…</span>';
+    try { tt.info = await api(`/tiktok/creator/${tt.acct}`); } catch (e) { tt.error = e.message; }
+    tt.loading = false;
+    drawTikTokChoices();
+  }
+  if (!show) tt.acct = null;
+  checkTikTok();
+}
+function drawTikTokChoices() {
+  const i = tt.info;
+  $('#tt-creator').innerHTML = i
+    ? `${i.avatar ? `<img src="${esc(i.avatar)}" alt="">` : ''}<span>Posting to <b>${esc(i.nickname || i.username || 'your TikTok')}</b>${i.username ? ` <span class="muted">@${esc(i.username)}</span>` : ''}</span>`
+    : `<span class="tt-bad">${esc(tt.error || 'Could not reach TikTok.')}</span>`;
+  const sel = $('#tt-privacy');
+  sel.innerHTML = '<option value="" selected disabled>Choose…</option>' + (i ? i.privacy.map((v) => `<option value="${v}">${TT_PRIVACY[v] || v}</option>`).join('') : '');
+  for (const [id, off] of [['#tt-comment', i?.commentOff], ['#tt-duet', i?.duetOff], ['#tt-stitch', i?.stitchOff]]) {
+    const c = $(id);
+    c.checked = false;
+    c.disabled = Boolean(off) || !i;
+    c.closest('label').title = off ? 'Turned off in your TikTok settings' : '';
+  }
+}
+// Length of the chosen video, to check it against what TikTok allows this account.
+function ttVideoLength() {
+  const file = form.media.files[0];
+  if (composeClip) { tt.videoSec = composeClip.length; return; }
+  tt.videoSec = null;
+  if (!file || !file.type.startsWith('video')) return;
+  const v = document.createElement('video');
+  const url = URL.createObjectURL(file);
+  v.preload = 'metadata';
+  v.onloadedmetadata = () => { tt.videoSec = v.duration; URL.revokeObjectURL(url); checkTikTok(); };
+  v.src = url;
+}
+form.media.addEventListener('change', ttVideoLength);
+function ttChoices() {
+  return {
+    privacy: $('#tt-privacy').value, comment: $('#tt-comment').checked, duet: $('#tt-duet').checked, stitch: $('#tt-stitch').checked,
+    disclose: $('#tt-disclose').checked, brand: $('#tt-brand').checked, branded: $('#tt-branded').checked,
+  };
+}
+function checkTikTok() {
+  const buttons = [form.querySelector('button[type=submit]'), $('#post-now')];
+  const say = (msg) => { $('#tt-msg').textContent = msg; buttons.forEach((b) => { b.disabled = Boolean(msg); b.title = msg; }); };
+  if (!ttOn()) { $('#tt-msg').textContent = ''; buttons.forEach((b) => { b.disabled = false; b.title = ''; }); return; }
+  const c = ttChoices();
+  $('#tt-cc').hidden = !c.disclose;
+  // Branded content can't be private: lock out "Only me" while it is on, and the other way round.
+  const only = $('#tt-privacy').querySelector('option[value=SELF_ONLY]');
+  if (only) { only.disabled = c.disclose && c.branded; only.title = only.disabled ? 'Branded content visibility cannot be set to private.' : ''; }
+  const bc = $('#tt-branded');
+  bc.disabled = c.privacy === 'SELF_ONLY';
+  bc.closest('label').title = bc.disabled ? 'Branded content visibility cannot be set to private.' : '';
+  if (bc.disabled && bc.checked) bc.checked = false;
+  const brandedOn = c.disclose && $('#tt-branded').checked;
+  $('#tt-label').textContent = !c.disclose ? '' : brandedOn ? "Your photo/video will be labeled as 'Paid partnership'"
+    : c.brand ? "Your photo/video will be labeled as 'Promotional content'" : '';
+  $('#tt-consent').innerHTML = brandedOn
+    ? `By posting, you agree to TikTok's ${TT_BC} and ${TT_MUSIC}.`
+    : `By posting, you agree to TikTok's ${TT_MUSIC}.`;
+  if (tt.loading) return say('Checking your TikTok account…');
+  if (!tt.info) return say(tt.error || 'Could not reach TikTok. Try again in a moment.');
+  if (tt.info.maxSec && tt.videoSec && tt.videoSec > tt.info.maxSec + 0.5) return say(`TikTok lets this account post videos up to ${Math.floor(tt.info.maxSec)} seconds. This one is ${Math.round(tt.videoSec)} seconds.`);
+  if (!c.privacy) return say('Choose who can see the TikTok video.');
+  if (c.disclose && !c.brand && !c.branded) return say('You need to indicate if your content promotes yourself, a third party, or both.');
+  say('');
+}
 
 async function submitPost(now) {
   const fd = new FormData(form);
@@ -609,6 +695,7 @@ async function submitPost(now) {
   if (!form.media.files[0] && composeClip) fd.set('clipId', composeClip.id);
   fd.set('look', lookState.look);
   fd.set('removeText', lookState.removeText ? '1' : '0');
+  if (ttOn()) fd.set('tiktok', JSON.stringify(ttChoices()));
   const msg = $('#compose-msg');
   msg.textContent = 'Saving…';
   form.querySelectorAll('button').forEach((b) => (b.disabled = true));
@@ -618,6 +705,7 @@ async function submitPost(now) {
     composeClip = null;
     showComposeClip();
     showLook();
+    tt.acct = null; updateTikTok();
     calMonth = startOfMonth(when);
     location.hash = 'calendar';
   } catch (e) {

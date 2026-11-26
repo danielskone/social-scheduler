@@ -857,3 +857,25 @@ input[type=file]::file-selector-button:hover { border-color: var(--accent); back
 .clip-pick input { width: 22px; height: 22px; margin: 0; accent-color: #22c55e; cursor: pointer; }
 .clip-card.picked { outline: 3px solid #22c55e; outline-offset: -1px; }
 .clip-card.picked .clip-pick { background: #16a34a; }
+
+/* TikTok choices in New post (shown when TikTok posts by itself) */
+.tt-field { border: 1px solid var(--line, #e5e7eb); border-radius: 14px; padding: 14px 16px; display: grid; gap: 12px; }
+.tt-field > span { margin-bottom: 0; }
+.tt-creator { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tt-creator img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex: none; }
+.tt-creator > span { min-width: 0; overflow-wrap: anywhere; }
+.tt-row { display: grid; gap: 6px; }
+.tt-row > b { font-size: .88rem; }
+.tt-row select { max-width: 280px; }
+.tt-allow { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.tt-switch { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.tt-switch input { width: auto; margin-top: 3px; flex: none; }
+.tt-switch small, .tt-cc small { display: block; font-weight: 400; }
+.tt-cc { display: grid; gap: 10px; padding-left: 26px; }
+.tt-cc .check { align-items: flex-start; }
+.tt-cc .check input { width: auto; margin-top: 3px; flex: none; }
+.tt-label { margin: 0; font-weight: 650; font-size: .86rem; }
+.tt-label:empty, .tt-msg:empty { display: none; }
+.tt-consent { margin: 0; font-size: .86rem; }
+.tt-msg, .tt-bad { color: #b42318; font-weight: 600; }
+.check input:disabled + span { opacity: .5; }

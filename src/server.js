@@ -444,6 +444,15 @@ function validatePost({ caption, scheduledAt, accountIds, mediaType }) {
   return null;
 }
 
+// What TikTok allows this account right now (New post builds its TikTok choices from it).
+api.get('/tiktok/creator/:id', async (req, res) => {
+  const a = db.prepare("SELECT * FROM accounts WHERE id=? AND platform='tiktok'").get(Number(req.params.id));
+  if (!a) return res.status(404).json({ error: 'TikTok account not found.' });
+  try { res.json({ ...(await tiktok.creatorInfo(a)), saved: tiktok.defaults() }); } catch (err) {
+    res.status(400).json({ error: err.tiktokWait ? 'TikTok says this account can\'t post more right now. Please try again later.' : err.message });
+  }
+});
+
 api.post('/posts', upload.single('media'), (req, res) => {
   const caption = (req.body.caption || '').trim();
   const accountIds = [].concat(req.body.accountIds || []).flatMap((v) => String(v).split(',')).filter(Boolean).map(Number);
@@ -459,15 +468,20 @@ api.post('/posts', upload.single('media'), (req, res) => {
       db.prepare(`SELECT 1 FROM accounts WHERE platform='instagram' AND id IN (${accountIds.map(() => '?').join(',')})`).get(...accountIds)) {
     error = 'Instagram only accepts JPG photos. Please save the image as a JPG.';
   }
+  // TikTok choices (only sent when TikTok posts by itself).
+  const tt = req.body.tiktok ? tiktok.cleanSettings(req.body.tiktok) : { settings: null };
+  if (!error && tt.error) error = tt.error;
   if (error) {
     if (req.file) fs.rmSync(req.file.path, { force: true });
     if (clipFile) fs.rmSync(path.join(config.mediaDir, clipFile), { force: true });
     return res.status(400).json({ error });
   }
+  if (tt.settings) tiktok.saveDefaults(tt.settings);
   const id = db.transaction(() => {
     const { lastInsertRowid } = db.prepare('INSERT INTO posts (caption, media_file, media_type, scheduled_at, title, look, remove_text, clip_id) VALUES (?,?,?,?,?,?,?,?)')
       .run(caption, req.file?.filename || clipFile || null, mediaType, new Date(req.body.scheduledAt).toISOString(), (req.body.title || '').trim() || null,
         mediaType ? lk.look : null, mediaType ? lk.removeText : 0, clipFile ? Number(req.body.clipId) : null);
+    if (tt.settings) db.prepare('UPDATE posts SET tiktok=? WHERE id=?').run(JSON.stringify(tt.settings), lastInsertRowid);
     const ins = db.prepare('INSERT INTO post_targets (post_id, account_id) VALUES (?,?)');
     accountIds.forEach((a) => ins.run(lastInsertRowid, a));
     if (clipFile) clipper.markScheduled(Number(req.body.clipId), new Date(req.body.scheduledAt).toISOString());

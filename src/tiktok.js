@@ -23,6 +23,10 @@ const mode = () => (process.env.TIKTOK_MODE === 'direct' ? 'direct' : 'draft');
 const redirectUri = () => process.env.TIKTOK_REDIRECT_URI || 'https://danielskone.github.io/social-scheduler/tiktok-callback.html';
 const configured = () => Boolean(clientKey() && clientSecret());
 
+// Per-post TikTok choices from New post (who can see it, comments/duet/stitch, promotion labels).
+if (!db.prepare('PRAGMA table_info(posts)').all().some((c) => c.name === 'tiktok')) db.exec('ALTER TABLE posts ADD COLUMN tiktok TEXT');
+db.exec('CREATE TABLE IF NOT EXISTS post_settings (key TEXT PRIMARY KEY, value TEXT)');
+
 class TikTokError extends Error {}
 const WAIT_CODES = new Set(['spam_risk_too_many_pending_share', 'spam_risk_too_many_posts']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -119,6 +123,51 @@ function chunking(size) {
   return { chunkSize, count: Math.floor(size / chunkSize) };
 }
 
+// Who is posting and what TikTok allows them right now. New post builds its TikTok
+// choices from this (TikTok requires it, and it can change at any time).
+async function creatorInfo(account) {
+  const d = (await call('POST', '/v2/post/publish/creator_info/query/', await accessToken(account), {})).data || {};
+  return {
+    nickname: d.creator_nickname || null,
+    username: d.creator_username || null,
+    avatar: d.creator_avatar_url || null,
+    privacy: d.privacy_level_options || [],
+    commentOff: Boolean(d.comment_disabled),
+    duetOff: Boolean(d.duet_disabled),
+    stitchOff: Boolean(d.stitch_disabled),
+    maxSec: d.max_video_post_duration_sec || null,
+  };
+}
+
+const PRIVACY = ['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'];
+// Checks the TikTok choices sent from New post. Returns { settings } or { error }.
+function cleanSettings(raw) {
+  let o = raw;
+  if (typeof raw === 'string') { try { o = JSON.parse(raw); } catch { return { error: 'TikTok settings could not be read.' }; } }
+  if (!o || typeof o !== 'object') return { settings: null };
+  if (!PRIVACY.includes(o.privacy)) return { error: 'Choose who can see the TikTok video.' };
+  const s = { privacy: o.privacy, comment: Boolean(o.comment), duet: Boolean(o.duet), stitch: Boolean(o.stitch), disclose: Boolean(o.disclose) };
+  s.brand = s.disclose && Boolean(o.brand);
+  s.branded = s.disclose && Boolean(o.branded);
+  if (s.disclose && !s.brand && !s.branded) return { error: 'You need to indicate if your content promotes yourself, a third party, or both.' };
+  if (s.branded && s.privacy === 'SELF_ONLY') return { error: 'Branded content visibility cannot be set to private.' };
+  return { settings: s };
+}
+// The last choices made in New post are kept, so imported posts can post the same way.
+function saveDefaults(s) {
+  db.prepare('INSERT INTO post_settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('tiktok', JSON.stringify(s));
+}
+function defaults() {
+  try { return JSON.parse(db.prepare("SELECT value FROM post_settings WHERE key='tiktok'").get()?.value || 'null'); } catch { return null; }
+}
+// Settings to post this one with: its own, else the saved ones, but only when they are not
+// "Only me" (a test post while waiting for TikTok's review must not make every post private).
+function settingsFor(post) {
+  try { if (post.tiktok) return JSON.parse(post.tiktok); } catch { /* fall through */ }
+  const d = defaults();
+  return d && d.privacy && d.privacy !== 'SELF_ONLY' ? d : null;
+}
+
 async function publishTikTok(account, post, { pollMs = 5000, maxPolls = 60 } = {}) {
   if (post.media_type !== 'video' || !post.media_file) throw new TikTokError('TikTok posts need a video.');
   const token = await accessToken(account);
@@ -129,14 +178,24 @@ async function publishTikTok(account, post, { pollMs = 5000, maxPolls = 60 } = {
   const source_info = { source: 'FILE_UPLOAD', video_size: buf.length, chunk_size: chunkSize, total_chunk_count: count };
 
   let init;
-  const direct = mode() === 'direct';
+  // Direct posting needs the choices made in New post (TikTok's rules); without them the
+  // video goes to the TikTok inbox as before.
+  const choice = mode() === 'direct' ? settingsFor(post) : null;
+  const direct = Boolean(choice);
   if (direct) {
     const creator = (await call('POST', '/v2/post/publish/creator_info/query/', token, {})).data || {};
     const opts = creator.privacy_level_options || [];
-    const wanted = process.env.TIKTOK_PRIVACY || 'PUBLIC_TO_EVERYONE';
-    const privacy = opts.includes(wanted) ? wanted : (opts.includes('SELF_ONLY') ? 'SELF_ONLY' : opts[0] || 'SELF_ONLY');
+    if (!opts.includes(choice.privacy)) throw new TikTokError('TikTok no longer offers the "who can see it" choice for this post. Open the post, pick again, and retry.');
     init = await call('POST', '/v2/post/publish/video/init/', token, {
-      post_info: { title: String(post.caption || '').slice(0, 2200), privacy_level: privacy, disable_comment: false, disable_duet: false, disable_stitch: false },
+      post_info: {
+        title: String(post.caption || '').slice(0, 2200),
+        privacy_level: choice.privacy,
+        disable_comment: !choice.comment || Boolean(creator.comment_disabled),
+        disable_duet: !choice.duet || Boolean(creator.duet_disabled),
+        disable_stitch: !choice.stitch || Boolean(creator.stitch_disabled),
+        brand_content_toggle: Boolean(choice.branded),
+        brand_organic_toggle: Boolean(choice.brand),
+      },
       source_info,
     });
   } else {
@@ -232,4 +291,4 @@ async function followerCount(account) {
   return d.data?.user?.follower_count ?? null;
 }
 
-module.exports = { configured, mode, redirectUri, loginUrl, accountsFromCode, publishTikTok, videoStats, listVideos, matchInbox, followerCount, chunking, TikTokError };
+module.exports = { configured, mode, redirectUri, loginUrl, accountsFromCode, publishTikTok, creatorInfo, cleanSettings, saveDefaults, defaults, settingsFor, videoStats, listVideos, matchInbox, followerCount, chunking, TikTokError };
