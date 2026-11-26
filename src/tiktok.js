@@ -186,9 +186,50 @@ async function videoStats(account, videoId) {
   return { likes: v.like_count ?? null, comments: v.comment_count ?? null, shares: v.share_count ?? null, views: v.view_count ?? null };
 }
 
+// The user's own public videos, newest first, back to `sinceSec` (unix seconds).
+async function listVideos(account, sinceSec, { maxPages = 10 } = {}) {
+  const token = await accessToken(account);
+  const out = [];
+  let cursor;
+  for (let page = 0; page < maxPages; page++) {
+    const body = { max_count: 20 };
+    if (cursor) body.cursor = cursor;
+    const d = await call('POST', '/v2/video/list/?fields=id,create_time,title,video_description,share_url', token, body);
+    const vids = d.data?.videos || [];
+    out.push(...vids);
+    if (!d.data?.has_more || !vids.length || vids[vids.length - 1].create_time < sinceSec) break;
+    cursor = d.data.cursor;
+  }
+  return out.filter((v) => v.create_time >= sinceSec);
+}
+
+const words = (t) => String(t || '').toLowerCase().replace(/https?:\/\/\S+/g, ' ').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+// Inbox uploads only get a temporary publish id. Once Daniel taps Post in the TikTok app,
+// the real video shows up in his video list. Match each inbox post to that video:
+// first by caption, otherwise the first new video made after it was sent (within 4 days).
+function matchInbox(targets, videos) {
+  const free = [...videos].sort((a, b) => a.create_time - b.create_time);
+  const links = [];
+  const take = (v) => free.splice(free.indexOf(v), 1);
+  const ordered = [...targets].sort((a, b) => a.sentSec - b.sentSec);
+  const after = (t) => free.filter((v) => v.create_time >= t.sentSec - 300 && v.create_time <= t.sentSec + 4 * 86400);
+  const left = [];
+  for (const t of ordered) { // caption matches first
+    const key = words(t.caption).slice(0, 40);
+    const v = key.length >= 12 && after(t).find((x) => words(`${x.title || ''} ${x.video_description || ''}`).includes(key));
+    if (v) { take(v); links.push({ target: t, video: v }); } else left.push(t);
+  }
+  for (const t of left) {
+    const v = after(t)[0];
+    if (v) { take(v); links.push({ target: t, video: v }); }
+  }
+  return links;
+}
+
 async function followerCount(account) {
   const d = await call('GET', '/v2/user/info/?fields=follower_count', await accessToken(account));
   return d.data?.user?.follower_count ?? null;
 }
 
-module.exports = { configured, mode, redirectUri, loginUrl, accountsFromCode, publishTikTok, videoStats, followerCount, chunking, TikTokError };
+module.exports = { configured, mode, redirectUri, loginUrl, accountsFromCode, publishTikTok, videoStats, listVideos, matchInbox, followerCount, chunking, TikTokError };
