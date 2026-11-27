@@ -292,3 +292,24 @@ test('comments on your Facebook and Instagram posts come into Conversations, and
   await social.reply(jo.id, 'December 5!', graph);
   assert.strictEqual(calls.filter((c) => c.method === 'POST').pop().p, 'ic1/replies');
 });
+
+test('Facebook comments: when the Page feed is not allowed, reads the posts Viral Post published there', async () => {
+  const db = require('../../src/db');
+  const social = require('../server/social');
+  const acc = db.prepare("INSERT INTO accounts (platform, external_id, name, username, access_token) VALUES ('facebook','GN1','Good News Page',NULL,'gn-token')").run().lastInsertRowid;
+  const post = db.prepare("INSERT INTO posts (caption, scheduled_at) VALUES ('Comment FAIRY for the link', datetime('now'))").run().lastInsertRowid;
+  db.prepare("INSERT INTO post_targets (post_id, account_id, status, external_post_id, permalink, published_at) VALUES (?,?, 'published', 'GN1_77', 'https://facebook.com/p/77', datetime('now'))").run(post, acc);
+  for (const a of social.accounts()) social.saveAccount(a.id, { enabled: a.id === acc });
+  const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString().replace('Z', '+0000');
+  const graph = async (method, p) => {
+    if (p.endsWith('/conversations')) throw Object.assign(new Error('(#200) Requires permission: pages_messaging'), { code: 200 });
+    if (p === 'GN1/feed') throw Object.assign(new Error("(#10) This endpoint requires the 'pages_read_engagement' permission"), { code: 10 });
+    if (p === 'GN1_77/comments') return { data: [{ id: 'k1', message: 'FAIRY', created_time: iso(60e3), from: { id: 'FBU70', name: 'Nina Cole' } }] };
+    return {};
+  };
+  const r = await social.check({ graph });
+  assert.strictEqual(r.added, 1);
+  assert.ok(db.prepare("SELECT 1 FROM contacts WHERE name='Nina Cole'").get());
+  const st = social.accounts().find((a) => a.id === acc);
+  assert.doesNotMatch(st.last_error, /Comments:/, 'comments worked through the fallback');
+});

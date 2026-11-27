@@ -148,6 +148,30 @@ async function commenter(a, c, graph) {
   return who || { id: `c:${c.id}`, name: `${NAMES[a.platform]} commenter` };
 }
 
+// The Page's last 10 posts with their newest comments. Reading the whole Page feed needs
+// pages_read_engagement; when Facebook refuses that, it reads the last 10 posts Viral Post
+// published there instead (the same way Viral Post's Analytics shows comments).
+const FB_COMMENT_FIELDS = 'id,message,created_time,from{id,name}';
+async function facebookPosts(a, graph) {
+  try {
+    return (await graph('GET', `${a.page_id}/feed`, { access_token: a.access_token, fields: `id,permalink_url,message,created_time,comments.order(reverse_chronological).limit(25){${FB_COMMENT_FIELDS}}`, limit: 10 })).data || [];
+  } catch (e) {
+    const ours = db.prepare(`SELECT t.external_post_id AS id, t.permalink, p.caption FROM post_targets t JOIN posts p ON p.id=t.post_id
+      WHERE t.account_id=? AND t.status='published' AND t.external_post_id IS NOT NULL ORDER BY t.published_at DESC LIMIT 10`).all(a.id);
+    if (!ours.length) throw e;
+    const out = [];
+    for (const o of ours) {
+      try {
+        const d = await graph('GET', `${o.id}/comments`, { access_token: a.access_token, fields: FB_COMMENT_FIELDS, order: 'reverse_chronological', limit: 25 });
+        out.push({ id: o.id, message: o.caption, permalink_url: o.permalink, comments: { data: d.data || [] } });
+      } catch (e2) {
+        if (!out.length && o === ours[ours.length - 1]) throw e2;
+      }
+    }
+    return out;
+  }
+}
+
 // Comments people leave on your last posts become messages in Conversations, like GoHighLevel.
 // You answer with a public reply under their comment (no 24-hour limit for that).
 async function checkComments(a, graph = meta.call) {
@@ -156,7 +180,7 @@ async function checkComments(a, graph = meta.call) {
   let newest = a.comments_since || '';
   const posts = a.platform === 'instagram'
     ? (await graph('GET', `${a.external_id}/media`, { access_token: a.access_token, fields: 'id,permalink,caption,timestamp,comments.limit(25){id,text,timestamp,username,from}', limit: 10 })).data || []
-    : (await graph('GET', `${a.page_id}/feed`, { access_token: a.access_token, fields: 'id,permalink_url,message,created_time,comments.order(reverse_chronological).limit(25){id,message,created_time,from{id,name}}', limit: 10 })).data || [];
+    : await facebookPosts(a, graph);
   const added = [];
   for (const p of posts) {
     for (const c of (p.comments && p.comments.data) || []) {
