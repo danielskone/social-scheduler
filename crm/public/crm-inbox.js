@@ -146,7 +146,7 @@
       : `<div class="ib-msg ${m.direction}">
           <div class="ib-meta">${m.direction === 'in' ? h(c.name) : m.subject === 'Answer bot' ? 'Answer bot' : 'You'} · ${CH[m.channel] ? `${CH[m.channel]} · ` : ''}${when(m.sent_at, true)}</div>
           <div class="ib-bubble${CH[m.channel] ? ` chat ${m.channel}` : ''}">${CH[m.channel] ? '' : `<div class="ib-s">${h(m.subject)}</div>`}<div class="ib-b">${h(m.body)}</div>
-          ${m.more ? `<button type="button" class="ib-more" data-mid="${m.id}">Show the whole email</button>` : ''}</div>
+          ${m.more ? `<button type="button" class="ib-more" data-mid="${m.id}">${CH[m.channel] ? 'Show more' : 'Show the whole email'}</button>` : ''}</div>
         </div>`);
     const social = d.social;
     const chatMode = !social && Boolean(d.chat && d.chat.last);

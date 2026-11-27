@@ -247,6 +247,8 @@ test('comments on your Facebook and Instagram posts come into Conversations, and
   const graph = async (method, p, params) => {
     calls.push({ method, p, params });
     if (method === 'POST') return { id: `reply_${calls.length}` };
+    if (p === 'ic2') return { username: 'amy.r' };
+    if (p === 'ic3' || p === 'ic4') return { id: p };
     if (p.endsWith('/conversations')) throw Object.assign(new Error('(#200) Requires pages_messaging permission'), { code: 200 });
     if (p === 'NP1/feed') return { data: [{ id: 'NP1_post', message: 'Fairy lights are here! Comment FAIRY', permalink_url: 'https://facebook.com/p/1', comments: { data: [
       { id: 'c2', message: 'FAIRY', created_time: iso(60e3), from: { id: 'FBU7', name: 'Kara Lee' } },
@@ -255,13 +257,18 @@ test('comments on your Facebook and Instagram posts come into Conversations, and
     ] } }] };
     if (p === 'NPIG/media') return { data: [{ id: 'm1', caption: 'Lights!', permalink: 'https://instagram.com/p/x', comments: { data: [
       { id: 'ic1', text: 'When is the parade?', timestamp: iso(120e3), username: 'jo.k', from: { id: 'IGU5', username: 'jo.k' } },
+      { id: 'ic2', text: 'Fairy', timestamp: iso(100e3) },
+      { id: 'ic3', text: 'Fairy', timestamp: iso(90e3) },
+      { id: 'ic4', text: 'Fairy!', timestamp: iso(80e3) },
     ] } }] };
     return { data: [] };
   };
   // Only these two accounts, so other tests' accounts don't get in the way.
   for (const a of social.accounts()) if (![page, ig].includes(a.id)) social.saveAccount(a.id, { enabled: false });
   const r = await social.check({ graph });
-  assert.strictEqual(r.added, 2, 'the new Facebook and Instagram comments, not the old one or our own');
+  assert.strictEqual(r.added, 5, 'the new Facebook and Instagram comments, not the old one or our own');
+  assert.ok(db.prepare("SELECT 1 FROM contacts WHERE name='@amy.r'").get(), 'a missing name is looked up for that one comment');
+  assert.strictEqual(db.prepare("SELECT COUNT(*) AS n FROM contacts WHERE name='Instagram commenter'").get().n, 2, 'unnamed commenters are never lumped into one person');
   const kara = db.prepare("SELECT * FROM contacts WHERE name='Kara Lee'").get();
   assert.ok(kara);
   assert.ok(!db.prepare("SELECT 1 FROM contacts WHERE name='Old Person'").get(), 'comments older than 3 days are skipped the first time');
