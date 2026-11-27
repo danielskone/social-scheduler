@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS crm_social_accounts (
 );
 `);
 if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_messages') WHERE name='account_id'").get()) db.exec('ALTER TABLE crm_messages ADD COLUMN account_id INTEGER');
+// Added later: comments on your posts come in too (newest comment time already read).
+if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_social_accounts') WHERE name='comments_since'").get()) db.exec('ALTER TABLE crm_social_accounts ADD COLUMN comments_since TEXT');
 
 const crm = () => require('./crm');
 const businesses = () => require('./businesses');
@@ -50,7 +52,7 @@ function accounts() {
     const page = a.platform === 'facebook' ? a : pages.find((p) => p.access_token === a.access_token);
     const s = db.prepare('SELECT * FROM crm_social_accounts WHERE account_id=?').get(a.id) || { enabled: 1 };
     return { ...a, page_id: page ? page.external_id : null, page_name: page ? page.name : null, enabled: Boolean(s.enabled), group_name: s.group_name || null,
-      last_check: s.last_check || null, last_error: s.last_error || null, since: s.since || null };
+      last_check: s.last_check || null, last_error: s.last_error || null, since: s.since || null, comments_since: s.comments_since || null };
   });
 }
 const accountById = (id) => accounts().find((a) => a.id === Number(id));
@@ -116,12 +118,58 @@ function saveMessage(a, m, { quiet = false } = {}) {
   return { id: r.lastInsertRowid, contact, mine, text };
 }
 
+// Facebook's own words, plus what to do about it.
+function reason(e) {
+  const perm = e.code === 10 || e.code === 190 || (e.code >= 200 && e.code < 300) || /permission/i.test(e.message || '');
+  return perm ? `Facebook has not allowed this yet ("${String(e.message || '').slice(0, 160)}"). Reconnect Facebook and Instagram in Viral Post and allow everything it asks, then wait 2 minutes.`
+    : `Could not read them ("${String(e.message || '').slice(0, 160)}").`;
+}
+
+// Comments people leave on your last posts become messages in Conversations, like GoHighLevel.
+// You answer with a public reply under their comment (no 24-hour limit for that).
+async function checkComments(a, graph = meta.call) {
+  const first = !a.comments_since;
+  const since = a.comments_since || new Date(Date.now() - 3 * 86400e3).toISOString();
+  let newest = a.comments_since || '';
+  const posts = a.platform === 'instagram'
+    ? (await graph('GET', `${a.external_id}/media`, { access_token: a.access_token, fields: 'id,permalink,caption,timestamp,comments.limit(25){id,text,timestamp,username,from{id,username}}', limit: 10 })).data || []
+    : (await graph('GET', `${a.page_id}/feed`, { access_token: a.access_token, fields: 'id,permalink_url,message,created_time,comments.order(reverse_chronological).limit(25){id,message,created_time,from{id,name}}', limit: 10 })).data || [];
+  const added = [];
+  for (const p of posts) {
+    for (const c of (p.comments && p.comments.data) || []) {
+      const at = new Date(c.timestamp || c.created_time || 0).toISOString();
+      if (at <= since) continue;
+      if (at > newest) newest = at;
+      const text = String(c.text || c.message || '').trim();
+      const who = a.platform === 'instagram'
+        ? { id: (c.from && c.from.id) || `u:${c.username || (c.from && c.from.username) || 'someone'}`, username: c.username || (c.from && c.from.username) }
+        : c.from && { id: c.from.id, name: c.from.name };
+      if (!who || !who.id) continue; // Facebook hides who wrote it until the app may read names
+      if (String(who.id) === String(a.platform === 'instagram' ? a.external_id : a.page_id) || (a.platform === 'instagram' && who.username && who.username === a.username)) continue; // your own comment
+      const key = `${a.platform}-comment:${c.id}`;
+      if (db.prepare('SELECT 1 FROM crm_messages WHERE message_id=?').get(key)) continue;
+      const { contact } = personFor(a, who);
+      const post = String(p.caption || p.message || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      const link = p.permalink || p.permalink_url || '';
+      const body = `${text || '(a photo or sticker)'}\n\n(Comment on your post${post ? `: "${post}${post.length >= 60 ? '...' : ''}"` : ''})`;
+      const quiet = first && Date.now() - Date.parse(at) > 15 * 60e3;
+      const r = db.prepare(`INSERT INTO crm_messages (contact_id, direction, channel, account_id, subject, body, full_text, message_id, is_read, sent_at)
+        VALUES (?, 'in', ?, ?, ?, ?, ?, ?, ?, ?)`).run(contact.id, a.platform, a.id, `${NAMES[a.platform]} comment`, body.slice(0, 5000), `${body}${link ? `\n${link}` : ''}`.slice(0, 20000), key, quiet ? 1 : 0, at);
+      crm().logActivity(contact.id, { kind: 'Note', note: `Commented on ${a.platform === 'instagram' ? `@${a.username || a.name}` : a.name}'s ${NAMES[a.platform]} post:\n${text.slice(0, 300)}${link ? `\n${link}` : ''}` });
+      if (!quiet) added.push({ id: r.lastInsertRowid, contact, text, comment: true });
+    }
+  }
+  setState(a.id, { comments_since: newest || since });
+  return added;
+}
+
 const FIELDS = 'id,updated_time,messages.limit(25){id,message,created_time,from,to,attachments.limit(1){mime_type},sticker}';
 // Reads new messages for one account. `graph` stands in for Facebook in tests.
 async function checkAccount(a, graph = meta.call) {
   const first = !a.since;
   let newest = a.since || '';
   const added = [];
+  let msgError = null;
   try {
     const page = await graph('GET', `${a.page_id}/conversations`, { access_token: a.access_token, platform: a.platform === 'instagram' ? 'instagram' : 'messenger', fields: FIELDS, limit: 25 });
     for (const conv of page.data || []) {
@@ -136,17 +184,23 @@ async function checkAccount(a, graph = meta.call) {
         if (row && !row.mine && !(first && !recent(m.created_time))) added.push(row);
       }
     }
-    setState(a.id, { since: newest || null, last_check: new Date().toISOString(), last_error: null });
+    setState(a.id, { since: newest || null });
   } catch (e) {
-    const perm = e.code === 10 || e.code === 190 || (e.code >= 200 && e.code < 300) || /permission/i.test(e.message);
-    setState(a.id, { last_check: new Date().toISOString(), last_error: perm
-      ? 'Facebook said the CRM may not read these messages yet. Reconnect Facebook and Instagram in Viral Post once, then wait 2 minutes.'
-      : `Could not read messages (${e.message}).` });
-    return { ok: false, added: 0, error: e.message };
+    msgError = e;
   }
-  for (const r of added.slice(0, 5)) notify.send(`${NAMES[a.platform]}: ${r.contact.name}`, r.text.slice(0, 200), { tags: 'speech_balloon', priority: 'high' }).catch(() => {});
+  // Comments on your recent posts (a separate permission, so they still come in when messages can't).
+  let comError = null;
+  try {
+    added.push(...await checkComments(a, graph));
+  } catch (e) {
+    comError = e;
+  }
+  const errors = [msgError && `Messages: ${reason(msgError)}`, comError && `Comments: ${reason(comError)}`].filter(Boolean);
+  setState(a.id, { last_check: new Date().toISOString(), last_error: errors.join(' ') || null });
+  if (msgError && comError) return { ok: false, added: 0, error: `${msgError.message}; ${comError.message}` };
+  for (const r of added.slice(0, 5)) notify.send(`${NAMES[a.platform]}${r.comment ? ' comment' : ''}: ${r.contact.name}`, r.text.slice(0, 200), { tags: 'speech_balloon', priority: 'high' }).catch(() => {});
   if (added.length > 5) notify.send(`${NAMES[a.platform]} messages`, `${added.length} new messages in Conversations.`, { tags: 'speech_balloon' }).catch(() => {});
-  return { ok: true, added: added.length };
+  return msgError || comError ? { ok: false, added: added.length, error: (msgError || comError).message } : { ok: true, added: added.length };
 }
 
 let running = null;
@@ -170,6 +224,7 @@ function replyInfo(contactId) {
   const last = db.prepare("SELECT * FROM crm_messages WHERE contact_id=? AND channel IN ('facebook','instagram') AND direction='in' ORDER BY sent_at DESC, id DESC LIMIT 1").get(Number(contactId));
   if (!last) return null;
   const a = accountById(last.account_id);
+  if (/comment$/.test(last.subject || '')) return { channel: last.channel, kind: 'comment', account: a ? (a.platform === 'instagram' ? `@${a.username || a.name}` : a.name) : null, open: true, closesAt: null, connected: Boolean(a) };
   const open = Date.now() - Date.parse(last.sent_at) < WINDOW_MS;
   return { channel: last.channel, account: a ? (a.platform === 'instagram' ? `@${a.username || a.name}` : a.name) : null, open,
     closesAt: new Date(Date.parse(last.sent_at) + WINDOW_MS).toISOString(), connected: Boolean(a) };
@@ -186,6 +241,7 @@ async function reply(contactId, text, graph = meta.call) {
   if (!last) throw err(`${c.name} has not messaged you on Facebook or Instagram.`);
   const a = accountById(last.account_id);
   if (!a || !a.page_id) throw err('That Page is not connected in Viral Post any more.');
+  if (/comment$/.test(last.subject || '')) return replyToComment(c, a, last, text, graph);
   if (Date.now() - Date.parse(last.sent_at) >= WINDOW_MS) throw err(`Facebook only lets apps answer within 24 hours of their last message. Answer ${String(c.name).split(' ')[0]} in the ${NAMES[a.platform]} app instead${c.email ? ', or send an email' : ''}.`);
   const who = db.prepare('SELECT user_id FROM crm_social_people WHERE platform=? AND account_id=? AND contact_id=? LIMIT 1').get(a.platform, a.id, c.id);
   if (!who) throw err('Could not find who to send this to.');
@@ -201,6 +257,21 @@ async function reply(contactId, text, graph = meta.call) {
   return { ok: true };
 }
 
+// A public reply under their comment (Facebook: pages_manage_engagement, Instagram: instagram_manage_comments).
+async function replyToComment(c, a, last, text, graph) {
+  const commentId = String(last.message_id).split(':').slice(1).join(':');
+  let sent;
+  try {
+    sent = await graph('POST', a.platform === 'instagram' ? `${commentId}/replies` : `${commentId}/comments`, { access_token: a.access_token, message: text });
+  } catch (e) {
+    throw err(`${NAMES[a.platform]} did not post the reply ("${e.message}"). Reconnect Facebook and Instagram in Viral Post, then try again.`);
+  }
+  db.prepare(`INSERT INTO crm_messages (contact_id, direction, channel, account_id, subject, body, full_text, message_id, is_read, sent_at) VALUES (?, 'out', ?, ?, ?, ?, ?, ?, 1, ?)`)
+    .run(c.id, a.platform, a.id, `${NAMES[a.platform]} comment reply`, text, text, `${a.platform}-reply:${(sent && sent.id) || `out-${Date.now()}`}`, new Date().toISOString());
+  crm().logActivity(c.id, { kind: 'Note', note: `You replied to their ${NAMES[a.platform]} comment:\n${text.slice(0, 300)}` });
+  return { ok: true };
+}
+
 const router = express.Router();
 const wrap = (fn) => async (req, res) => { try { res.json(await fn(req)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); } };
 router.get('/', wrap(() => status()));
@@ -208,4 +279,4 @@ router.put('/accounts/:id', wrap((req) => saveAccount(req.params.id, req.body ||
 router.post('/check', wrap(() => check()));
 router.post('/:contactId/reply', wrap((req) => reply(req.params.contactId, (req.body || {}).text)));
 
-module.exports = { accounts, status, saveAccount, check, checkAccount, saveMessage, replyInfo, reply, router };
+module.exports = { accounts, status, saveAccount, check, checkAccount, checkComments, saveMessage, replyInfo, reply, router };
