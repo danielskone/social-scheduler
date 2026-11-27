@@ -37,6 +37,16 @@ CREATE TABLE IF NOT EXISTS crm_social_accounts (
 if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_messages') WHERE name='account_id'").get()) db.exec('ALTER TABLE crm_messages ADD COLUMN account_id INTEGER');
 // Added later: comments on your posts come in too (newest comment time already read).
 if (!db.prepare("SELECT 1 FROM pragma_table_info('crm_social_accounts') WHERE name='comments_since'").get()) db.exec('ALTER TABLE crm_social_accounts ADD COLUMN comments_since TEXT');
+// Early version put every Instagram commenter whose name Facebook hid into one "Instagram visitor".
+// Those comments are read again (quietly), so each person gets their own contact.
+for (const bad of db.prepare("SELECT * FROM crm_social_people WHERE user_id='u:someone'").all()) {
+  db.prepare("DELETE FROM crm_messages WHERE contact_id=? AND message_id LIKE 'instagram-comment:%'").run(bad.contact_id);
+  db.prepare('DELETE FROM crm_social_people WHERE platform=? AND account_id=? AND user_id=?').run(bad.platform, bad.account_id, bad.user_id);
+  const left = db.prepare('SELECT COUNT(*) AS n FROM crm_messages WHERE contact_id=?').get(bad.contact_id).n;
+  const c = db.prepare('SELECT * FROM contacts WHERE id=?').get(bad.contact_id);
+  if (c && !left && !c.email && !c.phone && c.name === 'Instagram visitor') db.prepare('DELETE FROM contacts WHERE id=?').run(c.id);
+  db.prepare('UPDATE crm_social_accounts SET comments_since=NULL WHERE account_id=?').run(bad.account_id);
+}
 
 const crm = () => require('./crm');
 const businesses = () => require('./businesses');
@@ -125,6 +135,43 @@ function reason(e) {
     : `Could not read them ("${String(e.message || '').slice(0, 160)}").`;
 }
 
+// Who wrote a comment. Facebook sometimes leaves the name out of the list, so ask for that
+// one comment. When it still won't say, the comment gets its own contact (never lumped together).
+async function commenter(a, c, graph) {
+  const pick = (x) => (a.platform === 'instagram'
+    ? ((x.from && x.from.id) || x.username || (x.from && x.from.username)) && { id: (x.from && x.from.id) || `u:${x.username || x.from.username}`, username: x.username || (x.from && x.from.username) }
+    : x.from && x.from.id && { id: x.from.id, name: x.from.name });
+  let who = pick(c);
+  if (!who) {
+    try { who = pick(await graph('GET', c.id, { access_token: a.access_token, fields: a.platform === 'instagram' ? 'username,from' : 'from' })); } catch { /* keep going */ }
+  }
+  return who || { id: `c:${c.id}`, name: `${NAMES[a.platform]} commenter` };
+}
+
+// The Page's last 10 posts with their newest comments. Reading the whole Page feed needs
+// pages_read_engagement; when Facebook refuses that, it reads the last 10 posts Viral Post
+// published there instead (the same way Viral Post's Analytics shows comments).
+const FB_COMMENT_FIELDS = 'id,message,created_time,from{id,name}';
+async function facebookPosts(a, graph) {
+  try {
+    return (await graph('GET', `${a.page_id}/feed`, { access_token: a.access_token, fields: `id,permalink_url,message,created_time,comments.order(reverse_chronological).limit(25){${FB_COMMENT_FIELDS}}`, limit: 10 })).data || [];
+  } catch (e) {
+    const ours = db.prepare(`SELECT t.external_post_id AS id, t.permalink, p.caption FROM post_targets t JOIN posts p ON p.id=t.post_id
+      WHERE t.account_id=? AND t.status='published' AND t.external_post_id IS NOT NULL ORDER BY t.published_at DESC LIMIT 10`).all(a.id);
+    if (!ours.length) throw e;
+    const out = [];
+    for (const o of ours) {
+      try {
+        const d = await graph('GET', `${o.id}/comments`, { access_token: a.access_token, fields: FB_COMMENT_FIELDS, order: 'reverse_chronological', limit: 25 });
+        out.push({ id: o.id, message: o.caption, permalink_url: o.permalink, comments: { data: d.data || [] } });
+      } catch (e2) {
+        if (!out.length && o === ours[ours.length - 1]) throw e2;
+      }
+    }
+    return out;
+  }
+}
+
 // Comments people leave on your last posts become messages in Conversations, like GoHighLevel.
 // You answer with a public reply under their comment (no 24-hour limit for that).
 async function checkComments(a, graph = meta.call) {
@@ -132,8 +179,8 @@ async function checkComments(a, graph = meta.call) {
   const since = a.comments_since || new Date(Date.now() - 3 * 86400e3).toISOString();
   let newest = a.comments_since || '';
   const posts = a.platform === 'instagram'
-    ? (await graph('GET', `${a.external_id}/media`, { access_token: a.access_token, fields: 'id,permalink,caption,timestamp,comments.limit(25){id,text,timestamp,username,from{id,username}}', limit: 10 })).data || []
-    : (await graph('GET', `${a.page_id}/feed`, { access_token: a.access_token, fields: 'id,permalink_url,message,created_time,comments.order(reverse_chronological).limit(25){id,message,created_time,from{id,name}}', limit: 10 })).data || [];
+    ? (await graph('GET', `${a.external_id}/media`, { access_token: a.access_token, fields: 'id,permalink,caption,timestamp,comments.limit(25){id,text,timestamp,username,from}', limit: 10 })).data || []
+    : await facebookPosts(a, graph);
   const added = [];
   for (const p of posts) {
     for (const c of (p.comments && p.comments.data) || []) {
@@ -141,10 +188,7 @@ async function checkComments(a, graph = meta.call) {
       if (at <= since) continue;
       if (at > newest) newest = at;
       const text = String(c.text || c.message || '').trim();
-      const who = a.platform === 'instagram'
-        ? { id: (c.from && c.from.id) || `u:${c.username || (c.from && c.from.username) || 'someone'}`, username: c.username || (c.from && c.from.username) }
-        : c.from && { id: c.from.id, name: c.from.name };
-      if (!who || !who.id) continue; // Facebook hides who wrote it until the app may read names
+      let who = await commenter(a, c, graph);
       if (String(who.id) === String(a.platform === 'instagram' ? a.external_id : a.page_id) || (a.platform === 'instagram' && who.username && who.username === a.username)) continue; // your own comment
       const key = `${a.platform}-comment:${c.id}`;
       if (db.prepare('SELECT 1 FROM crm_messages WHERE message_id=?').get(key)) continue;
