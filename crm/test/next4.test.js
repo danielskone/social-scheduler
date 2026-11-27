@@ -235,3 +235,53 @@ test('business templates: save a business, start a new one from a starter or a f
   await j(`/biztemplates/${up.id}`, { method: 'DELETE' });
   assert.ok(!(await j('/biztemplates')).body.some((t) => t.id === up.id));
 });
+
+test('comments on your Facebook and Instagram posts come into Conversations, and you reply under the comment', async () => {
+  const db = require('../../src/db');
+  const social = require('../server/social');
+  const add = db.prepare("INSERT INTO accounts (platform, external_id, name, username, access_token) VALUES (?,?,?,?,?)");
+  const page = add.run('facebook', 'NP1', 'NC Northpole', null, 'np-token').lastInsertRowid;
+  const ig = add.run('instagram', 'NPIG', 'NC North Pole', 'ncnorthpole', 'np-token').lastInsertRowid;
+  const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString().replace('Z', '+0000');
+  const calls = [];
+  const graph = async (method, p, params) => {
+    calls.push({ method, p, params });
+    if (method === 'POST') return { id: `reply_${calls.length}` };
+    if (p.endsWith('/conversations')) throw Object.assign(new Error('(#200) Requires pages_messaging permission'), { code: 200 });
+    if (p === 'NP1/feed') return { data: [{ id: 'NP1_post', message: 'Fairy lights are here! Comment FAIRY', permalink_url: 'https://facebook.com/p/1', comments: { data: [
+      { id: 'c2', message: 'FAIRY', created_time: iso(60e3), from: { id: 'FBU7', name: 'Kara Lee' } },
+      { id: 'c1', message: 'Old one', created_time: iso(10 * 86400e3), from: { id: 'FBU8', name: 'Old Person' } },
+      { id: 'c3', message: 'Thanks!', created_time: iso(30e3), from: { id: 'NP1', name: 'NC Northpole' } },
+    ] } }] };
+    if (p === 'NPIG/media') return { data: [{ id: 'm1', caption: 'Lights!', permalink: 'https://instagram.com/p/x', comments: { data: [
+      { id: 'ic1', text: 'When is the parade?', timestamp: iso(120e3), username: 'jo.k', from: { id: 'IGU5', username: 'jo.k' } },
+    ] } }] };
+    return { data: [] };
+  };
+  // Only these two accounts, so other tests' accounts don't get in the way.
+  for (const a of social.accounts()) if (![page, ig].includes(a.id)) social.saveAccount(a.id, { enabled: false });
+  const r = await social.check({ graph });
+  assert.strictEqual(r.added, 2, 'the new Facebook and Instagram comments, not the old one or our own');
+  const kara = db.prepare("SELECT * FROM contacts WHERE name='Kara Lee'").get();
+  assert.ok(kara);
+  assert.ok(!db.prepare("SELECT 1 FROM contacts WHERE name='Old Person'").get(), 'comments older than 3 days are skipped the first time');
+  const m = db.prepare("SELECT * FROM crm_messages WHERE contact_id=?").get(kara.id);
+  assert.strictEqual(m.subject, 'Facebook comment');
+  assert.match(m.body, /^FAIRY/);
+  // The red note says what Facebook said about messages, while comments still work.
+  const st = (await j('/social')).body.accounts.find((a) => a.id === page);
+  assert.match(st.last_error, /Messages: .*pages_messaging/);
+  assert.doesNotMatch(st.last_error, /Comments:/);
+  // Nothing twice.
+  assert.strictEqual((await social.check({ graph })).added, 0);
+  // The thread says it is a comment reply, with no 24-hour limit.
+  const t = (await j(`/inbox/${kara.id}`)).body;
+  assert.strictEqual(t.social.kind, 'comment');
+  assert.strictEqual(t.social.open, true);
+  await social.reply(kara.id, 'Check your messages for the link!', graph);
+  const fbReply = calls.filter((c) => c.method === 'POST').pop();
+  assert.strictEqual(fbReply.p, 'c2/comments');
+  const jo = db.prepare("SELECT * FROM contacts WHERE name='@jo.k'").get();
+  await social.reply(jo.id, 'December 5!', graph);
+  assert.strictEqual(calls.filter((c) => c.method === 'POST').pop().p, 'ic1/replies');
+});

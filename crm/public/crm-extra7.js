@@ -39,7 +39,7 @@
     const s = await call('/social');
     const d = dlg();
     d.innerHTML = `<div class="chat-set soc-set"><header class="view-head"><h1>${svg('fb')} Facebook &amp; Instagram messages</h1><button class="btn ghost" type="button" data-close>Close</button></header>
-      <p class="muted">Messages people send to your Facebook Pages and Instagram accounts show up in <b>Conversations</b>, and your iPhone buzzes. Answer from here within 24 hours of their last message (Facebook's rule). New people become contacts by themselves.</p>
+      <p class="muted">Messages people send to your Facebook Pages and Instagram accounts, and comments on your last 10 posts, show up in <b>Conversations</b>, and your iPhone buzzes. Answer messages from here within 24 hours (Facebook's rule). Comments get a public reply under the comment, any time. New people become contacts by themselves.</p>
       ${s.accounts.length ? `<div class="soc-list">${s.accounts.map((a) => `<div class="soc-row" data-acc="${a.id}">
           <span class="soc-ico ${a.platform}">${svg(a.platform === 'instagram' ? 'ig' : 'fb')}</span>
           <div class="soc-info"><b>${h(a.platform === 'instagram' ? `@${a.username || a.name}` : a.name)}</b>
