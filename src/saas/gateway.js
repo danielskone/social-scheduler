@@ -34,6 +34,7 @@ const { createStore, access } = require('./store');
 const { createBilling } = require('./billing');
 const { createTenants, TENANT_SETTINGS } = require('./tenants');
 const pages = require('./pages');
+const promo = require('./promo');
 
 function createGateway(opts = {}) {
   const env = opts.env || process.env;
@@ -206,6 +207,8 @@ function createGateway(opts = {}) {
   const needAdmin = (req, res, next) => (req.user.role === 'admin' ? next() : res.status(404).send('Not found'));
 
   app.get('/welcome', (req, res) => res.send(pages.welcome({ priceLabel, trialDays, signupsOpen, beta })));
+  // The Viral Touch CRM sales page for ads and promotions (see promo.js and SELLING.md).
+  app.get(['/deal', '/black-friday'], (req, res) => res.set('Cache-Control', 'no-cache').send(promo.crmPromo({ priceLabel, trialDays, signupsOpen, beta, promo: promo.promoFrom(env) })));
 
   // A teammate uses their team owner's app copy and plan.
   const ownerOf = (u) => (u && u.team_of ? store.getUser(u.team_of) : u);

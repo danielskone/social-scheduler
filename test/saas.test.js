@@ -54,6 +54,11 @@ test('visitors who are not signed in see the welcome page, never the app', async
   assert.strictEqual(home.status, 302);
   assert.strictEqual(home.location, '/welcome');
   assert.match((await b('/welcome')).text, /Start free trial/);
+  // The CRM sales page is public too, and sends people to sign up.
+  const deal = await b('/deal');
+  assert.strictEqual(deal.status, 200);
+  assert.match(deal.text, /Viral Touch CRM/);
+  assert.match(deal.text, /href="\/signup"/);
   assert.strictEqual((await b('/api/accounts', { json: undefined, headers: { Accept: 'application/json' } })).status, 401);
   // Pretending to be signed in with the internal header does nothing.
   assert.strictEqual((await b('/api/accounts', { headers: { Accept: 'application/json', 'x-vp-user': '1', 'x-vp-tenant-key': 'guess' } })).status, 401);
