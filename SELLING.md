@@ -51,6 +51,14 @@ too, so updates reach testers.
     SAAS_SMTP_HOST=smtp.hostinger.com   SAAS_SMTP_PORT=465
     SAAS_SMTP_USER=support@viralattraction.com   SAAS_SMTP_PASS=...   SAAS_EMAIL_FROM=support@viralattraction.com
 
+    # Optional: a sale on the Viral Touch CRM sales page (https://your-site/deal, also /black-friday).
+    # Make the discount in Stripe as a promotion code with the same name; customers type it at checkout.
+    # The sale and countdown disappear by themselves after SAAS_PROMO_ENDS.
+    SAAS_PROMO_TEXT=50% off your first 3 months
+    SAAS_PROMO_CODE=BLACKFRIDAY
+    SAAS_PROMO_ENDS=2026-11-30T23:59:00-05:00
+    SAAS_PROMO_ENDS_LABEL=Monday, Nov 30 at 11:59 PM ET
+
     # Optional: switch payments on
     STRIPE_SECRET_KEY=sk_live_...   STRIPE_PRICE_ID=price_...   STRIPE_WEBHOOK_SECRET=whsec_...
 
